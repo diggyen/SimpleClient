@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kullanici/rdpboot/internal/domain"
+	"github.com/diggyen/SimpleClient/internal/domain"
 )
 
 // NetworkScanner implements domain.Scanner by probing port 3389 concurrently.

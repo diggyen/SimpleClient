@@ -1,11 +1,11 @@
-## rdpboot — Build System
+## simpleclient — Build System
 ## Targets: binary, initramfs, iso, all, clean, docker-build, test, qemu
 
 .PHONY: all binary initramfs iso clean docker-build test qemu
 
-BINARY     := rdpboot
+BINARY     := simpleclient
 OUT_DIR    := dist
-DOCKER_IMG := rdpboot-builder
+DOCKER_IMG := simpleclient-builder
 
 GO         := go
 GOOS       := linux
@@ -19,7 +19,7 @@ all: binary initramfs iso
 binary:
 	@mkdir -p $(OUT_DIR)
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-	$(GO) build -ldflags '$(LDFLAGS)' -o $(OUT_DIR)/$(BINARY) ./cmd/rdpboot
+	$(GO) build -ldflags '$(LDFLAGS)' -o $(OUT_DIR)/$(BINARY) ./cmd/simpleclient
 	@echo "Built: $(OUT_DIR)/$(BINARY)"
 	@file $(OUT_DIR)/$(BINARY)
 
@@ -55,9 +55,9 @@ iso: initramfs
 	@cp $(OUT_DIR)/vmlinuz $(OUT_DIR)/iso/boot/vmlinuz
 	@cp $(OUT_DIR)/initramfs.cpio.gz $(OUT_DIR)/iso/boot/initramfs.cpio.gz
 	@cp build/grub.cfg $(OUT_DIR)/iso/boot/grub/grub.cfg
-	@grub-mkrescue -o $(OUT_DIR)/rdpboot.iso $(OUT_DIR)/iso -- -volid RDPBOOT
-	@echo "Built: $(OUT_DIR)/rdpboot.iso"
-	@ls -lh $(OUT_DIR)/rdpboot.iso
+	@grub-mkrescue -o $(OUT_DIR)/simpleclient.iso $(OUT_DIR)/iso -- -volid SIMPLECLIENT
+	@echo "Built: $(OUT_DIR)/simpleclient.iso"
+	@ls -lh $(OUT_DIR)/simpleclient.iso
 
 ## ── Docker build (full: binary + kernel + iso) ───────────────────────────────
 docker-build:
@@ -70,15 +70,16 @@ docker-build:
 
 ## ── QEMU test ────────────────────────────────────────────────────────────────
 qemu:
-	@[ -f $(OUT_DIR)/rdpboot.iso ] || (echo "Build iso first: make docker-build" && exit 1)
+	@[ -f $(OUT_DIR)/simpleclient.iso ] || (echo "Build iso first: make docker-build" && exit 1)
 	qemu-system-x86_64 \
 	    -m 256M \
 	    -boot d \
-	    -cdrom $(OUT_DIR)/rdpboot.iso \
+	    -cdrom $(OUT_DIR)/simpleclient.iso \
 	    -vga std \
 	    -display vnc=:1 \
 	    -device e1000,netdev=net0 \
-	    -netdev user,id=net0
+	    -netdev user,id=net0 \
+	    -drive if=pflash,format=raw,readonly=on,file=/opt/homebrew/share/qemu/edk2-x86_64-code.fd
 
 ## ── Clean ────────────────────────────────────────────────────────────────────
 clean:

@@ -1,4 +1,4 @@
-# rdpboot
+# SimpleClient
 
 Minimal kiosk işletim sistemi. Boot açıldığında ağdaki RDP sunucularını tarar, tam ekran listeler ve tek tık ile RDP bağlantısı kurar. Başka hiçbir şey yapamaz.
 
@@ -25,7 +25,7 @@ Minimal kiosk işletim sistemi. Boot açıldığında ağdaki RDP sunucularını
 make binary
 ```
 
-`dist/rdpboot` statik binary oluşur.
+`dist/SimpleClient` statik binary oluşur.
 
 ### Tam ISO Build (Docker ile)
 
@@ -33,7 +33,7 @@ make binary
 make docker-build
 ```
 
-`dist/rdpboot.iso` dosyası oluşur (< 60 MB).
+`dist/SimpleClient.iso` dosyası oluşur (< 60 MB).
 
 ### QEMU ile Test
 
@@ -45,7 +45,7 @@ make qemu
 
 ```bash
 # /dev/sdX = USB diskiniz (dikkatli olun!)
-sudo dd if=dist/rdpboot.iso of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=dist/SimpleClient.iso of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
 ## Kullanım
@@ -66,7 +66,7 @@ Fare desteği: Tıklayarak sunucu seçin, bağlan/iptal düğmelerine tıklayın
 ## Proje Yapısı
 
 ```
-cmd/rdpboot/          — Program girişi
+cmd/simpleclient/          — Program girişi
 internal/
   config/             — Flag-tabanlı yapılandırma
   domain/             — Host entity, ScanEvent, Scanner interface

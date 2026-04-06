@@ -2,7 +2,14 @@
 dist/
 *.iso
 *.cpio.gz
-rdpboot
+simpleclient
+
+# Documentation
+SPECIFICATION.md
+CLAUDE.md
+PROMPT.md
+TASKS.md
+IMPLEMENTATION.md
 
 # Go
 vendor/

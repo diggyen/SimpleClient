@@ -2,7 +2,7 @@ package ui
 
 import "image/color"
 
-// Color palette for the rdpboot kiosk UI.
+// Color palette for the SimpleClient kiosk UI.
 // Matches IMPLEMENTATION.md 6.1 specification.
 var (
 	ColorBG       = color.RGBA{R: 26, G: 26, B: 46, A: 255}    // #1a1a2e dark navy

@@ -1,4 +1,4 @@
-# rdpboot — Implementation Plan
+# SimpleClient — Implementation Plan
 
 > SPECIFICATION.md'den türetilmiş teknik blueprint. Kiosk framebuffer mimarisi.
 
@@ -257,9 +257,9 @@ func render(fb *framebuffer.FB, state *UIState) {
 ### 3.1 Dizin Düzeni
 
 ```
-rdpboot/
+SimpleClient/
 ├── cmd/
-│   └── rdpboot/
+│   └── SimpleClient/
 │       └── main.go              # Giriş noktası; wire-up, ana döngü
 ├── internal/
 │   ├── domain/
@@ -313,7 +313,7 @@ rdpboot/
 ### 3.2 Modül Bağımlılık Grafiği
 
 ```
-cmd/rdpboot
+cmd/simpleclient
     ├── ui/loop ──→ ui/state ──→ domain
     │           ├──→ ui/render ──→ framebuffer
     │           │              └──→ ui/draw
@@ -570,7 +570,7 @@ var (
 
 ```
 ┌──────────────── fb.Width ──────────────────┐
-│ ▌rdpboot▐    192.168.1.50    Tarıyor... 45%│  ← TopBar (40px)
+│ ▌SimpleClient▐    192.168.1.50    Tarıyor... 45%│  ← TopBar (40px)
 ├────────────────────────────────────────────┤
 │                                            │
 │  ▶ 192.168.1.50   WIN-SERVER01    12 ms    │  ← Seçili satır (vurgulanmış)
@@ -667,7 +667,7 @@ udhcpc -i eth0 -n -q -s /etc/udhcpc.script 2>/dev/null || {
 
 # Kiosk döngüsü: binary çökerse yeniden başlat
 while true; do
-    /sbin/rdpboot
+    /sbin/SimpleClient
     sleep 2
 done
 ```
@@ -765,7 +765,7 @@ func (m *MockFB) Blit(img *image.RGBA) { draw.Draw(m.Img, ..., img, ...) }
 ```bash
 qemu-system-x86_64 \
     -m 256M \
-    -cdrom rdpboot.iso \
+    -cdrom SimpleClient.iso \
     -display sdl \           # veya -display gtk
     -device e1000 \
     -netdev user,id=n0
@@ -794,7 +794,7 @@ COPY . .
 # Statik Go binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags '-s -w -extldflags "-static"' \
-    -o build/rootfs/sbin/rdpboot ./cmd/rdpboot
+    -o build/rootfs/sbin/SimpleClient ./cmd/simpleclient
 
 # BusyBox (statik)
 RUN wget -q https://busybox.net/downloads/busybox-1.36.1.tar.bz2 && \
@@ -812,5 +812,5 @@ RUN mkdir -p build/iso-root/boot/grub && \
     cp build/vmlinuz build/iso-root/boot/ && \
     cp build/initramfs.cpio.gz build/iso-root/boot/ && \
     cp build/grub.cfg build/iso-root/boot/grub/ && \
-    grub-mkrescue -o /build/rdpboot.iso build/iso-root
+    grub-mkrescue -o /build/SimpleClient.iso build/iso-root
 ```

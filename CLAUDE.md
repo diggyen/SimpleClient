@@ -4,15 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-rdpboot is a minimal kiosk OS (~50 MB bootable ISO) that boots on x86_64 hardware, scans the local network for RDP servers on port 3389, and provides a fullscreen framebuffer UI for one-click RDP connections. There is no X11, Wayland, web server, HTTP, or shell access. A single statically-compiled Go binary writes pixels directly to `/dev/fb0` and reads input from `/dev/input/event*` via evdev.
+SimpleClient is a minimal kiosk OS (~50 MB bootable ISO) that boots on x86_64 hardware, scans the local network for RDP servers on port 3389, and provides a fullscreen framebuffer UI for one-click RDP connections. There is no X11, Wayland, web server, HTTP, or shell access. A single statically-compiled Go binary writes pixels directly to `/dev/fb0` and reads input from `/dev/input/event*` via evdev.
 
-Language: Go 1.23 | Module: `github.com/kullanici/rdpboot` | UI language: Turkish
+Language: Go 1.23 | Module: `github.com/diggyen/SimpleClient` | UI language: Turkish
 
 ## Build & Test Commands
 
 ```bash
 # Static binary (requires Linux or cross-compile)
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '-s -w' -o dist/rdpboot ./cmd/rdpboot
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags '-s -w' -o dist/simpleclient ./cmd/simpleclient
 
 # Via Makefile (preferred)
 make binary       # build static binary to dist/
@@ -29,7 +29,7 @@ go test ./internal/scanner/... -run TestExpandCIDR -v
 
 CI runs on Ubuntu: `go vet ./...` → `go test ./... -v -timeout 120s` → static binary build → verify "statically linked".
 
-Note: `cmd/rdpboot/main.go` has `//go:build linux` — the binary only compiles on Linux. Tests for other packages work on any OS via `MockFB`.
+Note: `cmd/simpleclient/main.go` has `//go:build linux` — the binary only compiles on Linux. Tests for other packages work on any OS via `MockFB`.
 
 ## Architecture
 
@@ -55,7 +55,7 @@ The loop never returns (kiosk mode). `connect()` runs in a goroutine; the RDP fr
 ### Package Dependency Graph
 
 ```
-cmd/rdpboot → config, framebuffer, inputdev, scanner, ui
+cmd/simpleclient → config, framebuffer, inputdev, scanner, ui
 ui/loop     → ui/state, ui/render, scanner (domain.Scanner), inputdev, rdp, network, config
 ui/render   → ui/draw, ui/colors, framebuffer (Device interface)
 scanner     → domain, network
@@ -91,7 +91,7 @@ Linux framebuffer uses BGRA byte order (little-endian). The `Blit()` method swap
 
 ### Kiosk Init System
 
-`build/init` is a BusyBox shell script that mounts virtual filesystems, configures networking (DHCP with link-local fallback), and runs rdpboot in a `while true` loop. Kernel params: `quiet loglevel=0 panic=5 vt.global_cursor_default=0`. SysRq is disabled in kernel config.
+`build/init` is a BusyBox shell script that mounts virtual filesystems, configures networking (DHCP with link-local fallback), and runs SimpleClient in a `while true` loop. Kernel params: `quiet loglevel=0 panic=5 vt.global_cursor_default=0`. SysRq is disabled in kernel config.
 
 ## Important Patterns
 

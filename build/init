@@ -1,5 +1,5 @@
 #!/bin/sh
-# rdpboot init — minimal kiosk init script
+# SimpleClient init — minimal kiosk init script
 set -e
 
 mount -t proc proc /proc
@@ -20,8 +20,8 @@ udhcpc -i eth0 -n -q 2>/dev/null || \
 udhcpc -i enp0s3 -n -q 2>/dev/null || \
 ip addr add 169.254.100.100/16 dev eth0 2>/dev/null || true
 
-# Kiosk loop: restart rdpboot on crash.
+# Kiosk loop: restart SimpleClient on crash.
 while true; do
-    /sbin/rdpboot
+    /sbin/simpleclient
     sleep 2
 done

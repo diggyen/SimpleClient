@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"image/draw"
 
-	"github.com/kullanici/rdpboot/internal/framebuffer"
+	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	xdraw "golang.org/x/image/draw"
 )
 

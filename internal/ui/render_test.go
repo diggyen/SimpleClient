@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kullanici/rdpboot/internal/domain"
-	"github.com/kullanici/rdpboot/internal/framebuffer"
+	"github.com/diggyen/SimpleClient/internal/domain"
+	"github.com/diggyen/SimpleClient/internal/framebuffer"
 )
 
 func TestRenderDiscovery_Empty(t *testing.T) {

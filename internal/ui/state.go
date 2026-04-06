@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"github.com/kullanici/rdpboot/internal/domain"
+	"github.com/diggyen/SimpleClient/internal/domain"
 )
 
 // Screen identifies which UI screen is currently active.

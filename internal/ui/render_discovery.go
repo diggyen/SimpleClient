@@ -26,7 +26,7 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 	DrawHLine(img, 0, w, barH-1, ColorBorder)
 
 	// Logo / title.
-	DrawTextLarge(img, padding, 4, "rdpboot", ColorAccent)
+	DrawTextLarge(img, padding, 4, "SimpleClient", ColorAccent)
 
 	// Host count.
 	hostCount := fmt.Sprintf("%d sunucu bulundu", len(state.Hosts))

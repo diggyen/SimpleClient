@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kullanici/rdpboot/internal/config"
-	"github.com/kullanici/rdpboot/internal/domain"
-	"github.com/kullanici/rdpboot/internal/framebuffer"
-	"github.com/kullanici/rdpboot/internal/inputdev"
-	"github.com/kullanici/rdpboot/internal/network"
-	"github.com/kullanici/rdpboot/internal/rdp"
+	"github.com/diggyen/SimpleClient/internal/config"
+	"github.com/diggyen/SimpleClient/internal/domain"
+	"github.com/diggyen/SimpleClient/internal/framebuffer"
+	"github.com/diggyen/SimpleClient/internal/inputdev"
+	"github.com/diggyen/SimpleClient/internal/network"
+	"github.com/diggyen/SimpleClient/internal/rdp"
 )
 
 // SessionState holds the state of an active RDP session.

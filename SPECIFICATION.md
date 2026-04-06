@@ -1,4 +1,4 @@
-# rdpboot — Specification
+# SimpleClient — Specification
 
 > Bağımlılıksız önyüklenebilir RDP kiosk sistemi: açılır, ağı tarar, seçilir, bağlanılır — başka hiçbir şey yapılamaz.
 
@@ -8,7 +8,7 @@
 
 ### 1.1 Nedir?
 
-rdpboot, USB belleğe yazılan ve herhangi bir x86_64 bilgisayarı önyükleyen minimal bir Linux ISO'sudur (~50 MB). Önyükleme tamamlandığında ekran tamamen bu sisteme aittir: tek bir statik derlenmiş Go binary'si Linux framebuffer'ına (`/dev/fb0`) doğrudan piksel yazarak tam ekran grafiksel bir arayüz sunar. Kullanıcı klavye veya fare ile ağdaki RDP sunucularını listeleyen bu arayüzden bir hedef seçer, kimlik bilgilerini girer ve uzak masaüstü oturumu aynı ekranda açılır.
+SimpleClient, USB belleğe yazılan ve herhangi bir x86_64 bilgisayarı önyükleyen minimal bir Linux ISO'sudur (~50 MB). Önyükleme tamamlandığında ekran tamamen bu sisteme aittir: tek bir statik derlenmiş Go binary'si Linux framebuffer'ına (`/dev/fb0`) doğrudan piksel yazarak tam ekran grafiksel bir arayüz sunar. Kullanıcı klavye veya fare ile ağdaki RDP sunucularını listeleyen bu arayüzden bir hedef seçer, kimlik bilgilerini girer ve uzak masaüstü oturumu aynı ekranda açılır.
 
 Sistem bir kiosk olarak çalışır: shell erişimi yoktur, başka uygulama çalışmaz, kullanıcı bu arayüzün dışına çıkamaz. X11, Wayland, masaüstü yöneticisi, web tarayıcısı veya herhangi bir grafik kütüphanesi bulunmaz. Tüm görsel çıktı saf Go kodu tarafından framebuffer'a yazılan piksellerden oluşur.
 
@@ -28,7 +28,7 @@ Sistem bir kiosk olarak çalışır: shell erişimi yoktur, başka uygulama çal
 
 ### 1.4 Rekabet Ortamı
 
-| Özellik | rdpboot | Tails + rdesktop | WinPE + mstsc | Kali Live |
+| Özellik | SimpleClient | Tails + rdesktop | WinPE + mstsc | Kali Live |
 |---------|---------|-----------------|---------------|-----------|
 | ISO boyutu | ~50 MB | ~1.2 GB | ~500 MB | ~3 GB |
 | Kiosk modu (kilitli) | ✅ | ❌ | ❌ | ❌ |
@@ -62,7 +62,7 @@ Sistem bir kiosk olarak çalışır: shell erişimi yoktur, başka uygulama çal
 
 **Kullanıcı Hikayesi:** USB'yi takıp bilgisayarı başlattığımda, sistem otomatik olarak ağ yapılandırmasını almalı ve RDP tarama arayüzünü ekranda göstermeli.
 
-**Açıklama:** init betiği sırayla şunu yapar: sanal dosya sistemlerini mount eder, DHCP ile IP alır, rdpboot binary'sini başlatır. Binary başladığında framebuffer'ı açar, tam ekran keşif arayüzünü render eder ve arka planda subnet taramasını başlatır.
+**Açıklama:** init betiği sırayla şunu yapar: sanal dosya sistemlerini mount eder, DHCP ile IP alır, SimpleClient binary'sini başlatır. Binary başladığında framebuffer'ı açar, tam ekran keşif arayüzünü render eder ve arka planda subnet taramasını başlatır.
 
 **Kabul Kriterleri:**
 - [ ] USB önyüklemesinden arayüzün görünmesine kadar geçen süre 15 saniyenin altında
@@ -84,7 +84,7 @@ Sistem bir kiosk olarak çalışır: shell erişimi yoktur, başka uygulama çal
 
 **Açıklama:** Ekran üç bölümden oluşur:
 
-**Üst bar**: `rdpboot` başlığı | Yerel IP adresi | Tarama durumu
+**Üst bar**: `SimpleClient` başlığı | Yerel IP adresi | Tarama durumu
 
 **Orta alan — Sunucu listesi:**
 ```
@@ -203,13 +203,13 @@ Metin alanları klavye ile doldurulur. Tab ile alanlar arasında geçilir. Enter
 │  ┌────────────────────────────────────────────┐    │
 │  │  Linux Kernel (minimal, ~5 MB)             │    │
 │  │  BusyBox initramfs (~2 MB)                 │    │
-│  │  rdpboot binary (statik Go, ~20 MB)        │    │
+│  │  SimpleClient binary (statik Go, ~20 MB)        │    │
 │  └────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────┘
          │ önyükleme
          ▼
 ┌─────────────────────────────────────────────────────┐
-│              rdpboot binary                         │
+│              SimpleClient binary                         │
 │                                                     │
 │  ┌──────────────┐   ┌──────────────────────────┐   │
 │  │ Ağ Tarayıcı  │   │ Framebuffer Renderer      │   │
@@ -234,7 +234,7 @@ Metin alanları klavye ile doldurulur. Tab ile alanlar arasında geçilir. Enter
 
 ### 4.2 Bileşen Etkileşimleri
 
-1. **Önyükleme**: Kernel → BusyBox init → DHCP → rdpboot binary
+1. **Önyükleme**: Kernel → BusyBox init → DHCP → SimpleClient binary
 2. **Tarama**: Scanner goroutine pool → port 3389 → sonuçlar UI state'e gönderilir → framebuffer'a render edilir
 3. **Girdi**: evdev event'leri → Input Handler → UI State Machine → state değişimi → yeniden render
 4. **Bağlantı**: UI State Machine → RDP Client → TCP bağlantısı → bitmap güncellemeleri → framebuffer
@@ -290,7 +290,7 @@ Metin alanları klavye ile doldurulur. Tab ile alanlar arasında geçilir. Enter
 ### 6.1 Kiosk Kilidi
 
 - Binary çıkmaz; tüm hataları içeride yakalar ve arayüzde gösterir
-- init betiği binary'yi `while true; do /sbin/rdpboot; sleep 2; done` döngüsünde çalıştırır
+- init betiği binary'yi `while true; do /sbin/SimpleClient; sleep 2; done` döngüsünde çalıştırır
 - Kernel: `console=tty0 quiet loglevel=0 sysrq_always_enabled=0`
 - Sanal terminal geçişi: kernel config'de `CONFIG_VT_CONSOLE_SLEEP=n`, init'te `kbd_mode -a` ile raw mode
 
@@ -309,7 +309,7 @@ x86_64, BIOS veya UEFI, minimum 128 MB RAM, Ethernet adaptörü.
 
 ### 7.2 Dağıtım Yöntemi
 
-Tek ISO → `dd if=rdpboot.iso of=/dev/sdX bs=4M` veya Balena Etcher ile USB'ye yaz.
+Tek ISO → `dd if=SimpleClient.iso of=/dev/sdX bs=4M` veya Balena Etcher ile USB'ye yaz.
 
 ### 7.3 Sistem Gereksinimleri
 

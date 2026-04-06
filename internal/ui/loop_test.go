@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kullanici/rdpboot/internal/domain"
-	"github.com/kullanici/rdpboot/internal/framebuffer"
-	"github.com/kullanici/rdpboot/internal/inputdev"
+	"github.com/diggyen/SimpleClient/internal/domain"
+	"github.com/diggyen/SimpleClient/internal/framebuffer"
+	"github.com/diggyen/SimpleClient/internal/inputdev"
 )
 
 // mockScanner implements domain.Scanner for loop tests.

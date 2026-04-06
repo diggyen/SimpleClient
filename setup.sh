@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rdpboot/setup.sh — Proje kurulum, bağımlılık, test ve binary build scripti.
+# simpleclient/setup.sh — Proje kurulum, bağımlılık, test ve binary build scripti.
 # Kullanım: bash setup.sh [--iso] [--qemu]
 #   --iso   : Docker ile tam ISO build (Docker gerektirir)
 #   --qemu  : ISO build sonrası QEMU ile başlat
@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-log()  { echo -e "${BOLD}[rdpboot]${NC} $*"; }
+log()  { echo -e "${BOLD}[simpleclient]${NC} $*"; }
 ok()   { echo -e "${GREEN}✓${NC} $*"; }
 warn() { echo -e "${YELLOW}⚠${NC} $*"; }
 fail() { echo -e "${RED}✗${NC} $*"; exit 1; }
@@ -96,11 +96,11 @@ ok "go vet: uyarı yok"
 
 # ── Testler ───────────────────────────────────────────────────────────────────
 log "Testler çalıştırılıyor..."
-go test -mod=vendor ./... -v -timeout 120s 2>&1 | tee /tmp/rdpboot_test.log
+go test -mod=vendor ./... -v -timeout 120s 2>&1 | tee /tmp/simpleclient_test.log
 TEST_EXIT=${PIPESTATUS[0]}
 
 if [[ $TEST_EXIT -ne 0 ]]; then
-  fail "Bazı testler başarısız. Detay: /tmp/rdpboot_test.log"
+  fail "Bazı testler başarısız. Detay: /tmp/simpleclient_test.log"
 fi
 ok "Tüm testler geçti"
 
@@ -108,17 +108,17 @@ ok "Tüm testler geçti"
 log "Statik binary derleniyor..."
 mkdir -p dist
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-  go build -mod=vendor -ldflags '-s -w' -o dist/rdpboot ./cmd/rdpboot
+  go build -mod=vendor -ldflags '-s -w' -o dist/simpleclient ./cmd/simpleclient
 
-if file dist/rdpboot | grep -q "statically linked"; then
-  ok "dist/rdpboot: statik binary"
+if file dist/simpleclient | grep -q "statically linked"; then
+  ok "dist/simpleclient: statik binary"
 else
   warn "Binary oluşturuldu ama statik bağlı olmayabilir (cross-compile değilse normal)"
 fi
 
 echo ""
 echo -e "${GREEN}${BOLD}✓ Temel kurulum tamamlandı!${NC}"
-echo "  Binary: dist/rdpboot"
+echo "  Binary: dist/simpleclient"
 echo ""
 
 # ── ISO Build (Docker) ───────────────────────────────────────────────────────
@@ -135,10 +135,10 @@ if [[ $BUILD_ISO -eq 1 ]]; then
     -f build/Dockerfile \
     .
 
-  if [[ -f dist/rdpboot.iso ]]; then
-    ISO_SIZE=$(du -sh dist/rdpboot.iso | cut -f1)
-    ok "dist/rdpboot.iso oluşturuldu ($ISO_SIZE)"
-    file dist/rdpboot.iso
+  if [[ -f dist/simpleclient.iso ]]; then
+    ISO_SIZE=$(du -sh dist/simpleclient.iso | cut -f1)
+    ok "dist/simpleclient.iso oluşturuldu ($ISO_SIZE)"
+    file dist/simpleclient.iso
   else
     fail "ISO oluşturulamadı."
   fi
@@ -146,7 +146,7 @@ fi
 
 # ── QEMU test ─────────────────────────────────────────────────────────────────
 if [[ $RUN_QEMU -eq 1 ]]; then
-  if [[ ! -f dist/rdpboot.iso ]]; then
+  if [[ ! -f dist/simpleclient.iso ]]; then
     fail "ISO bulunamadı. Önce --iso ile build edin."
   fi
   log "QEMU başlatılıyor..."
@@ -155,6 +155,6 @@ fi
 
 echo ""
 echo -e "${BOLD}Sonraki adımlar:${NC}"
-echo "  1. USB'ye yaz : sudo dd if=dist/rdpboot.iso of=/dev/sdX bs=4M status=progress conv=fsync"
+echo "  1. USB'ye yaz : sudo dd if=dist/simpleclient.iso of=/dev/sdX bs=4M status=progress conv=fsync"
 echo "  2. QEMU test  : bash setup.sh --iso --qemu"
 echo "  3. CI         : .github/workflows/ci.yml otomatik çalışır"

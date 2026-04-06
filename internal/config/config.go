@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Config holds all runtime configuration for rdpboot.
+// Config holds all runtime configuration for SimpleClient.
 type Config struct {
 	FBDevice    string
 	KbdDevice   string

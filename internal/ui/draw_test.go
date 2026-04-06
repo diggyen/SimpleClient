@@ -28,7 +28,7 @@ func TestFillRect(t *testing.T) {
 
 func TestDrawText_NonZero(t *testing.T) {
 	img := newTestImage(1280, 100)
-	DrawText(img, 10, 10, "rdpboot", ColorText)
+	DrawText(img, 10, 10, "SimpleClient", ColorText)
 	// At least one non-zero pixel should exist.
 	found := false
 	for x := 0; x < 100; x++ {
@@ -47,7 +47,7 @@ func TestDrawText_NonZero(t *testing.T) {
 
 func TestDrawTextLarge_NonZero(t *testing.T) {
 	img := newTestImage(1280, 100)
-	DrawTextLarge(img, 10, 10, "rdpboot", ColorAccent)
+	DrawTextLarge(img, 10, 10, "SimpleClient", ColorAccent)
 	found := false
 	for x := 10; x < 150; x++ {
 		for y := 10; y < 60; y++ {

@@ -1,4 +1,4 @@
-module github.com/kullanici/rdpboot
+module github.com/diggyen/SimpleClient
 
 go 1.23
 

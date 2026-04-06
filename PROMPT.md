@@ -1,8 +1,8 @@
-# rdpboot — Claude Code Implementation Prompt
+# SimpleClient — Claude Code Implementation Prompt
 
 ## Proje Özeti
 
-rdpboot, USB belleğe yazılıp herhangi bir x86_64 bilgisayarı önyükleyen ~50 MB'lık minimal bir Linux ISO'sudur. Sistem başladığında tek bir statik derlenmiş Go binary'si `/dev/fb0` Linux framebuffer'ına doğrudan piksel yazarak **tam ekran kiosk arayüzü** açar. Kullanıcı bu ekranda ağdaki RDP sunucularını görür, klavye/fare ile seçer, kimlik bilgilerini girer ve uzak masaüstü oturumu aynı ekranda açılır. X11, Wayland, web tarayıcısı, HTTP sunucu yoktur. Sistem kilitlidir: başka yere gidilemez.
+SimpleClient, USB belleğe yazılıp herhangi bir x86_64 bilgisayarı önyükleyen ~50 MB'lık minimal bir Linux ISO'sudur. Sistem başladığında tek bir statik derlenmiş Go binary'si `/dev/fb0` Linux framebuffer'ına doğrudan piksel yazarak **tam ekran kiosk arayüzü** açar. Kullanıcı bu ekranda ağdaki RDP sunucularını görür, klavye/fare ile seçer, kimlik bilgilerini girer ve uzak masaüstü oturumu aynı ekranda açılır. X11, Wayland, web tarayıcısı, HTTP sunucu yoktur. Sistem kilitlidir: başka yere gidilemez.
 
 ---
 
@@ -28,8 +28,8 @@ rdpboot, USB belleğe yazılıp herhangi bir x86_64 bilgisayarı önyükleyen ~5
 ## Proje Yapısı
 
 ```
-rdpboot/
-├── cmd/rdpboot/main.go
+SimpleClient/
+├── cmd/simpleclient/main.go
 ├── internal/
 │   ├── domain/
 │   │   ├── host.go
@@ -74,7 +74,7 @@ rdpboot/
 ## Bağımlılıklar
 
 ```bash
-go mod init github.com/kullanici/rdpboot
+go mod init github.com/diggyen/SimpleClient
 go get github.com/tomatome/grdp@latest
 go get github.com/google/uuid@latest
 go get golang.org/x/image@latest
@@ -91,14 +91,14 @@ Her Go dosyası kendi paket bildirimiyle başlayan boş stub. `go build ./...` h
 
 `go.mod`:
 ```
-module github.com/kullanici/rdpboot
+module github.com/diggyen/SimpleClient
 go 1.23
 ```
 
 `.gitignore`:
 ```
-rdpboot
-rdpboot.iso
+SimpleClient
+SimpleClient.iso
 build/rootfs/
 build/initramfs.cpio.gz
 build/iso-root/
@@ -691,8 +691,8 @@ import (
     "sync/atomic"
     "time"
 
-    "github.com/kullanici/rdpboot/internal/domain"
-    "github.com/kullanici/rdpboot/internal/network"
+    "github.com/diggyen/SimpleClient/internal/domain"
+    "github.com/diggyen/SimpleClient/internal/network"
 )
 
 type NetworkScanner struct {
@@ -972,7 +972,7 @@ func Sprintf(format string, a ...interface{}) string { return fmt.Sprintf(format
 // internal/ui/state.go
 package ui
 
-import "github.com/kullanici/rdpboot/internal/domain"
+import "github.com/diggyen/SimpleClient/internal/domain"
 
 type Screen int
 const (
@@ -1087,7 +1087,7 @@ package ui
 
 import (
     "image"
-    "github.com/kullanici/rdpboot/internal/framebuffer"
+    "github.com/diggyen/SimpleClient/internal/framebuffer"
 )
 
 type FBInterface interface {
@@ -1142,7 +1142,7 @@ func renderDiscovery(img *image.RGBA, state *UIState, mouseX, mouseY int) {
     DrawBorder(img, topBar, ColorBorder)
 
     // Logo
-    DrawTextLarge(img, 16, 8, "rdpboot", ColorAccent)
+    DrawTextLarge(img, 16, 8, "SimpleClient", ColorAccent)
 
     // IP adresi
     ipText := "IP: " + state.LocalIP
@@ -1505,7 +1505,7 @@ func (fw *FrameWriter) Write(src image.Image) {
 
 ### Adım 11: Config ve Ana Döngü
 
-**Dosyalar:** `internal/config/config.go`, `internal/ui/loop.go`, `cmd/rdpboot/main.go`
+**Dosyalar:** `internal/config/config.go`, `internal/ui/loop.go`, `cmd/simpleclient/main.go`
 
 ```go
 // internal/config/config.go
@@ -1544,11 +1544,11 @@ import (
     "context"
     "time"
 
-    "github.com/kullanici/rdpboot/internal/config"
-    "github.com/kullanici/rdpboot/internal/domain"
-    "github.com/kullanici/rdpboot/internal/inputdev"
-    "github.com/kullanici/rdpboot/internal/network"
-    "github.com/kullanici/rdpboot/internal/rdp"
+    "github.com/diggyen/SimpleClient/internal/config"
+    "github.com/diggyen/SimpleClient/internal/domain"
+    "github.com/diggyen/SimpleClient/internal/inputdev"
+    "github.com/diggyen/SimpleClient/internal/network"
+    "github.com/diggyen/SimpleClient/internal/rdp"
 )
 
 type RDPFactory func(addr string, creds rdp.Credentials, w, h int) (*rdp.Client, error)
@@ -1777,17 +1777,17 @@ type SessionState struct {
 ```
 
 ```go
-// cmd/rdpboot/main.go
+// cmd/simpleclient/main.go
 package main
 
 import (
     "log"
 
-    "github.com/kullanici/rdpboot/internal/config"
-    "github.com/kullanici/rdpboot/internal/framebuffer"
-    "github.com/kullanici/rdpboot/internal/inputdev"
-    "github.com/kullanici/rdpboot/internal/scanner"
-    "github.com/kullanici/rdpboot/internal/ui"
+    "github.com/diggyen/SimpleClient/internal/config"
+    "github.com/diggyen/SimpleClient/internal/framebuffer"
+    "github.com/diggyen/SimpleClient/internal/inputdev"
+    "github.com/diggyen/SimpleClient/internal/scanner"
+    "github.com/diggyen/SimpleClient/internal/ui"
 )
 
 func main() {
@@ -1820,7 +1820,7 @@ func main() {
 }
 ```
 
-**🔍 Checkpoint:** `CGO_ENABLED=0 go build ./cmd/rdpboot` → statik binary. QEMU'da `qemu-system-x86_64 -m 256M -cdrom rdpboot.iso -display sdl` çalıştırıldığında ekranda rdpboot UI görünmeli.
+**🔍 Checkpoint:** `CGO_ENABLED=0 go build ./cmd/simpleclient` → statik binary. QEMU'da `qemu-system-x86_64 -m 256M -cdrom SimpleClient.iso -display sdl` çalıştırıldığında ekranda SimpleClient UI görünmeli.
 
 ---
 
@@ -1846,7 +1846,7 @@ udhcpc -i eth0 -n -q 2>/dev/null || ip addr add 169.254.100.100/16 dev eth0
 
 # Kiosk döngüsü
 while true; do
-    /sbin/rdpboot
+    /sbin/SimpleClient
     sleep 2
 done
 ```
@@ -1855,7 +1855,7 @@ done
 ```
 set timeout=1
 set default=0
-menuentry "rdpboot" {
+menuentry "SimpleClient" {
     linux /boot/vmlinuz quiet loglevel=0 console=tty0 panic=5 vt.global_cursor_default=0
     initrd /boot/initramfs.cpio.gz
 }
@@ -1863,8 +1863,8 @@ menuentry "rdpboot" {
 
 **`build/Makefile`:**
 ```makefile
-BINARY  := build/rootfs/sbin/rdpboot
-ISO     := rdpboot.iso
+BINARY  := build/rootfs/sbin/SimpleClient
+ISO     := SimpleClient.iso
 ROOTFS  := build/rootfs
 ISO_ROOT:= build/iso-root
 
@@ -1876,7 +1876,7 @@ binary:
 	@mkdir -p $(ROOTFS)/sbin $(ROOTFS)/bin $(ROOTFS)/dev $(ROOTFS)/proc $(ROOTFS)/sys $(ROOTFS)/etc
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 	    go build -ldflags '-s -w -extldflags "-static"' \
-	    -o $(BINARY) ./cmd/rdpboot
+	    -o $(BINARY) ./cmd/simpleclient
 	@echo "Binary: $$(du -sh $(BINARY) | cut -f1)"
 
 initramfs: binary
@@ -1893,11 +1893,11 @@ iso: initramfs
 	@echo "ISO: $$(du -sh $(ISO) | cut -f1)"
 
 clean:
-	rm -rf $(ROOTFS) build/initramfs.cpio.gz $(ISO_ROOT) $(ISO) rdpboot
+	rm -rf $(ROOTFS) build/initramfs.cpio.gz $(ISO_ROOT) $(ISO) SimpleClient
 
 docker-build:
-	docker build -f build/Dockerfile -t rdpboot-builder .
-	docker run --rm -v "$$(pwd)":/workspace -w /workspace rdpboot-builder make all
+	docker build -f build/Dockerfile -t SimpleClient-builder .
+	docker run --rm -v "$$(pwd)":/workspace -w /workspace SimpleClient-builder make all
 ```
 
 ---
@@ -1908,15 +1908,15 @@ Tüm adımlar tamamlandıktan sonra doğrula:
 
 - [ ] `go vet ./...` → 0 uyarı
 - [ ] `go test ./...` → 0 hata
-- [ ] `CGO_ENABLED=0 go build ./cmd/rdpboot` → hatasız
-- [ ] `ldd rdpboot` → "not a dynamic executable"
-- [ ] `file rdpboot` → "ELF 64-bit, statically linked"
+- [ ] `CGO_ENABLED=0 go build ./cmd/simpleclient` → hatasız
+- [ ] `ldd SimpleClient` → "not a dynamic executable"
+- [ ] `file SimpleClient` → "ELF 64-bit, statically linked"
 - [ ] `unsafe.Sizeof(framebuffer.fbVarScreenInfo{})` == 160
 - [ ] `scanner.ExpandCIDR("192.168.1.0/24")` → 254 IP
 - [ ] MockFB ile render testleri geçer
 - [ ] QEMU SDL modda UI görünür ve klavye girdisi çalışır
-- [ ] `make iso` → rdpboot.iso < 60 MB
-- [ ] `file rdpboot.iso` → "ISO 9660 CD-ROM filesystem data"
+- [ ] `make iso` → SimpleClient.iso < 60 MB
+- [ ] `file SimpleClient.iso` → "ISO 9660 CD-ROM filesystem data"
 - [ ] Gerçek veya sanal Windows makinesiyle RDP bağlantısı kurulur
 - [ ] Ctrl+Alt+End → session kapatılır, liste ekranına dönülür
 - [ ] Binary çöktüğünde init onu yeniden başlatır

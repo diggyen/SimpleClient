@@ -1,4 +1,4 @@
-# rdpboot build container
+# simpleclient build container
 # Produces a statically linked binary + bootable ISO
 #
 # NOTE: grdp/plugin uses CGo (import "C"), so we need CGO_ENABLED=1
@@ -15,7 +15,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     go build -ldflags '-s -w -extldflags "-static"' \
-    -o /out/rdpboot ./cmd/rdpboot
+    -o /out/simpleclient ./cmd/simpleclient
 
 # ── Kernel builder ────────────────────────────────────────────────────────────
 FROM --platform=linux/amd64 debian:bookworm-slim AS kernel-builder
@@ -43,10 +43,10 @@ FROM --platform=linux/amd64 alpine:3.20 AS initramfs-builder
 
 RUN apk add --no-cache busybox-static cpio gzip
 
-COPY --from=go-builder /out/rdpboot /rootfs/sbin/rdpboot
+COPY --from=go-builder /out/simpleclient /rootfs/sbin/simpleclient
 COPY build/init /rootfs/init
 
-RUN chmod +x /rootfs/init /rootfs/sbin/rdpboot \
+RUN chmod +x /rootfs/init /rootfs/sbin/simpleclient \
     && mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/tmp /rootfs/etc /rootfs/bin
 
 # Copy busybox. Alpine 3.20 installs to /bin/busybox for the static variant.
@@ -67,11 +67,11 @@ COPY --from=kernel-builder /out/vmlinuz /iso/boot/vmlinuz
 COPY --from=initramfs-builder /out/initramfs.cpio.gz /iso/boot/initramfs.cpio.gz
 COPY build/grub.cfg /iso/boot/grub/grub.cfg
 
-RUN mkdir -p /out && grub-mkrescue -o /out/rdpboot.iso /iso \
-    -- -volid RDPBOOT
+RUN mkdir -p /out && grub-mkrescue -o /out/simpleclient.iso /iso \
+    -- -volid SIMPLECLIENT
 
 # ── Final export stage ────────────────────────────────────────────────────────
 FROM scratch AS export
-COPY --from=go-builder /out/rdpboot /
+COPY --from=go-builder /out/simpleclient /
 COPY --from=initramfs-builder /out/initramfs.cpio.gz /
-COPY --from=iso-builder /out/rdpboot.iso /
+COPY --from=iso-builder /out/simpleclient.iso /

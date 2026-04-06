@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kullanici/rdpboot/internal/domain"
+	"github.com/diggyen/SimpleClient/internal/domain"
 )
 
 // startMockRDP3389 binds a TCP listener on 127.0.0.1:3389 if available.

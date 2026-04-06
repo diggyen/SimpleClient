@@ -1,4 +1,4 @@
-# rdpboot — Tasks
+# SimpleClient — Tasks
 
 > Kiosk framebuffer mimarisine göre güncellenmiş görev listesi.
 > Web sunucu / WebSocket / SSE kaldırıldı; framebuffer + evdev eklendi.
@@ -28,8 +28,8 @@
 **Go modülü, dizin yapısı ve tüm boş stub'ları oluştur.**
 
 **Oluşturulacak Dosyalar:**
-- `go.mod` — `module github.com/kullanici/rdpboot`, Go 1.23
-- `cmd/rdpboot/main.go` — boş main()
+- `go.mod` — `module github.com/diggyen/SimpleClient`, Go 1.23
+- `cmd/simpleclient/main.go` — boş main()
 - `internal/domain/host.go` — stub
 - `internal/domain/events.go` — stub
 - `internal/domain/interfaces.go` — stub
@@ -62,7 +62,7 @@
 
 **Komutlar:**
 ```bash
-go mod init github.com/kullanici/rdpboot
+go mod init github.com/diggyen/SimpleClient
 go get github.com/tomatome/grdp@latest
 go get github.com/google/uuid@latest
 go get golang.org/x/image@latest
@@ -389,7 +389,7 @@ func DrawInputField(img *image.RGBA, r image.Rectangle, text string, active bool
 **Test:** MockFB ile her fonksiyon çağrılır; en az bir piksel rengi doğrulanır.
 
 **Kabul Kriterleri:**
-- [ ] `DrawText` 1280x720 boş image'a "rdpboot" yazar, ilgili bölge boş değil
+- [ ] `DrawText` 1280x720 boş image'a "SimpleClient" yazar, ilgili bölge boş değil
 - [ ] `DrawProgressBar` %0 → tamamen bg, %100 → tamamen fg
 - [ ] `DrawInputField` aktif modda kenarlık rengi farklı
 - [ ] Unit testler geçer (MockFB)
@@ -533,7 +533,7 @@ func scaleToFit(src image.Image, w, h int) *image.RGBA
 **Düzenlenecek Dosyalar:**
 - `internal/ui/loop.go`
 - `internal/config/config.go`
-- `cmd/rdpboot/main.go`
+- `cmd/simpleclient/main.go`
 
 **`config.go`:**
 ```go
@@ -617,7 +617,7 @@ func main() {
 ```
 
 **Kabul Kriterleri:**
-- [ ] `go build -o rdpboot ./cmd/rdpboot` hatasız
+- [ ] `go build -o SimpleClient ./cmd/simpleclient` hatasız
 - [ ] MockFB + simüle edilmiş input stream ile loop testi: 10 ScanEvent → state.Hosts 10 eleman
 - [ ] Enter tuşu → ScreenDiscovery'den ScreenModal'a geçiş
 - [ ] Esc → ScreenModal'dan ScreenDiscovery'ye geçiş
@@ -626,7 +626,7 @@ func main() {
 **Bağımlılıklar:** Görev 6, Görev 8, Görev 9
 **Efor:** 6 saat
 
-**🔍 Checkpoint:** Bu noktada `go run ./cmd/rdpboot` QEMU'da çalıştırılabilir. Framebuffer ekranında keşif arayüzü görünmeli. Tarama başlamalı. (Gerçek RDP sunucusu yoksa liste boş olur, bu normal.)
+**🔍 Checkpoint:** Bu noktada `go run ./cmd/simpleclient` QEMU'da çalıştırılabilir. Framebuffer ekranında keşif arayüzü görünmeli. Tarama başlamalı. (Gerçek RDP sunucusu yoksa liste boş olur, bu normal.)
 
 ---
 
@@ -756,7 +756,7 @@ udhcpc -i eth0 -n -q 2>/dev/null || ip addr add 169.254.100.100/16 dev eth0
 
 # Kiosk döngüsü: çökerse yeniden başlat
 while true; do
-    /sbin/rdpboot
+    /sbin/SimpleClient
     sleep 2
 done
 # Asla buraya ulaşılmaz
@@ -766,7 +766,7 @@ done
 ```
 set timeout=1
 set default=0
-menuentry "rdpboot" {
+menuentry "SimpleClient" {
     linux /boot/vmlinuz quiet loglevel=0 console=tty0 panic=5 vt.global_cursor_default=0
     initrd /boot/initramfs.cpio.gz
 }
@@ -785,9 +785,9 @@ menuentry "rdpboot" {
 **Kabul Kriterleri:**
 - [ ] `make binary` → statik binary; `ldd` → "not a dynamic executable"
 - [ ] `make initramfs` → cpio.gz üretilir
-- [ ] `make iso` → rdpboot.iso üretilir; `file rdpboot.iso` → ISO 9660
+- [ ] `make iso` → SimpleClient.iso üretilir; `file SimpleClient.iso` → ISO 9660
 - [ ] ISO boyutu < 60 MB
-- [ ] `file build/rootfs/sbin/rdpboot` → "ELF 64-bit LSB executable, statically linked"
+- [ ] `file build/rootfs/sbin/SimpleClient` → "ELF 64-bit LSB executable, statically linked"
 
 **Bağımlılıklar:** Görev 11
 **Efor:** 6 saat
@@ -810,7 +810,7 @@ menuentry "rdpboot" {
 qemu-system-x86_64 \
     -m 256M \
     -boot d \
-    -cdrom rdpboot.iso \
+    -cdrom SimpleClient.iso \
     -display sdl \
     -device e1000,netdev=net0 \
     -netdev user,id=net0 \
@@ -829,8 +829,8 @@ jobs:
         with: { go-version: '1.23' }
       - run: go vet ./...
       - run: go test ./...
-      - run: CGO_ENABLED=0 GOOS=linux go build -ldflags '-s -w' ./cmd/rdpboot
-      - run: file rdpboot | grep "statically linked"
+      - run: CGO_ENABLED=0 GOOS=linux go build -ldflags '-s -w' ./cmd/simpleclient
+      - run: file SimpleClient | grep "statically linked"
 ```
 
 **Kabul Kriterleri:**

@@ -32,13 +32,13 @@ jobs:
       - name: Build static binary
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-          go build -ldflags '-s -w' -o rdpboot ./cmd/rdpboot
+          go build -ldflags '-s -w' -o simpleclient ./cmd/simpleclient
 
       - name: Verify static binary
-        run: file rdpboot | grep "statically linked"
+        run: file simpleclient | grep "statically linked"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rdpboot-linux-amd64
-          path: rdpboot
+          name: simpleclient-linux-amd64
+          path: simpleclient

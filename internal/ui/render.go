@@ -3,7 +3,7 @@ package ui
 import (
 	"image"
 
-	"github.com/kullanici/rdpboot/internal/framebuffer"
+	"github.com/diggyen/SimpleClient/internal/framebuffer"
 )
 
 // Render dispatches to the appropriate screen renderer and blits to fb.
