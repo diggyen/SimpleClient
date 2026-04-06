@@ -1,0 +1,17 @@
+# Build artifacts
+dist/
+*.iso
+*.cpio.gz
+rdpboot
+
+# Go
+vendor/
+*.test
+*.out
+
+# Editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

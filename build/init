@@ -1,0 +1,27 @@
+#!/bin/sh
+# rdpboot init — minimal kiosk init script
+set -e
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+# Create required device nodes if devtmpfs is not available.
+mkdir -p /dev/pts /dev/shm
+mount -t devpts devpts /dev/pts 2>/dev/null || true
+
+# Silence kernel log noise.
+echo 0 > /proc/sys/kernel/printk
+
+# Bring up network.
+ip link set lo up
+ip link set eth0 up 2>/dev/null || ip link set enp0s3 up 2>/dev/null || true
+udhcpc -i eth0 -n -q 2>/dev/null || \
+udhcpc -i enp0s3 -n -q 2>/dev/null || \
+ip addr add 169.254.100.100/16 dev eth0 2>/dev/null || true
+
+# Kiosk loop: restart rdpboot on crash.
+while true; do
+    /sbin/rdpboot
+    sleep 2
+done
