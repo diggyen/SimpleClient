@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"sync"
+
 	"github.com/diggyen/SimpleClient/internal/domain"
 )
 
@@ -23,6 +25,7 @@ type ModalState struct {
 
 // UIState is the complete mutable state of the UI layer.
 type UIState struct {
+	Mu           sync.Mutex
 	Screen       Screen
 	Hosts        []domain.Host
 	SelectedIdx  int

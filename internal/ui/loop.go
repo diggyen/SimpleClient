@@ -248,8 +248,10 @@ func handleMouseClick(
 }
 
 func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
+	state.Mu.Lock()
 	host := state.SelectedHost()
 	if host == nil {
+		state.Mu.Unlock()
 		return
 	}
 
@@ -261,15 +263,19 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 
 	state.Transition(ScreenConnecting)
 	state.Modal.Error = ""
+	state.Mu.Unlock()
 
 	client, err := rdp.New(host.AddrRDP(), creds, fb.Width(), fb.Height())
 	if err != nil {
+		state.Mu.Lock()
 		state.Modal.Error = rdpErrToMessage(err)
 		state.Transition(ScreenModal)
+		state.Mu.Unlock()
 		return
 	}
 
 	writer := &rdp.FrameWriter{FB: fb}
+	state.Mu.Lock()
 	*session = &SessionState{
 		Host:      *host,
 		Client:    client,
@@ -277,6 +283,7 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 		Connected: true,
 	}
 	state.Transition(ScreenSession)
+	state.Mu.Unlock()
 
 	// RDP frame rendering loop (blocks until connection closes).
 	for frame := range client.Frames() {
@@ -284,9 +291,11 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	}
 
 	// Connection closed.
+	state.Mu.Lock()
 	*session = nil
 	state.Transition(ScreenDiscovery)
 	state.ErrorMsg = "Bağlantı kesildi"
+	state.Mu.Unlock()
 }
 
 func disconnect(state *UIState, session *SessionState) {
