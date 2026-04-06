@@ -5,11 +5,7 @@ dist/
 simpleclient
 
 # Documentation
-SPECIFICATION.md
-CLAUDE.md
-PROMPT.md
-TASKS.md
-IMPLEMENTATION.md
+*.md
 
 # Go
 vendor/
