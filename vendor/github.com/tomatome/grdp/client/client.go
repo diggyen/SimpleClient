@@ -93,6 +93,18 @@ func (c *Client) MouseUp(button, x, y int) {
 func (c *Client) MouseDown(button, x, y int) {
 	c.ctl.MouseDown(button, x, y)
 }
+
+// Close tears down the underlying transport.
+//
+// PATCH (SimpleClient): upstream only has Close on the unexported ctl field, so
+// there is no way to hang up from outside the package — every ended session
+// leaks its TCP connection and reader goroutine. Bkz. build/patches/.
+func (c *Client) Close() {
+	if c != nil && c.ctl != nil {
+		c.ctl.Close()
+	}
+}
+
 func (c *Client) OnError(f func(e error)) {
 	c.ctl.On("error", f)
 }

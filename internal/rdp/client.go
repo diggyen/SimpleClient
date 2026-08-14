@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"sync"
 	"time"
 
 	"github.com/tomatome/grdp/client"
@@ -17,6 +18,11 @@ type Credentials struct {
 	Domain   string
 }
 
+// connectTimeout bounds the whole handshake: TCP dial, x224, MCS, licensing and
+// capability exchange. Ten seconds is generous for a LAN and short enough that a
+// wrong password does not leave the kiosk staring at a spinner.
+const connectTimeout = 10 * time.Second
+
 // Client wraps grdp/client and provides frame streaming and input forwarding.
 type Client struct {
 	g      *client.Client
@@ -24,6 +30,10 @@ type Client struct {
 	done   chan struct{}
 	width  int
 	height int
+
+	// mu guards closed and serialises sends on frames against closing it.
+	mu     sync.Mutex
+	closed bool
 }
 
 // New creates and connects an RDP client. Times out after 10 seconds.
@@ -49,12 +59,28 @@ func New(addr string, creds Credentials, width, height int) (*Client, error) {
 		height: height,
 	}
 
-	successCh := make(chan struct{}, 1)
+	// Login has to come first. grdp's RdpClient is an empty struct until Login
+	// builds the protocol stack, and every On* registration dereferences the
+	// pdu client it creates there — attaching handlers beforehand panics with a
+	// nil pointer. Login is not the blocking call its name suggests: it dials,
+	// starts the x224 handshake and returns, leaving the session running on
+	// grdp's own reader goroutine.
+	if err := g.Login(); err != nil {
+		return nil, fmt.Errorf("RDP connect %s: %w", addr, err)
+	}
+
+	readyCh := make(chan struct{}, 1)
 	errCh := make(chan error, 1)
 
-	g.OnSuccess(func() {
+	// "ready", not "success". grdp's On* helpers all subscribe to the pdu layer,
+	// and pdu only ever emits close/error/ready/bitmap/orders/color — "success"
+	// comes from the sec layer and never reaches a subscriber on an RDP
+	// connection. Waiting for it means every connection attempt times out even
+	// after the server has logged the user in. "ready" fires on the server font
+	// map PDU, which is the point the session is actually live.
+	g.OnReady(func() {
 		select {
-		case successCh <- struct{}{}:
+		case readyCh <- struct{}{}:
 		default:
 		}
 	})
@@ -66,53 +92,63 @@ func New(addr string, creds Credentials, width, height int) (*Client, error) {
 		}
 	})
 
-	g.OnClose(func() {
-		select {
-		case <-c.done:
-		default:
-			close(c.done)
-		}
-	})
+	g.OnClose(c.shutdown)
 
 	// Register bitmap callback — grdp calls this for every screen update tile.
 	g.OnBitmap(func(bitmaps []client.Bitmap) {
 		for _, bm := range bitmaps {
-			img := bitmapToImage(bm)
-			select {
-			case c.frames <- img:
-			default:
-				// Drop oldest frame to avoid blocking.
-				select {
-				case <-c.frames:
-				default:
-				}
-				select {
-				case c.frames <- img:
-				default:
-				}
-			}
+			c.push(bitmapToImage(bm))
 		}
 	})
 
-	// Login blocks until session ends; run in goroutine.
-	go func() {
-		if err := g.Login(); err != nil {
-			select {
-			case errCh <- err:
-			default:
-			}
-		}
-	}()
-
-	// Wait for connection success, error, or timeout.
+	// Wait for the session to come up, fail, or time out.
 	select {
-	case <-successCh:
+	case <-readyCh:
 		return c, nil
 	case err := <-errCh:
+		g.Close()
 		return nil, fmt.Errorf("RDP connect %s: %w", addr, err)
-	case <-time.After(10 * time.Second):
-		return nil, fmt.Errorf("RDP connect %s: timeout after 10s", addr)
+	case <-time.After(connectTimeout):
+		g.Close()
+		return nil, fmt.Errorf("RDP connect %s: timeout after %s", addr, connectTimeout)
 	}
+}
+
+// push hands a decoded tile to the frame consumer, dropping the oldest frame
+// when the consumer has fallen behind. Sends are serialised with shutdown so a
+// tile arriving during teardown cannot be written to a closed channel.
+func (c *Client) push(img image.Image) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	select {
+	case c.frames <- img:
+	default:
+		select {
+		case <-c.frames:
+		default:
+		}
+		select {
+		case c.frames <- img:
+		default:
+		}
+	}
+}
+
+// shutdown closes the frame channel exactly once. Closing it is what lets the
+// UI's "for frame := range client.Frames()" loop return and put the kiosk back
+// on the discovery screen; without it a dropped session left the UI stuck.
+func (c *Client) shutdown() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	c.closed = true
+	close(c.done)
+	close(c.frames)
 }
 
 // Frames returns the channel of incoming video frames.
@@ -149,29 +185,30 @@ func (c *Client) SendMouseUp(button, x, y int) {
 	c.g.MouseUp(button, x, y)
 }
 
-// Close disconnects from the RDP server.
-// Note: grdp's client.Client does not expose a Close method on the outer
-// type; Close() is on the internal Control interface.  We signal closure
-// via the done channel so consumers (Frames loop) unblock.
+// Close disconnects from the RDP server and unblocks anyone ranging over
+// Frames. It is safe to call more than once.
 func (c *Client) Close() error {
-	select {
-	case <-c.done:
-	default:
-		close(c.done)
-	}
+	c.g.Close()
+	c.shutdown()
 	return nil
 }
 
 // bitmapToImage converts a grdp Bitmap tile to image.Image.
-// Bitmap.BitsPerPixel is bytes-per-pixel (grdp already divides by 8 via Bpp()).
+//
+// Bitmap.BitsPerPixel is bytes per pixel: grdp has already divided by 8 in
+// Bpp(). Rows run top-down and 16-bit pixels are big-endian RGB565 — both
+// verified against a live Windows session, where the desktop's #F0F0F0 arrives
+// as the word 0xF79E. Reading those little-endian, or flipping the rows, turns
+// the remote desktop into upside-down text in the wrong colours.
 func bitmapToImage(bm client.Bitmap) image.Image {
-	r := image.Rect(bm.DestLeft, bm.DestTop, bm.DestRight+1, bm.DestBottom+1)
-	img := image.NewNRGBA(r)
-
-	w := bm.Width
-	h := bm.Height
+	w, h := bm.Width, bm.Height
 	bpp := bm.BitsPerPixel // bytes per pixel
 	data := bm.Data
+
+	// The tile is positioned by DestLeft/DestTop and sized by Width/Height;
+	// the Dest* rectangle is not always exactly Width x Height.
+	r := image.Rect(bm.DestLeft, bm.DestTop, bm.DestLeft+w, bm.DestTop+h)
+	img := image.NewNRGBA(r)
 
 	if bpp == 0 || len(data) == 0 {
 		return img
@@ -179,8 +216,7 @@ func bitmapToImage(bm client.Bitmap) image.Image {
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// Bitmap is stored bottom-up with BGR byte order.
-			off := ((h-1-y)*w + x) * bpp
+			off := (y*w + x) * bpp
 			if off+bpp > len(data) {
 				break
 			}
@@ -191,13 +227,13 @@ func bitmapToImage(bm client.Bitmap) image.Image {
 				g2 = data[off+1]
 				r2 = data[off+2]
 			case 2:
-				lo := data[off]
-				hi := data[off+1]
-				v := uint16(hi)<<8 | uint16(lo)
-				r2 = uint8((v >> 11) << 3)
-				g2 = uint8((v >> 5 & 0x3f) << 2)
-				b2 = uint8((v & 0x1f) << 3)
+				v := uint16(data[off])<<8 | uint16(data[off+1])
+				r2 = uint8(v & 0xF800 >> 8)
+				g2 = uint8(v & 0x07E0 >> 3)
+				b2 = uint8(v & 0x001F << 3)
 			case 1:
+				// 8bpp is palettised and we do not track the colour table, so
+				// fall back to greyscale rather than render nothing.
 				r2 = data[off]
 				g2 = r2
 				b2 = r2

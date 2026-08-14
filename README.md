@@ -82,6 +82,36 @@ bash build/test-qemu.sh --headless --fake-rdp  # boot, screenshot, exit
 `--fake-rdp` opens port 3389 on the host, which QEMU's user-mode networking
 presents to the guest at `10.0.2.2`, so the scan finds something to list.
 
+### Test against a real RDP server
+
+Everything in `internal/rdp` is unit-tested against synthetic tiles except the
+handshake itself. `TestLiveConnect` drives a real server — NLA authentication,
+the session PDUs and the bitmap stream — and is skipped unless you point it at
+one:
+
+```sh
+SIMPLECLIENT_RDP_ADDR=10.0.0.5:3389 \
+SIMPLECLIENT_RDP_USER=administrator \
+SIMPLECLIENT_RDP_PASS=... \
+SIMPLECLIENT_RDP_SHOT=/tmp/desktop.png \
+go test -mod=vendor ./internal/rdp -run TestLiveConnect -v
+```
+
+`SIMPLECLIENT_RDP_SHOT` composites the incoming tiles into a PNG, which is the
+only way to confirm the decode is right: a session can be live and still send
+nothing this decoder understands, and that looks exactly like a black screen.
+
+## Known limitations
+
+- **Colour depth is whatever the server picks.** Windows commonly negotiates
+  16bpp, which is what the tile decoder is tuned for.
+- **No RemoteFX/GFX codecs.** grdp ignores surface-command updates, so servers
+  that send only those will show nothing. Every Windows server tested still
+  falls back to legacy bitmap updates, which work.
+- **No manual host entry.** The kiosk connects to hosts it discovers on its own
+  subnet; there is no box to type an address into.
+- **Clipboard, audio and drive redirection are not implemented.**
+
 ## Layout
 
 ```
