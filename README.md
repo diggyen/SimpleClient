@@ -4,12 +4,22 @@ A bootable remote-desktop kiosk. Boot it on a machine, it scans the local
 network for RDP hosts, you pick one, and it connects — full screen, no desktop
 environment underneath.
 
+![The host picker](docs/screenshots/02-list.png)
+
 It draws straight to the Linux framebuffer (`/dev/fb0`) and reads raw evdev
 input. There is no X11 and no Wayland: the whole system is a kernel, busybox and
-one static Go binary in an initramfs, about 40 MB of ISO.
+one static Go binary in an initramfs, about 40 MB of ISO. Every pixel above —
+the mark, the lettering, the signal bars — is drawn by the binary itself; there
+is no toolkit and no image asset in the ISO.
 
 The UI ships in **English** (default) and **Türkçe**. Pick one from the boot
 menu, or press **F2** at any time to switch.
+
+![The same screen in Turkish](docs/screenshots/08-turkish.png)
+
+Every screen is in [`docs/screenshots/`](docs/screenshots), including the
+credential dialog, the empty and error states, and a capture of the real thing
+booting under QEMU.
 
 ## Get it
 
@@ -47,6 +57,9 @@ Boots on both UEFI and legacy BIOS machines.
 
 The scan probes TCP port 3389 across the subnet the machine got from DHCP. If
 there is no DHCP server it falls back to a link-local address and scans that.
+Each host is listed with the round trip of that handshake, graded onto four
+signal bars, so a link too slow to work as a desktop session is visible before
+you connect to it rather than after.
 
 ## Build it from source
 
@@ -154,7 +167,20 @@ internal/framebuffer/ mmap'd /dev/fb0
 internal/inputdev/    evdev keyboard and mouse reader
 internal/i18n/        message catalogue (en, tr)
 build/                Dockerfile, init, GRUB config, Makefile, vendor patches
+docs/screenshots/     every screen, rendered by TestScreenshots
 ```
+
+The screens under `docs/` are generated, not hand-captured. Regenerate them in
+place after changing anything that draws, so a rendering change can be reviewed
+as a diff of the pictures rather than of the arithmetic behind them:
+
+```sh
+SIMPLECLIENT_UI_SHOTS=$PWD/docs/screenshots \
+go test -mod=vendor ./internal/ui -run TestScreenshots -count=1
+```
+
+The path has to be absolute: the test runs with `internal/ui` as its working
+directory, so a relative one silently writes there instead.
 
 ## A note on `vendor/`
 
