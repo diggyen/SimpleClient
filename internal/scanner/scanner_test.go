@@ -136,3 +136,26 @@ func TestExpandCIDRCounts(t *testing.T) {
 		t.Fatalf("expected 254 IPs for /24, got %d", len(ips))
 	}
 }
+
+// A discovered host must always carry a latency the list can show. The scanner
+// used to hardcode 0, which the UI reads as "not measured" and draws as an
+// empty cell — so every host on a real network had a blank latency column.
+func TestDialLatencyMs_NeverZeroForALiveHost(t *testing.T) {
+	cases := []struct {
+		in   time.Duration
+		want int64
+	}{
+		{0, 1},                      // faster than the clock can resolve
+		{120 * time.Microsecond, 1}, // a switched LAN
+		{999 * time.Microsecond, 1},
+		{time.Millisecond, 1},
+		{1500 * time.Microsecond, 2}, // rounds up
+		{47 * time.Millisecond, 47},
+		{time.Second, 1000},
+	}
+	for _, c := range cases {
+		if got := dialLatencyMs(c.in); got != c.want {
+			t.Errorf("dialLatencyMs(%v) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}

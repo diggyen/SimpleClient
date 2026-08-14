@@ -86,14 +86,18 @@ func (s *NetworkScanner) Start(ctx context.Context, cidrs []string) <-chan domai
 				defer func() { <-sem }()
 
 				addr := ip.String() + ":3389"
+				start := time.Now()
 				conn, err := net.DialTimeout("tcp", addr, s.timeout)
 				if err == nil {
+					// Time the TCP handshake, and do it before the reverse
+					// lookup so a slow DNS server is not charged to the host.
+					latency := dialLatencyMs(time.Since(start))
 					conn.Close()
 					hostname := reverseLookup(ip)
 					host := domain.Host{
 						IP:           ip,
 						Hostname:     hostname,
-						LatencyMs:    0,
+						LatencyMs:    latency,
 						DiscoveredAt: time.Now(),
 					}
 					s.mu.Lock()
@@ -221,6 +225,20 @@ func (s *NetworkScanner) startWithPort(ctx context.Context, cidrs []string, port
 	}()
 
 	return ch
+}
+
+// dialLatencyMs converts a measured handshake time to the whole milliseconds
+// the UI displays, rounding up.
+//
+// It never returns zero for a host that answered. A switched LAN answers in
+// well under a millisecond, and truncating that to 0 is indistinguishable from
+// "not measured" — which is what the list treats it as, so a whole column of
+// perfectly good hosts would render blank.
+func dialLatencyMs(d time.Duration) int64 {
+	if ms := (d.Microseconds() + 999) / 1000; ms > 0 {
+		return ms
+	}
+	return 1
 }
 
 // reverseLookup performs a reverse DNS lookup with a 200ms timeout.
