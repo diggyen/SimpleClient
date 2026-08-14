@@ -123,3 +123,27 @@ func TestTOutOfRange(t *testing.T) {
 		t.Fatalf("T(numKeys) = %q, want empty", got)
 	}
 }
+
+func TestHostCount_Plural(t *testing.T) {
+	resetLang(t)
+
+	Set(LangEN)
+	if got := HostCount(1); got != "1 server found" {
+		t.Errorf("HostCount(1) = %q, want the singular form", got)
+	}
+	if got := HostCount(0); got != "0 servers found" {
+		t.Errorf("HostCount(0) = %q, want the plural form", got)
+	}
+	if got := HostCount(7); got != "7 servers found" {
+		t.Errorf("HostCount(7) = %q, want the plural form", got)
+	}
+
+	// Turkish does not inflect the noun after a number.
+	Set(LangTR)
+	if got := HostCount(1); got != "1 sunucu bulundu" {
+		t.Errorf("HostCount(1) in tr = %q", got)
+	}
+	if got := HostCount(7); got != "7 sunucu bulundu" {
+		t.Errorf("HostCount(7) in tr = %q", got)
+	}
+}

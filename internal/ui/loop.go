@@ -34,6 +34,11 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 	state := &UIState{}
 	backBuf := image.NewRGBA(fb.Bounds())
 
+	// The reader starts the pointer at the centre of the screen; mirror that so
+	// the first session starts with its cursor somewhere sensible rather than
+	// in the top-left corner.
+	state.MouseX, state.MouseY = input.MousePos()
+
 	var session *SessionState
 
 	// Start initial scan.
@@ -45,7 +50,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 	state.Dirty = true
 	spinTick := 0
 
-	maxRows := (fb.Height() - 2*barH - 4) / rowH
+	maxRows := layoutDiscovery(fb.Bounds()).Rows
 
 	for {
 		select {
@@ -235,6 +240,12 @@ func handleSessionInput(
 		_ = session.Client.SendKey(ev.KeyCode, ev.Pressed)
 	case inputdev.EvMouseMove:
 		_ = session.Client.SendMouse(ev.MouseX, ev.MouseY, 0)
+		// RDP leaves the pointer to the client: the server moves its own but
+		// never paints it into the screen updates, so without this the user is
+		// pushing an invisible mouse around the remote desktop.
+		if session.Writer != nil {
+			session.Writer.MoveCursor(ev.MouseX, ev.MouseY)
+		}
 	case inputdev.EvMouseButton:
 		if ev.Pressed {
 			session.Client.SendMouseDown(ev.Button, ev.MouseX, ev.MouseY)
@@ -253,27 +264,36 @@ func handleMouseClick(
 ) {
 	switch state.Screen {
 	case ScreenDiscovery:
-		listTop := barH + 2
-		listBottom := fb.Height() - barH - 2
-		if my > listTop && my < listBottom {
-			rowIdx := (my - listTop) / rowH
-			absIdx := state.ScrollOffset + rowIdx
-			if absIdx >= 0 && absIdx < len(state.Hosts) {
-				state.SelectedIdx = absIdx
-				state.Modal = ModalState{}
-				state.Transition(ScreenModal)
-			}
+		// Hit-testing goes through the same layout the renderer used, so a
+		// click always lands on the row the user actually sees.
+		rowIdx := layoutDiscoveryFor(fb.Bounds(), len(state.Hosts)).rowAt(mx, my)
+		if rowIdx < 0 {
+			return
+		}
+		absIdx := state.ScrollOffset + rowIdx
+		if absIdx >= 0 && absIdx < len(state.Hosts) {
+			state.SelectedIdx = absIdx
+			state.Modal = ModalState{}
+			state.Transition(ScreenModal)
 		}
 
 	case ScreenModal:
-		cx := fb.Width() / 2
-		cy := fb.Height() / 2
-		// Connect button.
-		if mx >= cx-modalW/2+8 && mx < cx && my >= cy+modalH/2-44 && my < cy+modalH/2-14 {
-			go connect(state, fb, session)
+		l := layoutModal(fb.Bounds())
+		p := image.Pt(mx, my)
+
+		// Clicking a field focuses it, so the dialog is usable with the mouse
+		// alone rather than only by tabbing.
+		for i, f := range l.Fields {
+			if p.In(f) {
+				state.Modal.FocusIdx = i
+				return
+			}
 		}
-		// Cancel button.
-		if mx >= cx && mx < cx+modalW/2-8 && my >= cy+modalH/2-44 && my < cy+modalH/2-14 {
+		switch {
+		case p.In(l.Connect):
+			state.Modal.FocusIdx = 3
+			go connect(state, fb, session)
+		case p.In(l.Cancel):
 			state.Transition(ScreenDiscovery)
 		}
 	}
@@ -320,7 +340,12 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 		Connected: true,
 	}
 	state.Transition(ScreenSession)
+	mx, my := state.MouseX, state.MouseY
 	state.Mu.Unlock()
+
+	// Show the pointer straight away rather than waiting for the first mouse
+	// movement.
+	writer.MoveCursor(mx, my)
 
 	// RDP frame rendering loop (blocks until connection closes).
 	for frame := range client.Frames() {

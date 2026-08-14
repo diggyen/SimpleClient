@@ -1,0 +1,114 @@
+package ui
+
+import (
+	"image"
+	"image/png"
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/diggyen/SimpleClient/internal/domain"
+	"github.com/diggyen/SimpleClient/internal/framebuffer"
+	"github.com/diggyen/SimpleClient/internal/i18n"
+)
+
+// TestScreenshots renders every UI state to PNG so the design can be reviewed
+// without booting the image. Skipped unless a destination is given:
+//
+//	SIMPLECLIENT_UI_SHOTS=/tmp/ui go test ./internal/ui -run TestScreenshots
+func TestScreenshots(t *testing.T) {
+	dir := os.Getenv("SIMPLECLIENT_UI_SHOTS")
+	if dir == "" {
+		t.Skip("SIMPLECLIENT_UI_SHOTS not set")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { i18n.Set(i18n.Default) })
+
+	shot := func(name string, w, h int, draw func(*image.RGBA)) {
+		t.Helper()
+		fb := framebuffer.NewMock(w, h)
+		img := image.NewRGBA(fb.Bounds())
+		draw(img)
+
+		f, err := os.Create(filepath.Join(dir, name+".png"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := png.Encode(f, img); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	shot("01-scanning", 1280, 800, func(b *image.RGBA) {
+		renderDiscovery(b, &UIState{Screen: ScreenDiscovery, ScanProgress: 0.34, SpinnerTick: 1})
+	})
+	shot("02-list", 1280, 800, func(b *image.RGBA) {
+		renderDiscovery(b, &UIState{
+			Screen: ScreenDiscovery, Hosts: sampleHosts(7),
+			SelectedIdx: 2, ScanDone: true, ScanProgress: 1,
+		})
+	})
+	shot("03-scrolling", 1024, 768, func(b *image.RGBA) {
+		renderDiscovery(b, &UIState{
+			Screen: ScreenDiscovery, Hosts: sampleHosts(40),
+			SelectedIdx: 9, ScrollOffset: 4, ScanDone: true, ScanProgress: 1,
+		})
+	})
+	shot("04-empty", 1280, 800, func(b *image.RGBA) {
+		renderDiscovery(b, &UIState{Screen: ScreenDiscovery, ScanDone: true, ScanProgress: 1})
+	})
+	shot("05-error", 1280, 800, func(b *image.RGBA) {
+		renderDiscovery(b, &UIState{
+			Screen: ScreenDiscovery, Hosts: sampleHosts(3),
+			ScanDone: true, ScanProgress: 1, ErrorMsg: i18n.T(i18n.Disconnected),
+		})
+	})
+	shot("06-credentials", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenModal, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Modal: ModalState{Fields: [3]string{"administrator", "secret123", ""}, FocusIdx: 1},
+		}
+		renderDiscovery(b, st)
+		renderModal(b, st)
+	})
+	shot("07-connecting", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenConnecting, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1, SpinnerTick: 2,
+		}
+		renderDiscovery(b, st)
+		renderConnecting(b, st)
+	})
+
+	i18n.Set(i18n.LangTR)
+	shot("08-turkish", 1280, 800, func(b *image.RGBA) {
+		renderDiscovery(b, &UIState{
+			Screen: ScreenDiscovery, Hosts: sampleHosts(5),
+			SelectedIdx: 1, ScanDone: true, ScanProgress: 1,
+		})
+	})
+
+	t.Logf("wrote screenshots to %s", dir)
+}
+
+func sampleHosts(n int) []domain.Host {
+	names := []string{"veeam-2", "dc01", "", "fileserver", "", "sql-prod", "rds-gw", "app-01", "", "backup-02"}
+	latency := []int64{3, 12, 47, 88, 132, 210, 6, 19, 340, 61}
+
+	out := make([]domain.Host, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, domain.Host{
+			IP:           net.IPv4(10, 7, 7, byte(100+i)),
+			Hostname:     names[i%len(names)],
+			LatencyMs:    latency[i%len(latency)],
+			DiscoveredAt: time.Now(),
+		})
+	}
+	return out
+}

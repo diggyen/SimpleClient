@@ -20,4 +20,25 @@ var (
 	ColorBar      = color.RGBA{R: 22, G: 33, B: 62, A: 255}    // = ColorPanel
 	ColorCursor   = color.RGBA{R: 255, G: 255, B: 100, A: 255} // #ffff64
 	ColorLatency  = color.RGBA{R: 100, G: 221, B: 100, A: 255} // = ColorSuccess
+
+	// Discovery card.
+	ColorCardHeader = color.RGBA{R: 28, G: 42, B: 78, A: 255}   // header strip, a shade above the panel
+	ColorCardShadow = color.RGBA{R: 0, G: 0, B: 0, A: 90}       // soft drop shadow behind the card
+	ColorRowHover   = color.RGBA{R: 19, G: 28, B: 54, A: 255}   // banding for alternate rows
+	ColorScrollBar  = color.RGBA{R: 62, G: 84, B: 136, A: 255}  // scrollbar thumb
+	ColorDim        = color.RGBA{R: 96, G: 104, B: 130, A: 255} // column headings, secondary text
 )
+
+// LatencyColor grades a round-trip time so the list can be scanned at a glance.
+func LatencyColor(ms int64) color.RGBA {
+	switch {
+	case ms <= 0:
+		return ColorMuted
+	case ms < 50:
+		return ColorSuccess
+	case ms < 150:
+		return ColorWarning
+	default:
+		return ColorError
+	}
+}

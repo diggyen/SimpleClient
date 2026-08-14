@@ -38,10 +38,15 @@ var order = []Lang{LangEN, LangTR}
 type Key int
 
 const (
-	HostsFound Key = iota // "%d servers found"
-	Scanning              // "Scanning..."
+	HostsFound    Key = iota // "%d servers found"
+	HostsFoundOne            // singular form; see HostCount
+	Scanning                 // "Scanning..."
 	ScanComplete
 	NoServersFound
+	SelectServer
+	ColumnServer
+	ColumnLatency
+	NoServersHint
 	KeyHints
 	ModalTitle
 	LabelUsername
@@ -65,9 +70,14 @@ type catalogue [numKeys]string
 var catalogues = map[Lang]*catalogue{
 	LangEN: {
 		HostsFound:     "%d servers found",
+		HostsFoundOne:  "%d server found",
 		Scanning:       "Scanning...",
 		ScanComplete:   "Scan complete",
 		NoServersFound: "No servers found",
+		SelectServer:   "Select a server",
+		ColumnServer:   "SERVER",
+		ColumnLatency:  "LATENCY",
+		NoServersHint:  "Nothing is listening on port 3389 in this subnet. Press F5 to scan again.",
 		KeyHints:       "↑↓ Select   Enter Connect   F5 Refresh   F2 Language",
 		ModalTitle:     "Connection Details",
 		LabelUsername:  "Username:",
@@ -84,9 +94,14 @@ var catalogues = map[Lang]*catalogue{
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
+		HostsFoundOne:  "%d sunucu bulundu",
 		Scanning:       "Taranıyor...",
 		ScanComplete:   "Tarama tamamlandı",
 		NoServersFound: "Sunucu bulunamadı",
+		SelectServer:   "Bir sunucu seçin",
+		ColumnServer:   "SUNUCU",
+		ColumnLatency:  "GECİKME",
+		NoServersHint:  "Bu ağda 3389 portunu dinleyen bir sunucu yok. Yeniden taramak için F5.",
 		KeyHints:       "↑↓ Seç   Enter Bağlan   F5 Yenile   F2 Dil",
 		ModalTitle:     "Bağlantı Bilgileri",
 		LabelUsername:  "Kullanıcı:",
@@ -180,6 +195,16 @@ func T(key Key) string {
 		return ""
 	}
 	return active.Load()[key]
+}
+
+// HostCount renders the discovered-host count with the correct plural form.
+// Plural rules belong here rather than in the UI: English needs a singular
+// form, Turkish does not.
+func HostCount(n int) string {
+	if n == 1 {
+		return Tf(HostsFoundOne, n)
+	}
+	return Tf(HostsFound, n)
 }
 
 // Tf returns the message for key formatted with args.

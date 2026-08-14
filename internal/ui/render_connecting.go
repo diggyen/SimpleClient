@@ -21,21 +21,21 @@ func renderConnecting(img *image.RGBA, state *UIState) {
 	// Dim overlay.
 	FillRectBlend(img, bounds, ColorOverlay)
 
-	// Connecting box.
-	boxW := 320
-	boxH := 80
+	// Connecting box, styled to match the discovery card and the credential
+	// dialog rather than being a plain rectangle.
+	const boxW, boxH = 380, 104
 	r := image.Rect(cx-boxW/2, cy-boxH/2, cx+boxW/2, cy+boxH/2)
+	FillRectBlend(img, r.Add(image.Pt(5, 6)), ColorCardShadow)
 	FillRect(img, r, ColorPanel)
 	DrawBorder(img, r, ColorAccent)
 
-	// Spinner + message.
+	spinner := spinnerFrames[state.SpinnerTick%len(spinnerFrames)]
+	DrawTextLarge(img, cx-TextWidth(spinner, true)/2, r.Min.Y+18, spinner, ColorAccent)
+
 	host := ""
 	if h := state.SelectedHost(); h != nil {
-		host = h.IP.String()
+		host = h.DisplayName()
 	}
 	msg := i18n.Tf(i18n.Connecting, host)
-	DrawText(img, cx-TextWidth(msg, false)/2, cy-8, msg, ColorText)
-
-	spinner := spinnerFrames[state.SpinnerTick%len(spinnerFrames)]
-	DrawText(img, cx-CharW/2, cy+10, spinner, ColorAccent)
+	DrawText(img, cx-TextWidth(msg, false)/2, r.Max.Y-30, msg, ColorText)
 }

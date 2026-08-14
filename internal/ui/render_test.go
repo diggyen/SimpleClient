@@ -18,10 +18,96 @@ func TestRenderDiscovery_Empty(t *testing.T) {
 	state := &UIState{Screen: ScreenDiscovery}
 	Render(fb, back, state, 640, 360)
 
-	// Top bar and bottom bar should be non-background-colored pixels.
-	topPx := back.RGBAAt(10, 10)
-	if topPx == ColorBG {
-		t.Fatal("top bar should not be same as background color")
+	// The host list lives on a centred card, not an edge-to-edge bar.
+	l := layoutDiscoveryFor(fb.Bounds(), len(state.Hosts))
+	// Sample the header strip between the title and the count, clear of text.
+	if got := back.RGBAAt(l.Card.Min.X+l.Card.Dx()/2, l.Card.Min.Y+4); got != ColorCardHeader {
+		t.Fatalf("card header = %v, want ColorCardHeader", got)
+	}
+	if got := back.RGBAAt(10, 10); got != ColorBG {
+		t.Fatalf("screen margin = %v, want plain background around the card", got)
+	}
+}
+
+// The card must stay centred and inside the screen at every resolution the
+// kiosk is likely to boot at.
+func TestLayoutDiscovery_CardIsCentredAndFits(t *testing.T) {
+	sizes := [][2]int{{800, 600}, {1024, 768}, {1280, 800}, {1920, 1080}, {640, 480}}
+	for _, s := range sizes {
+		screen := image.Rect(0, 0, s[0], s[1])
+		l := layoutDiscovery(screen)
+
+		if !l.Card.In(screen) {
+			t.Errorf("%dx%d: card %v is not inside the screen", s[0], s[1], l.Card)
+		}
+		if left, right := l.Card.Min.X, screen.Max.X-l.Card.Max.X; left != right {
+			t.Errorf("%dx%d: card not horizontally centred (%d left, %d right)", s[0], s[1], left, right)
+		}
+		if l.Rows < 1 {
+			t.Errorf("%dx%d: card has room for %d rows", s[0], s[1], l.Rows)
+		}
+		if !l.List.In(l.Card) {
+			t.Errorf("%dx%d: list %v escapes the card %v", s[0], s[1], l.List, l.Card)
+		}
+	}
+}
+
+// Every row the layout reports must map back to itself when clicked, otherwise
+// a click selects a different host from the one under the pointer.
+func TestLayoutDiscovery_RowHitTestRoundTrips(t *testing.T) {
+	l := layoutDiscovery(image.Rect(0, 0, 1280, 800))
+	for i := 0; i < l.Rows; i++ {
+		r := l.rowRect(i)
+		mid := r.Min.Y + r.Dy()/2
+		if got := l.rowAt(r.Min.X+5, mid); got != i {
+			t.Errorf("click in row %d resolved to row %d", i, got)
+		}
+	}
+	if got := l.rowAt(l.List.Min.X+5, l.List.Min.Y-5); got != -1 {
+		t.Errorf("click above the list resolved to row %d", got)
+	}
+	if got := l.rowAt(l.List.Min.X+5, l.List.Max.Y+5); got != -1 {
+		t.Errorf("click below the list resolved to row %d", got)
+	}
+	if got := l.rowAt(l.Card.Min.X-5, l.List.Min.Y+5); got != -1 {
+		t.Errorf("click left of the card resolved to row %d", got)
+	}
+}
+
+// Latency is graded by colour so a list can be scanned without reading numbers.
+func TestLatencyColor(t *testing.T) {
+	if LatencyColor(0) != ColorMuted {
+		t.Error("an unmeasured latency should be muted")
+	}
+	if LatencyColor(10) != ColorSuccess {
+		t.Error("a fast host should be green")
+	}
+	if LatencyColor(100) != ColorWarning {
+		t.Error("a middling host should be amber")
+	}
+	if LatencyColor(400) != ColorError {
+		t.Error("a slow host should be red")
+	}
+}
+
+func TestWrapText(t *testing.T) {
+	got := wrapText("one two three four five", 9)
+	want := []string{"one two", "three", "four five"}
+	if len(got) != len(want) {
+		t.Fatalf("wrapText produced %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("wrapText produced %q, want %q", got, want)
+		}
+	}
+	for _, line := range got {
+		if len([]rune(line)) > 9 {
+			t.Errorf("line %q exceeds the width limit", line)
+		}
+	}
+	if wrapText("anything", 0) != nil {
+		t.Error("a non-positive width should produce no lines")
 	}
 }
 
@@ -39,10 +125,11 @@ func TestRenderDiscovery_ThreeHosts(t *testing.T) {
 	Render(fb, back, state, 0, 0)
 
 	// The list area should have non-bg pixels (host rows rendered).
-	listY := barH + 10
+	l := layoutDiscoveryFor(fb.Bounds(), len(state.Hosts))
+	row := l.rowRect(0)
 	hasContent := false
-	for x := 10; x < 300; x++ {
-		if back.RGBAAt(x, listY) != ColorBG {
+	for x := row.Min.X; x < row.Max.X; x++ {
+		if back.RGBAAt(x, row.Min.Y+row.Dy()/2) != ColorBG {
 			hasContent = true
 			break
 		}
@@ -64,11 +151,14 @@ func TestRenderDiscovery_SelectedRow(t *testing.T) {
 	}
 	renderDiscovery(back, state)
 
-	// Row 0 at listTop+4 should be highlighted (ColorSelected or border).
-	rowY := barH + 2 + 4
-	rowPx := back.RGBAAt(10, rowY)
-	if rowPx == ColorBG {
-		t.Fatal("selected row should not be plain background color")
+	// The selected row carries the accent bar on its leading edge.
+	l := layoutDiscoveryFor(fb.Bounds(), len(state.Hosts))
+	row := l.rowRect(0)
+	if got := back.RGBAAt(row.Min.X, row.Min.Y+row.Dy()/2); got != ColorAccent {
+		t.Fatalf("selected row leading edge = %v, want the accent bar", got)
+	}
+	if got := back.RGBAAt(row.Min.X+20, row.Min.Y+1); got != ColorSelected {
+		t.Fatalf("selected row background = %v, want ColorSelected", got)
 	}
 }
 
@@ -200,12 +290,95 @@ func TestRenderDiscovery_BottomBarNoOverlap(t *testing.T) {
 			back := image.NewRGBA(fb.Bounds())
 			renderDiscovery(back, &UIState{Screen: ScreenDiscovery})
 
-			hintsEnd := padding + TextWidth(i18n.T(i18n.KeyHints), false)
-			pbStart := w - progressBarW - padding
-			if hintsEnd >= pbStart {
-				t.Errorf("lang=%s w=%d: key hints (end %d) run into the progress bar (start %d)",
-					lang, w, hintsEnd, pbStart)
+			hintsW := TextWidth(i18n.T(i18n.KeyHints), false)
+			if hintsW > w-2*padding {
+				t.Errorf("lang=%s w=%d: key hints (%dpx) do not fit on screen", lang, w, hintsW)
 			}
 		}
+	}
+}
+
+// The card grows with the list instead of leaving a mostly empty panel, but
+// never beyond what fits — and once it is full the layout must match the
+// fixed-size one Run uses for scrolling, or clicks and selection drift apart.
+func TestLayoutDiscovery_CardGrowsWithTheList(t *testing.T) {
+	screen := image.Rect(0, 0, 1280, 800)
+	full := layoutDiscovery(screen)
+
+	short := layoutDiscoveryFor(screen, 3)
+	if short.Rows >= full.Rows {
+		t.Errorf("a 3-host card shows %d rows, the full card %d — it should be smaller",
+			short.Rows, full.Rows)
+	}
+	if short.Card.Dy() >= full.Card.Dy() {
+		t.Error("a short list should produce a shorter card")
+	}
+
+	long := layoutDiscoveryFor(screen, 500)
+	if long != full {
+		t.Error("a list longer than the screen must use the same layout as Run's")
+	}
+}
+
+// --- Credential dialog ---
+
+// The dialog is centred and its buttons hit-test where they are drawn.
+func TestLayoutModal_CentredAndHitTestable(t *testing.T) {
+	for _, s := range [][2]int{{800, 600}, {1024, 768}, {1280, 800}} {
+		screen := image.Rect(0, 0, s[0], s[1])
+		l := layoutModal(screen)
+
+		if !l.Box.In(screen) {
+			t.Errorf("%dx%d: dialog %v is not inside the screen", s[0], s[1], l.Box)
+		}
+		if left, right := l.Box.Min.X, screen.Max.X-l.Box.Max.X; left != right {
+			t.Errorf("%dx%d: dialog not horizontally centred", s[0], s[1])
+		}
+		if l.Connect.Overlaps(l.Cancel) {
+			t.Errorf("%dx%d: the buttons overlap", s[0], s[1])
+		}
+		for i, f := range l.Fields {
+			if !f.In(l.Box) {
+				t.Errorf("%dx%d: field %d escapes the dialog", s[0], s[1], i)
+			}
+			if f.Overlaps(l.Connect) || f.Overlaps(l.Cancel) {
+				t.Errorf("%dx%d: field %d overlaps the buttons", s[0], s[1], i)
+			}
+		}
+	}
+}
+
+// Clicking a field focuses it; clicking Cancel closes the dialog.
+func TestModalClick_FocusesFieldAndCancels(t *testing.T) {
+	fb := framebuffer.NewMock(1280, 800)
+	l := layoutModal(fb.Bounds())
+
+	state := &UIState{Screen: ScreenModal}
+	pwd := l.Fields[1]
+	handleMouseClick(pwd.Min.X+10, pwd.Min.Y+5, state, fb, nil)
+	if state.Modal.FocusIdx != 1 {
+		t.Fatalf("clicking the password field set focus to %d, want 1", state.Modal.FocusIdx)
+	}
+
+	handleMouseClick(l.Cancel.Min.X+5, l.Cancel.Min.Y+5, state, fb, nil)
+	if state.Screen != ScreenDiscovery {
+		t.Fatal("clicking Cancel should return to the host list")
+	}
+}
+
+// The dialog names the host it is about to connect to.
+func TestRenderModal_ShowsSelectedHost(t *testing.T) {
+	fb := framebuffer.NewMock(1280, 800)
+	withHost := image.NewRGBA(fb.Bounds())
+	withoutHost := image.NewRGBA(fb.Bounds())
+
+	renderModal(withHost, &UIState{
+		Screen: ScreenModal,
+		Hosts:  []domain.Host{{IP: net.ParseIP("10.0.0.9"), Hostname: "veeam-2"}},
+	})
+	renderModal(withoutHost, &UIState{Screen: ScreenModal})
+
+	if bytes.Equal(withHost.Pix, withoutHost.Pix) {
+		t.Fatal("the dialog should name the selected host in its header")
 	}
 }

@@ -97,3 +97,115 @@ func TestFrameWriter_NilFrameIsIgnored(t *testing.T) {
 	fw := &FrameWriter{FB: framebuffer.NewMock(100, 100)}
 	fw.Write(nil)
 }
+
+// --- Pointer ---
+
+// RDP makes the client responsible for the pointer: the server never paints it
+// into the screen updates. Without this the remote desktop has no cursor at all.
+func TestFrameWriter_MoveCursorPaintsPointer(t *testing.T) {
+	fb := framebuffer.NewMock(200, 100)
+	fw := &FrameWriter{FB: fb}
+
+	fw.Write(tile(image.Rect(0, 0, 200, 100), color.RGBA{R: 10, G: 10, B: 10, A: 255}))
+	fw.MoveCursor(100, 50)
+
+	if got := fb.Img.RGBAAt(100, 50); got != cursorDotColor {
+		t.Errorf("cursor centre = %v, want the pointer dot", got)
+	}
+	if got := fb.Img.RGBAAt(100-cursorArm, 50); got != cursorColor {
+		t.Errorf("cursor left arm = %v, want the pointer colour", got)
+	}
+	if got := fb.Img.RGBAAt(100, 50-cursorArm); got != cursorColor {
+		t.Errorf("cursor top arm = %v, want the pointer colour", got)
+	}
+}
+
+// Moving must restore the desktop underneath, otherwise the pointer smears a
+// trail across the session.
+func TestFrameWriter_MoveCursorLeavesNoTrail(t *testing.T) {
+	fb := framebuffer.NewMock(200, 100)
+	fw := &FrameWriter{FB: fb}
+
+	desktop := color.RGBA{R: 10, G: 20, B: 30, A: 255}
+	fw.Write(tile(image.Rect(0, 0, 200, 100), desktop))
+
+	fw.MoveCursor(50, 50)
+	fw.MoveCursor(150, 50)
+
+	if got := fb.Img.RGBAAt(50, 50); got != desktop {
+		t.Errorf("old cursor position = %v, want the desktop restored", got)
+	}
+	if got := fb.Img.RGBAAt(150, 50); got != cursorDotColor {
+		t.Errorf("new cursor position = %v, want the pointer", got)
+	}
+}
+
+// A screen update covering the pointer paints over it; it has to come back.
+func TestFrameWriter_TileOverPointerRedrawsIt(t *testing.T) {
+	fb := framebuffer.NewMock(200, 100)
+	fw := &FrameWriter{FB: fb}
+
+	fw.Write(tile(image.Rect(0, 0, 200, 100), color.RGBA{R: 10, G: 10, B: 10, A: 255}))
+	fw.MoveCursor(100, 50)
+
+	// A tile landing right on top of the pointer.
+	fw.Write(tile(image.Rect(90, 40, 110, 60), color.RGBA{B: 200, A: 255}))
+
+	if got := fb.Img.RGBAAt(100, 50); got != cursorDotColor {
+		t.Errorf("cursor = %v, want it repainted over the new tile", got)
+	}
+}
+
+// A tile elsewhere must not disturb the pointer.
+func TestFrameWriter_UnrelatedTileLeavesPointerAlone(t *testing.T) {
+	fb := framebuffer.NewMock(200, 100)
+	fw := &FrameWriter{FB: fb}
+
+	fw.Write(tile(image.Rect(0, 0, 200, 100), color.RGBA{R: 10, G: 10, B: 10, A: 255}))
+	fw.MoveCursor(100, 50)
+	fw.Write(tile(image.Rect(0, 0, 20, 20), color.RGBA{G: 200, A: 255}))
+
+	if got := fb.Img.RGBAAt(100, 50); got != cursorDotColor {
+		t.Errorf("cursor = %v, want it untouched", got)
+	}
+}
+
+func TestFrameWriter_HideCursorRestoresDesktop(t *testing.T) {
+	fb := framebuffer.NewMock(200, 100)
+	fw := &FrameWriter{FB: fb}
+
+	desktop := color.RGBA{R: 10, G: 20, B: 30, A: 255}
+	fw.Write(tile(image.Rect(0, 0, 200, 100), desktop))
+	fw.MoveCursor(100, 50)
+	fw.HideCursor()
+
+	if got := fb.Img.RGBAAt(100, 50); got != desktop {
+		t.Errorf("after HideCursor = %v, want the desktop restored", got)
+	}
+}
+
+// The pointer is clipped at the screen edge rather than wrapping or panicking.
+func TestFrameWriter_CursorAtEdge(t *testing.T) {
+	fb := framebuffer.NewMock(100, 100)
+	fw := &FrameWriter{FB: fb}
+
+	fw.Write(tile(image.Rect(0, 0, 100, 100), color.RGBA{R: 10, G: 10, B: 10, A: 255}))
+	fw.MoveCursor(0, 0)
+	fw.MoveCursor(99, 99)
+
+	if got := fb.Img.RGBAAt(99, 99); got != cursorDotColor {
+		t.Errorf("cursor at the bottom-right = %v, want the pointer", got)
+	}
+}
+
+// MoveCursor before any tile has arrived must still show a pointer.
+func TestFrameWriter_CursorBeforeFirstTile(t *testing.T) {
+	fb := framebuffer.NewMock(100, 100)
+	fw := &FrameWriter{FB: fb}
+
+	fw.MoveCursor(50, 50)
+
+	if got := fb.Img.RGBAAt(50, 50); got != cursorDotColor {
+		t.Errorf("cursor = %v, want it drawn even with no canvas yet", got)
+	}
+}
