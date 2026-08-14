@@ -1,77 +1,106 @@
-# simpleclient build container
-# Produces a statically linked binary + bootable ISO
+# SimpleClient build container — produces a bootable hybrid BIOS/UEFI ISO.
 #
-# NOTE: grdp/plugin uses CGo (import "C"), so we need CGO_ENABLED=1
-# with a cross-compiler for amd64 on ARM hosts.
+#   docker build --target export --output type=local,dest=dist -f build/Dockerfile .
+#
+# The kernel comes from Alpine's linux-lts package rather than being compiled
+# from source: a source build costs 30-40 minutes of CI time and only covers the
+# hardware whose drivers were configured in, whereas the distro kernel ships a
+# broad module set that actually boots on real machines.
+#
+# The Go binary is fully static (CGO_ENABLED=0). That works because vendor/
+# carries a patch removing a vestigial `import "C"` from grdp/plugin — see
+# build/patches/.
 
+ARG ALPINE_VERSION=3.20
+
+# ── Go binary ─────────────────────────────────────────────────────────────────
 FROM --platform=linux/amd64 golang:1.23-alpine AS go-builder
 
-RUN apk add --no-cache gcc musl-dev
-
 WORKDIR /src
+
+# vendor/ is committed, so there is nothing to download and no network needed.
 COPY go.mod go.sum ./
-RUN go mod download
+COPY vendor/ ./vendor/
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 
-COPY . .
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-    go build -ldflags '-s -w -extldflags "-static"' \
-    -o /out/simpleclient ./cmd/simpleclient
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -mod=vendor -ldflags '-s -w' -o /out/simpleclient ./cmd/simpleclient
 
-# ── Kernel builder ────────────────────────────────────────────────────────────
-FROM --platform=linux/amd64 debian:bookworm-slim AS kernel-builder
+# ── Kernel + initramfs ────────────────────────────────────────────────────────
+FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS rootfs-builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential bc bison flex libelf-dev libssl-dev \
-    perl python3 xz-utils wget ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-ARG KERNEL_VERSION=6.6.37
-RUN wget -q "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz" \
-    && tar xf linux-${KERNEL_VERSION}.tar.xz
-
-COPY build/kernel.config /linux-${KERNEL_VERSION}/.config
-
-RUN cd linux-${KERNEL_VERSION} \
-    && make olddefconfig \
-    && make -j$(nproc) bzImage \
-    && ls -lh arch/x86/boot/bzImage
-
-RUN mkdir -p /out && cp /linux-${KERNEL_VERSION}/arch/x86/boot/bzImage /out/vmlinuz
-
-# ── Initramfs builder ─────────────────────────────────────────────────────────
-FROM --platform=linux/amd64 alpine:3.20 AS initramfs-builder
-
-RUN apk add --no-cache busybox-static cpio gzip
+RUN apk add --no-cache linux-lts busybox-static kmod cpio gzip
 
 COPY --from=go-builder /out/simpleclient /rootfs/sbin/simpleclient
 COPY build/init /rootfs/init
+COPY build/udhcpc-default.script /rootfs/usr/share/udhcpc/default.script
 
-RUN chmod +x /rootfs/init /rootfs/sbin/simpleclient \
-    && mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/tmp /rootfs/etc /rootfs/bin
+RUN mkdir -p /out \
+ && cp /boot/vmlinuz-lts /out/vmlinuz \
+ && mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/tmp /rootfs/etc /rootfs/bin \
+ && chmod +x /rootfs/init /rootfs/sbin/simpleclient /rootfs/usr/share/udhcpc/default.script
 
-# Copy busybox. Alpine 3.20 installs to /bin/busybox for the static variant.
-RUN BUSYBOX=$(command -v busybox || echo /bin/busybox) \
-    && cp "$BUSYBOX" /rootfs/bin/busybox \
-    && /rootfs/bin/busybox --install -s /rootfs/bin
+# Busybox provides every userspace tool /init needs (ip, udhcpc, modprobe, ...).
+#
+# The applet symlinks are created by hand rather than with `busybox --install -s`:
+# that resolves the target from /proc/self/exe, so it would point every applet at
+# /rootfs/bin/busybox — a path that does not exist once the initramfs is the root
+# filesystem. The kernel then fails to exec /init with ENOENT because it cannot
+# find the #!/bin/sh interpreter, and panics with "No working init found".
+RUN cp /bin/busybox.static /rootfs/bin/busybox \
+ && for applet in $(/rootfs/bin/busybox --list); do \
+        ln -sf /bin/busybox "/rootfs/bin/$applet"; \
+    done \
+ && test -L /rootfs/bin/sh \
+ && test "$(readlink /rootfs/bin/sh)" = "/bin/busybox"
 
-# Build cpio.gz
-RUN mkdir -p /out && cd /rootfs \
-    && find . | cpio -oH newc | gzip > /out/initramfs.cpio.gz
+# Alpine's kernel builds most drivers as modules, so the initramfs has to carry
+# the ones /init loads. Copying the whole tree would add ~200 MB; these subtrees
+# cover NIC, framebuffer/DRM, input and HID/USB, which is everything a
+# framebuffer kiosk touches.
+#
+# kernel/net is not optional: af_packet lives there, and busybox udhcpc opens an
+# AF_PACKET socket to send its DHCP discover. Without it every boot silently
+# falls back to a link-local address and the network scan finds nothing.
+RUN KVER=$(basename /lib/modules/*) \
+ && echo "kernel: $KVER" \
+ && mkdir -p "/rootfs/lib/modules/$KVER/kernel/drivers" \
+ && for d in net gpu input hid usb virtio; do \
+        if [ -d "/lib/modules/$KVER/kernel/drivers/$d" ]; then \
+            cp -a "/lib/modules/$KVER/kernel/drivers/$d" "/rootfs/lib/modules/$KVER/kernel/drivers/"; \
+        fi; \
+    done \
+ && cp -a "/lib/modules/$KVER/kernel/net" "/rootfs/lib/modules/$KVER/kernel/" \
+ && for f in modules.builtin modules.builtin.modinfo modules.order; do \
+        if [ -f "/lib/modules/$KVER/$f" ]; then \
+            cp -a "/lib/modules/$KVER/$f" "/rootfs/lib/modules/$KVER/"; \
+        fi; \
+    done \
+ && depmod -b /rootfs "$KVER" \
+ && du -sh /rootfs/lib/modules
 
-# ── ISO builder ───────────────────────────────────────────────────────────────
-FROM --platform=linux/amd64 alpine:3.20 AS iso-builder
+RUN cd /rootfs && find . | cpio -oH newc | gzip -9 > /out/initramfs.cpio.gz \
+ && ls -lh /out/initramfs.cpio.gz
 
-RUN apk add --no-cache grub grub-efi xorriso mtools dosfstools
+# ── ISO ───────────────────────────────────────────────────────────────────────
+FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS iso-builder
 
-COPY --from=kernel-builder /out/vmlinuz /iso/boot/vmlinuz
-COPY --from=initramfs-builder /out/initramfs.cpio.gz /iso/boot/initramfs.cpio.gz
+# grub-bios is what makes the image bootable on legacy/CSM machines; grub-efi
+# covers UEFI. grub-mkrescue emits a hybrid image when both are installed.
+RUN apk add --no-cache grub grub-bios grub-efi xorriso mtools dosfstools
+
+COPY --from=rootfs-builder /out/vmlinuz /iso/boot/vmlinuz
+COPY --from=rootfs-builder /out/initramfs.cpio.gz /iso/boot/initramfs.cpio.gz
 COPY build/grub.cfg /iso/boot/grub/grub.cfg
 
-RUN mkdir -p /out && grub-mkrescue -o /out/simpleclient.iso /iso \
-    -- -volid SIMPLECLIENT
+RUN mkdir -p /out \
+ && grub-mkrescue -o /out/simpleclient.iso /iso -- -volid SIMPLECLIENT \
+ && ls -lh /out/simpleclient.iso
 
-# ── Final export stage ────────────────────────────────────────────────────────
+# ── Export ────────────────────────────────────────────────────────────────────
 FROM scratch AS export
 COPY --from=go-builder /out/simpleclient /
-COPY --from=initramfs-builder /out/initramfs.cpio.gz /
+COPY --from=rootfs-builder /out/initramfs.cpio.gz /
+COPY --from=rootfs-builder /out/vmlinuz /
 COPY --from=iso-builder /out/simpleclient.iso /

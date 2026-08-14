@@ -1,27 +1,98 @@
 #!/bin/sh
-# SimpleClient init — minimal kiosk init script
-set -e
+# SimpleClient init — minimal kiosk init, PID 1 inside the initramfs.
+#
+# Deliberately not "set -e": this is PID 1. If any single step fails the kernel
+# panics on exit, so every step has to be allowed to fail and be reported
+# instead. Progress goes to /dev/console, which grub.cfg points at the serial
+# port so it never gets painted over the kiosk UI.
 
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
-mount -t devtmpfs devtmpfs /dev
+log() { echo "[simpleclient-init] $*" > /dev/console 2>/dev/null; }
 
-# Create required device nodes if devtmpfs is not available.
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sysfs /sys 2>/dev/null
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+
 mkdir -p /dev/pts /dev/shm
-mount -t devpts devpts /dev/pts 2>/dev/null || true
+mount -t devpts devpts /dev/pts 2>/dev/null
 
-# Silence kernel log noise.
-echo 0 > /proc/sys/kernel/printk
+# Silence kernel log noise so it does not scribble over the UI.
+echo 0 > /proc/sys/kernel/printk 2>/dev/null
 
-# Bring up network.
-ip link set lo up
-ip link set eth0 up 2>/dev/null || ip link set enp0s3 up 2>/dev/null || true
-udhcpc -i eth0 -n -q 2>/dev/null || \
-udhcpc -i enp0s3 -n -q 2>/dev/null || \
-ip addr add 169.254.100.100/16 dev eth0 2>/dev/null || true
+# ── Kernel modules ────────────────────────────────────────────────────────────
+# Alpine's kernel builds nearly everything as a module, so nothing below is
+# optional:
+#   evdev      creates /dev/input/event*; without it the keyboard is invisible
+#              to userspace and the kiosk cannot be operated at all
+#   af_packet  udhcpc opens an AF_PACKET socket to send its DHCP discover
+#   simpledrm  turns the framebuffer GRUB hands over into /dev/fb0
+for m in evdev af_packet simpledrm bochs virtio_pci virtio_net virtio_gpu \
+         e1000 e1000e r8169 igb igc tg3 atkbd psmouse usbhid hid_generic \
+         xhci_pci ehci_pci; do
+    modprobe "$m" 2>/dev/null
+done
 
-# Kiosk loop: restart SimpleClient on crash.
+# ── Display ───────────────────────────────────────────────────────────────────
+if [ ! -e /dev/fb0 ]; then
+    log "ERROR: /dev/fb0 missing after module load"
+    log "drm: $(ls /sys/class/drm 2>/dev/null | tr '\n' ' ')"
+else
+    # The console starts out blanked on some firmware; anything written to the
+    # framebuffer then goes nowhere visible. Unblank before handing over.
+    echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null
+    log "fb0: $(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null) bpp=$(cat /sys/class/graphics/fb0/bits_per_pixel 2>/dev/null) driver=$(cat /sys/class/graphics/fb0/name 2>/dev/null)"
+fi
+
+if [ -z "$(ls /dev/input/event* 2>/dev/null)" ]; then
+    log "WARNING: no /dev/input/event* — keyboard will not work"
+fi
+
+# ── Kernel command line options ───────────────────────────────────────────────
+# lang=tr on the GRUB command line selects the startup UI language. F2 still
+# toggles it at runtime.
+LANG_ARG=""
+for arg in $(cat /proc/cmdline 2>/dev/null); do
+    case "$arg" in
+        lang=*) LANG_ARG="-lang=${arg#lang=}" ;;
+    esac
+done
+
+# ── Network ───────────────────────────────────────────────────────────────────
+ip link set lo up 2>/dev/null
+
+# Kernel is booted with net.ifnames=0 (see grub.cfg) so interfaces are ethN,
+# but fall back to whatever non-loopback interfaces exist.
+IFACES=$(ls /sys/class/net 2>/dev/null | grep -v '^lo$')
+
+for i in $IFACES; do
+    ip link set "$i" up 2>/dev/null
+done
+
+GOT_IP=0
+for i in $IFACES; do
+    out=$(udhcpc -i "$i" -n -q -t 5 -T 3 2>&1)
+    if [ $? -eq 0 ]; then
+        GOT_IP=1
+        log "DHCP on $i: $(ip -4 addr show "$i" | grep -o 'inet [0-9./]*')"
+        break
+    fi
+    log "DHCP failed on $i: $(echo "$out" | tr '\n' '|')"
+done
+
+if [ "$GOT_IP" = "0" ]; then
+    # No DHCP server: fall back to link-local so the scanner still has a subnet
+    # to work with on a flat, unmanaged network.
+    for i in $IFACES; do
+        if ip addr add 169.254.100.100/16 dev "$i" 2>/dev/null; then
+            log "no DHCP; using link-local on $i"
+            break
+        fi
+    done
+fi
+
+# ── Kiosk loop ────────────────────────────────────────────────────────────────
+# Restart simpleclient if it exits, so a crash does not leave a blank screen.
 while true; do
-    /sbin/simpleclient
+    /sbin/simpleclient $LANG_ARG
+    log "simpleclient exited ($?); restarting in 2s"
     sleep 2
 done

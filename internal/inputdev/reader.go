@@ -34,11 +34,11 @@ type InputEvent struct {
 
 // linuxInputEvent mirrors the 24-byte Linux struct input_event.
 type linuxInputEvent struct {
-	Sec     int64
-	Usec    int64
-	Type    uint16
-	Code    uint16
-	Value   int32
+	Sec   int64
+	Usec  int64
+	Type  uint16
+	Code  uint16
+	Value int32
 }
 
 const (

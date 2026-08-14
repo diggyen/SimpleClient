@@ -30,7 +30,10 @@ func DetectCIDR() (string, error) {
 			case *net.IPAddr:
 				ip = v.IP
 			}
-			if ip == nil || ip.IsLoopback() {
+			// ipnet is nil for *net.IPAddr entries, which carry no mask and so
+			// cannot yield a CIDR block. Skipping them keeps this from
+			// panicking on the kiosk's very first call.
+			if ip == nil || ipnet == nil || ip.IsLoopback() {
 				continue
 			}
 			if ip4 := ip.To4(); ip4 != nil {

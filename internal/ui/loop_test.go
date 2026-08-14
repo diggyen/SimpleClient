@@ -4,11 +4,15 @@ import (
 	"context"
 	"image"
 	"net"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/diggyen/SimpleClient/internal/config"
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
+	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 )
 
@@ -241,22 +245,101 @@ func TestRenderConnecting_NonEmpty(t *testing.T) {
 
 func TestRdpErrToMessage_Timeout(t *testing.T) {
 	msg := rdpErrToMessage(errTest("connection timeout after 10s"))
-	if msg != "Zaman aşımı: sunucuya ulaşılamıyor" {
-		t.Fatalf("expected Turkish timeout message, got %q", msg)
+	if msg != "Timeout: server unreachable" {
+		t.Fatalf("expected English timeout message, got %q", msg)
 	}
 }
 
 func TestRdpErrToMessage_Refused(t *testing.T) {
 	msg := rdpErrToMessage(errTest("connection refused"))
-	if msg != "Bağlantı reddedildi" {
-		t.Fatalf("expected Turkish refused message, got %q", msg)
+	if msg != "Connection refused" {
+		t.Fatalf("expected English refused message, got %q", msg)
 	}
 }
 
 func TestRdpErrToMessage_Auth(t *testing.T) {
 	msg := rdpErrToMessage(errTest("logon failure: bad credentials"))
-	if msg != "Kimlik doğrulama başarısız" {
-		t.Fatalf("expected Turkish auth message, got %q", msg)
+	if msg != "Authentication failed" {
+		t.Fatalf("expected English auth message, got %q", msg)
+	}
+}
+
+// Error classification must survive uppercase/mixed-case error text from the
+// RDP stack, which is why rdpErrToMessage lowercases before matching.
+func TestRdpErrToMessage_CaseInsensitive(t *testing.T) {
+	if msg := rdpErrToMessage(errTest("RDP connect 10.0.0.1: Connection REFUSED")); msg != "Connection refused" {
+		t.Fatalf("mixed-case refusal not classified, got %q", msg)
+	}
+}
+
+func TestRdpErrToMessage_Localised(t *testing.T) {
+	i18n.Set(i18n.LangTR)
+	t.Cleanup(func() { i18n.Set(i18n.Default) })
+
+	if msg := rdpErrToMessage(errTest("connection refused")); msg != "Bağlantı reddedildi" {
+		t.Fatalf("expected Turkish refused message, got %q", msg)
+	}
+}
+
+// Unclassified errors are passed through, truncated. The truncation must not
+// split a multi-byte rune.
+func TestRdpErrToMessage_TruncatesOnRuneBoundary(t *testing.T) {
+	long := strings.Repeat("ü", 80)
+	msg := rdpErrToMessage(errTest(long))
+	if !utf8.ValidString(msg) {
+		t.Fatalf("truncated message is not valid UTF-8: %q", msg)
+	}
+	if !strings.HasSuffix(msg, "...") {
+		t.Fatalf("expected truncated message to end in ellipsis, got %q", msg)
+	}
+}
+
+func TestLanguageToggle_F2(t *testing.T) {
+	t.Cleanup(func() { i18n.Set(i18n.Default) })
+
+	state := &UIState{Screen: ScreenDiscovery}
+	ctx := context.Background()
+	cancel := context.CancelFunc(func() {})
+	var scanCh <-chan domain.ScanEvent
+	ev := inputdev.InputEvent{Type: inputdev.EvKey, KeyCode: inputdev.KeyF2, Pressed: true}
+
+	handleInput(ev, state, &mockScanner{}, config.Config{}, framebuffer.NewMock(1280, 720),
+		&ctx, &cancel, &scanCh, nil, 20)
+	if i18n.Current() != i18n.LangTR {
+		t.Fatalf("F2 should switch to Turkish, got %q", i18n.Current())
+	}
+
+	handleInput(ev, state, &mockScanner{}, config.Config{}, framebuffer.NewMock(1280, 720),
+		&ctx, &cancel, &scanCh, nil, 20)
+	if i18n.Current() != i18n.LangEN {
+		t.Fatalf("second F2 should switch back to English, got %q", i18n.Current())
+	}
+
+	// F2 must not leak into the host list navigation.
+	if state.Screen != ScreenDiscovery {
+		t.Fatalf("F2 should not change screen, got %v", state.Screen)
+	}
+}
+
+// F2 also toggles while the credential modal is open, and must not be typed
+// into the focused text field.
+func TestLanguageToggle_F2_InModal(t *testing.T) {
+	t.Cleanup(func() { i18n.Set(i18n.Default) })
+
+	state := &UIState{Screen: ScreenModal, Modal: ModalState{FocusIdx: 0}}
+	ctx := context.Background()
+	cancel := context.CancelFunc(func() {})
+	var scanCh <-chan domain.ScanEvent
+
+	handleInput(inputdev.InputEvent{Type: inputdev.EvKey, KeyCode: inputdev.KeyF2, Pressed: true},
+		state, &mockScanner{}, config.Config{}, framebuffer.NewMock(1280, 720),
+		&ctx, &cancel, &scanCh, nil, 20)
+
+	if i18n.Current() != i18n.LangTR {
+		t.Fatalf("F2 in modal should switch language, got %q", i18n.Current())
+	}
+	if state.Modal.Fields[0] != "" {
+		t.Fatalf("F2 should not be typed into the field, got %q", state.Modal.Fields[0])
 	}
 }
 

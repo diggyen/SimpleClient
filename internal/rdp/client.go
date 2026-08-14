@@ -180,7 +180,7 @@ func bitmapToImage(bm client.Bitmap) image.Image {
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			// Bitmap is stored bottom-up with BGR byte order.
-			off := ((h - 1 - y) * w + x) * bpp
+			off := ((h-1-y)*w + x) * bpp
 			if off+bpp > len(data) {
 				break
 			}
@@ -195,7 +195,7 @@ func bitmapToImage(bm client.Bitmap) image.Image {
 				hi := data[off+1]
 				v := uint16(hi)<<8 | uint16(lo)
 				r2 = uint8((v >> 11) << 3)
-				g2 = uint8((v>>5&0x3f) << 2)
+				g2 = uint8((v >> 5 & 0x3f) << 2)
 				b2 = uint8((v & 0x1f) << 3)
 			case 1:
 				r2 = data[off]

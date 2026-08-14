@@ -17,9 +17,9 @@ func FillRect(img *image.RGBA, r image.Rectangle, c color.RGBA) {
 
 // DrawBorder draws a 1-pixel border around rect r.
 func DrawBorder(img *image.RGBA, r image.Rectangle, c color.RGBA) {
-	DrawHLine(img, r.Min.X, r.Max.X, r.Min.Y, c) // top
+	DrawHLine(img, r.Min.X, r.Max.X, r.Min.Y, c)   // top
 	DrawHLine(img, r.Min.X, r.Max.X, r.Max.Y-1, c) // bottom
-	DrawVLine(img, r.Min.X, r.Min.Y, r.Max.Y, c) // left
+	DrawVLine(img, r.Min.X, r.Min.Y, r.Max.Y, c)   // left
 	DrawVLine(img, r.Max.X-1, r.Min.Y, r.Max.Y, c) // right
 }
 

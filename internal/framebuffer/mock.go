@@ -21,10 +21,10 @@ func NewMock(width, height int) *MockFB {
 	}
 }
 
-func (m *MockFB) Bounds() image.Rectangle        { return m.Img.Bounds() }
-func (m *MockFB) Width() int                     { return m.width }
-func (m *MockFB) Height() int                    { return m.height }
-func (m *MockFB) Blit(img *image.RGBA)           { copy(m.Img.Pix, img.Pix) }
+func (m *MockFB) Bounds() image.Rectangle { return m.Img.Bounds() }
+func (m *MockFB) Width() int              { return m.width }
+func (m *MockFB) Height() int             { return m.height }
+func (m *MockFB) Blit(img *image.RGBA)    { copy(m.Img.Pix, img.Pix) }
 func (m *MockFB) BlitRect(img *image.RGBA, r image.Rectangle) {
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
@@ -33,4 +33,4 @@ func (m *MockFB) BlitRect(img *image.RGBA, r image.Rectangle) {
 	}
 }
 func (m *MockFB) WritePixel(x, y int, c color.RGBA) { m.Img.SetRGBA(x, y, c) }
-func (m *MockFB) Close() error                       { return nil }
+func (m *MockFB) Close() error                      { return nil }

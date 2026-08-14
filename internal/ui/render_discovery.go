@@ -3,12 +3,18 @@ package ui
 import (
 	"fmt"
 	"image"
+	"strings"
+
+	"github.com/diggyen/SimpleClient/internal/i18n"
 )
 
 const (
 	barH    = 28 // top/bottom bar height in pixels
 	rowH    = 22 // height per host row
 	padding = 8  // general padding
+
+	progressBarW = 194 // width of the scan progress bar in the bottom bar
+	gitURL       = "github.com/diggyen/SimpleClient"
 )
 
 // renderDiscovery draws the main host-discovery screen.
@@ -29,15 +35,20 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 	DrawTextLarge(img, padding, 4, "SimpleClient", ColorAccent)
 
 	// Host count.
-	hostCount := fmt.Sprintf("%d sunucu bulundu", len(state.Hosts))
+	hostCount := i18n.Tf(i18n.HostsFound, len(state.Hosts))
 	DrawText(img, w/2-TextWidth(hostCount, false)/2, 8, hostCount, ColorText)
 
-	// Scan status (right side).
-	scanStatus := "Taranıyor..."
+	// Active language badge, far right.
+	langBadge := "[" + strings.ToUpper(string(i18n.Current())) + "]"
+	langX := w - TextWidth(langBadge, false) - padding
+	DrawText(img, langX, 8, langBadge, ColorAccent)
+
+	// Scan status, left of the language badge.
+	scanStatus := i18n.T(i18n.Scanning)
 	if state.ScanDone {
-		scanStatus = "Tarama tamamlandı"
+		scanStatus = i18n.T(i18n.ScanComplete)
 	}
-	DrawText(img, w-TextWidth(scanStatus, false)-padding, 8, scanStatus, ColorMuted)
+	DrawText(img, langX-TextWidth(scanStatus, false)-padding, 8, scanStatus, ColorMuted)
 
 	// ── Host list area ───────────────────────────────────────────────────────
 	listTop := barH + 2
@@ -48,9 +59,9 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 	visible := state.VisibleHosts(maxRows)
 
 	if len(visible) == 0 {
-		msg := "Sunucu bulunamadı"
+		msg := i18n.T(i18n.NoServersFound)
 		if !state.ScanDone {
-			msg = "Taranıyor..."
+			msg = i18n.T(i18n.Scanning)
 		}
 		DrawTextLarge(img, w/2-TextWidth(msg, true)/2, h/2-13, msg, ColorMuted)
 	} else {
@@ -96,16 +107,22 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 	DrawHLine(img, 0, w, botTop, ColorBorder)
 
 	// Key hints (left).
-	hints := "↑↓ Seç   Enter Bağlan   F5 Yenile   Q Çıkış"
+	hints := i18n.T(i18n.KeyHints)
+	hintsEnd := padding + TextWidth(hints, false)
 	DrawText(img, padding, botTop+8, hints, ColorMuted)
 
-	// GitHub URL (right, above progress bar).
-	gitURL := "github.com/diggyen/SimpleClient"
-	DrawText(img, w-TextWidth(gitURL, false)-padding, botTop+8, gitURL, ColorAccent)
-
-	// Progress bar (right side of bottom bar).
-	pbRect := image.Rect(w-202, botTop+8, w-padding, botTop+barH-8)
+	// Progress bar (right).
+	pbRect := image.Rect(w-progressBarW-padding, botTop+8, w-padding, botTop+barH-8)
 	DrawProgressBar(img, pbRect, state.ScanProgress, ColorAccent, ColorBorder)
+
+	// Project URL, centred in whatever space is left between the two. Dropped
+	// entirely when it would collide — the hint text is localised and its width
+	// changes with the language.
+	urlW := TextWidth(gitURL, false)
+	urlX := (hintsEnd + pbRect.Min.X - urlW) / 2
+	if urlX > hintsEnd+padding && urlX+urlW < pbRect.Min.X-padding {
+		DrawText(img, urlX, botTop+8, gitURL, ColorAccent)
+	}
 
 	// Error message banner above bottom bar.
 	if state.ErrorMsg != "" {

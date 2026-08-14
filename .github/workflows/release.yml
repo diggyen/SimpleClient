@@ -1,0 +1,87 @@
+name: Release
+
+# Tag a commit to publish an ISO:
+#   git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # required to create the release and upload assets
+
+jobs:
+  iso:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      # Never ship an ISO built from a tree whose tests do not pass.
+      - name: Test
+        run: go test -mod=vendor -race ./... -timeout 120s
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ISO
+        run: |
+          docker buildx build \
+            --target export \
+            --output type=local,dest=dist \
+            -f build/Dockerfile .
+          ls -lh dist/
+
+      - name: Verify artifacts
+        run: |
+          test -s dist/simpleclient.iso
+          file dist/simpleclient.iso | grep -qi 'ISO 9660'
+          file dist/simpleclient | grep -q 'statically linked'
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum simpleclient.iso > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SimpleClient ${{ github.ref_name }}
+          files: |
+            dist/simpleclient.iso
+            dist/SHA256SUMS
+          body: |
+            ## SimpleClient ${{ github.ref_name }}
+
+            Bootable kiosk image. Boot it and it scans the local network for
+            RDP hosts, then connects to the one you pick. No installation, no
+            desktop environment — it draws straight to the framebuffer.
+
+            The boot menu offers **English** and **Türkçe**; press **F2** at any
+            time to switch language while it is running.
+
+            ### Write to a USB stick
+
+            Linux:
+            ```
+            sudo dd if=simpleclient.iso of=/dev/sdX bs=4M status=progress conv=fsync
+            ```
+
+            macOS:
+            ```
+            sudo dd if=simpleclient.iso of=/dev/rdiskN bs=4m
+            ```
+
+            ### Verify the download
+            ```
+            sha256sum -c SHA256SUMS
+            ```
+
+            Boots on both UEFI and legacy BIOS machines.

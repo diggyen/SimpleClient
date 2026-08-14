@@ -9,6 +9,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/config"
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
+	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 	"github.com/diggyen/SimpleClient/internal/network"
 	"github.com/diggyen/SimpleClient/internal/rdp"
@@ -24,6 +25,11 @@ type SessionState struct {
 }
 
 // Run is the main kiosk loop. It never returns.
+//
+// All UIState access goes through state.Mu: the connect goroutine started from
+// the credential modal mutates the same struct concurrently with this loop.
+// Nothing under the lock performs I/O that can block indefinitely — rdp.New and
+// the RDP frame loop both run outside it — so holding it across a render is safe.
 func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg config.Config) {
 	state := &UIState{}
 	backBuf := image.NewRGBA(fb.Bounds())
@@ -46,21 +52,32 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		// ── Scan events ──────────────────────────────────────────────────────
 		case ev, ok := <-scanCh:
 			if ok {
+				state.Mu.Lock()
 				state.HandleScanEvent(ev)
+				state.Mu.Unlock()
 				dirty = true
 			}
 
 		// ── Input events ─────────────────────────────────────────────────────
 		case ev := <-input.Events():
-			if session != nil && state.Screen == ScreenSession {
-				handleSessionInput(ev, state, session, input)
-			} else {
+			state.Mu.Lock()
+			inSession := state.Screen == ScreenSession && session != nil
+			current := session
+			if !inSession {
 				handleInput(ev, state, scan, cfg, fb, &ctx, &cancelScan, &scanCh, &session, maxRows)
+			}
+			state.Mu.Unlock()
+
+			// Session input forwards to the RDP socket, so it must not run
+			// while the UI lock is held.
+			if inSession {
+				handleSessionInput(ev, state, current, input)
 			}
 			dirty = true
 
 		// ── Render tick ──────────────────────────────────────────────────────
 		case <-ticker.C:
+			state.Mu.Lock()
 			if dirty && state.Screen != ScreenSession {
 				spinTick++
 				state.SpinnerTick = spinTick / 4
@@ -68,11 +85,13 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 				Render(fb, backBuf, state, mx, my)
 				dirty = false
 			}
+			state.Mu.Unlock()
 		}
 	}
 }
 
 // handleInput processes an InputEvent in non-session screens.
+// Callers must hold state.Mu.
 func handleInput(
 	ev inputdev.InputEvent,
 	state *UIState,
@@ -97,6 +116,14 @@ func handleInput(
 	}
 
 	if ev.Type != inputdev.EvKey || !ev.Pressed {
+		return
+	}
+
+	// F2 cycles the UI language from any non-session screen. Handled before the
+	// per-screen switch so it also works while the credential modal is open —
+	// F2 produces no rune, so it never collides with text entry.
+	if ev.KeyCode == inputdev.KeyF2 {
+		i18n.Next()
 		return
 	}
 
@@ -182,6 +209,8 @@ func handleModalKey(
 	}
 }
 
+// handleSessionInput forwards input to the live RDP session. It must be called
+// without state.Mu held: SendKey and friends write to the network socket.
 func handleSessionInput(
 	ev inputdev.InputEvent,
 	state *UIState,
@@ -213,6 +242,7 @@ func handleSessionInput(
 	}
 }
 
+// handleMouseClick processes a left click. Callers must hold state.Mu.
 func handleMouseClick(
 	mx, my int,
 	state *UIState,
@@ -247,6 +277,9 @@ func handleMouseClick(
 	}
 }
 
+// connect establishes the RDP session. It runs on its own goroutine and takes
+// state.Mu itself; the network calls deliberately happen outside the lock so the
+// render loop keeps running while the connection is being set up.
 func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	state.Mu.Lock()
 	host := state.SelectedHost()
@@ -260,12 +293,14 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 		Password: state.Modal.Fields[1],
 		Domain:   state.Modal.Fields[2],
 	}
+	addr := host.AddrRDP()
+	selected := *host
 
 	state.Transition(ScreenConnecting)
 	state.Modal.Error = ""
 	state.Mu.Unlock()
 
-	client, err := rdp.New(host.AddrRDP(), creds, fb.Width(), fb.Height())
+	client, err := rdp.New(addr, creds, fb.Width(), fb.Height())
 	if err != nil {
 		state.Mu.Lock()
 		state.Modal.Error = rdpErrToMessage(err)
@@ -277,7 +312,7 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	writer := &rdp.FrameWriter{FB: fb}
 	state.Mu.Lock()
 	*session = &SessionState{
-		Host:      *host,
+		Host:      selected,
 		Client:    client,
 		Writer:    writer,
 		Connected: true,
@@ -294,7 +329,7 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	state.Mu.Lock()
 	*session = nil
 	state.Transition(ScreenDiscovery)
-	state.ErrorMsg = "Bağlantı kesildi"
+	state.ErrorMsg = i18n.T(i18n.Disconnected)
 	state.Mu.Unlock()
 }
 
@@ -302,30 +337,33 @@ func disconnect(state *UIState, session *SessionState) {
 	if session != nil && session.Client != nil {
 		_ = session.Client.Close()
 	}
+	state.Mu.Lock()
 	state.Transition(ScreenDiscovery)
-	state.ErrorMsg = "Bağlantı kesildi"
+	state.ErrorMsg = i18n.T(i18n.Disconnected)
+	state.Mu.Unlock()
 }
 
+// rdpErrToMessage maps a connection error onto a localised, user-facing message.
 func rdpErrToMessage(err error) string {
 	if err == nil {
 		return ""
 	}
 	msg := err.Error()
-	if contains(msg, "timeout") {
-		return "Zaman aşımı: sunucuya ulaşılamıyor"
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "timeout"):
+		return i18n.T(i18n.ErrTimeout)
+	case strings.Contains(lower, "refused"):
+		return i18n.T(i18n.ErrRefused)
+	case strings.Contains(lower, "auth"),
+		strings.Contains(lower, "logon"),
+		strings.Contains(lower, "credential"):
+		return i18n.T(i18n.ErrAuthFailed)
 	}
-	if contains(msg, "refused") {
-		return "Bağlantı reddedildi"
-	}
-	if contains(msg, "auth") || contains(msg, "logon") || contains(msg, "credential") {
-		return "Kimlik doğrulama başarısız"
-	}
-	if len(msg) > 60 {
-		msg = msg[:60] + "..."
+	// Truncate on a rune boundary — localised or server-supplied text is not
+	// guaranteed to be ASCII.
+	if r := []rune(msg); len(r) > 60 {
+		msg = string(r[:60]) + "..."
 	}
 	return msg
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && strings.Contains(s, sub)
 }

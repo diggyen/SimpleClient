@@ -3,6 +3,8 @@ package config
 import (
 	"flag"
 	"time"
+
+	"github.com/diggyen/SimpleClient/internal/i18n"
 )
 
 // Config holds all runtime configuration for SimpleClient.
@@ -12,6 +14,7 @@ type Config struct {
 	MouseDevice string
 	ScanTimeout time.Duration
 	MaxWorkers  int
+	Language    string
 }
 
 // Load parses command-line flags and returns a Config.
@@ -23,6 +26,15 @@ func Load() Config {
 	flag.StringVar(&cfg.MouseDevice, "mouse", "", "Mouse evdev path (auto-detect if empty)")
 	flag.DurationVar(&cfg.ScanTimeout, "scan-timeout", 500*time.Millisecond, "TCP dial timeout per host")
 	flag.IntVar(&cfg.MaxWorkers, "workers", 256, "Concurrent scan workers")
+	flag.StringVar(&cfg.Language, "lang", string(i18n.Default),
+		"Startup UI language: en or tr (toggle at runtime with F2)")
 	flag.Parse()
 	return cfg
+}
+
+// Lang resolves the configured language, falling back to the default when the
+// value is empty or unrecognised.
+func (c Config) Lang() i18n.Lang {
+	lang, _ := i18n.Parse(c.Language)
+	return lang
 }

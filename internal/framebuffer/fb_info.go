@@ -4,9 +4,9 @@ package framebuffer
 
 // fbBitfield mirrors the Linux fb_bitfield struct.
 type fbBitfield struct {
-	Offset    uint32
-	Length    uint32
-	MsbRight  uint32
+	Offset   uint32
+	Length   uint32
+	MsbRight uint32
 }
 
 // fbVarScreenInfo mirrors the Linux fb_var_screeninfo struct (160 bytes).

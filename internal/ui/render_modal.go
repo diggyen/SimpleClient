@@ -2,6 +2,8 @@ package ui
 
 import (
 	"image"
+
+	"github.com/diggyen/SimpleClient/internal/i18n"
 )
 
 const (
@@ -26,11 +28,16 @@ func renderModal(img *image.RGBA, state *UIState) {
 	// Title bar.
 	titleBar := image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+barH)
 	FillRect(img, titleBar, ColorBar)
-	DrawText(img, r.Min.X+padding, r.Min.Y+8, "Bağlantı Bilgileri", ColorText)
+	DrawText(img, r.Min.X+padding, r.Min.Y+8, i18n.T(i18n.ModalTitle), ColorText)
 	DrawHLine(img, r.Min.X, r.Max.X, r.Min.Y+barH, ColorBorder)
 
-	// Field labels and inputs.
-	labels := [3]string{"Kullanıcı:", "Parola:   ", "Domain:   "}
+	// Field labels and inputs. Labels are localised and therefore vary in width;
+	// the input column starts at a fixed offset so they stay aligned.
+	labels := [3]string{
+		i18n.T(i18n.LabelUsername),
+		i18n.T(i18n.LabelPassword),
+		i18n.T(i18n.LabelDomain),
+	}
 	fieldH := 22
 	fieldXLabel := r.Min.X + padding
 	fieldXInput := r.Min.X + 90
@@ -72,14 +79,17 @@ func renderModal(img *image.RGBA, state *UIState) {
 		cancelColor = ColorFocus
 	}
 
+	connectLabel := i18n.T(i18n.ButtonConnect)
+	cancelLabel := i18n.T(i18n.ButtonCancel)
+
 	FillRect(img, connectRect, connectColor)
-	DrawText(img, connectRect.Min.X+(btnW-TextWidth("Bağlan", false))/2,
-		connectRect.Min.Y+8, "Bağlan", ColorText)
+	DrawText(img, connectRect.Min.X+(btnW-TextWidth(connectLabel, false))/2,
+		connectRect.Min.Y+8, connectLabel, ColorText)
 
 	FillRect(img, cancelRect, ColorPanel)
 	DrawBorder(img, cancelRect, cancelColor)
-	DrawText(img, cancelRect.Min.X+(btnW-TextWidth("İptal", false))/2,
-		cancelRect.Min.Y+8, "İptal", ColorMuted)
+	DrawText(img, cancelRect.Min.X+(btnW-TextWidth(cancelLabel, false))/2,
+		cancelRect.Min.Y+8, cancelLabel, ColorMuted)
 }
 
 func maskStr(s string) string {

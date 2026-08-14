@@ -2,28 +2,29 @@ package inputdev
 
 // Special key constants (Linux keycodes).
 const (
-	KeyEsc       = 1
-	KeyBackspace = 14
-	KeyTab       = 15
-	KeyEnter     = 28
-	KeyCtrl      = 29
-	KeyA         = 30
-	KeyZ         = 44
-	KeyLeftShift = 42
+	KeyEsc        = 1
+	KeyBackspace  = 14
+	KeyTab        = 15
+	KeyEnter      = 28
+	KeyCtrl       = 29
+	KeyA          = 30
+	KeyZ          = 44
+	KeyLeftShift  = 42
 	KeyRightShift = 54
-	KeyAlt       = 56
-	KeySpace     = 57
-	KeyF1        = 59
-	KeyF5        = 63
-	KeyF10       = 68
-	KeyUp        = 103
-	KeyPageUp    = 104
-	KeyLeft      = 105
-	KeyRight     = 106
-	KeyDown      = 108
-	KeyPageDown  = 109
-	KeyEnd       = 107
-	KeyHome      = 102
+	KeyAlt        = 56
+	KeySpace      = 57
+	KeyF1         = 59
+	KeyF2         = 60
+	KeyF5         = 63
+	KeyF10        = 68
+	KeyUp         = 103
+	KeyPageUp     = 104
+	KeyLeft       = 105
+	KeyRight      = 106
+	KeyDown       = 108
+	KeyPageDown   = 109
+	KeyEnd        = 107
+	KeyHome       = 102
 
 	// Mouse button keycodes (EV_KEY events from mouse device)
 	BtnLeft   = 0x110

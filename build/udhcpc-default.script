@@ -1,0 +1,49 @@
+#!/bin/sh
+# busybox udhcpc callback script.
+#
+# udhcpc does not configure anything itself — it execs this script with the
+# lease details in the environment. Without it the DHCP handshake completes and
+# the address is silently discarded, which is exactly what used to happen here:
+# the kiosk booted with no IP and the network scan found nothing.
+#
+# Installed at /usr/share/udhcpc/default.script, which is where busybox looks
+# by default.
+
+RESOLV_CONF=/etc/resolv.conf
+
+case "$1" in
+    deconfig)
+        ip addr flush dev "$interface"
+        ip link set "$interface" up
+        ;;
+
+    renew | bound)
+        ip addr add "$ip/${mask:-24}" dev "$interface" 2>/dev/null || \
+            ip addr replace "$ip/${mask:-24}" dev "$interface"
+        ip link set "$interface" up
+
+        if [ -n "$router" ]; then
+            # Replace any previous default route; a renew must not stack them.
+            ip route del default dev "$interface" 2>/dev/null
+            for r in $router; do
+                ip route add default via "$r" dev "$interface" 2>/dev/null
+            done
+        fi
+
+        # DNS is only used for the reverse lookups that put hostnames next to
+        # IPs in the host list; discovery itself works without it.
+        if [ -n "$dns" ]; then
+            : > "$RESOLV_CONF"
+            [ -n "$domain" ] && echo "search $domain" >> "$RESOLV_CONF"
+            for d in $dns; do
+                echo "nameserver $d" >> "$RESOLV_CONF"
+            done
+        fi
+        ;;
+
+    leasefail | nak)
+        # Nothing to do: /init falls back to a link-local address.
+        ;;
+esac
+
+exit 0

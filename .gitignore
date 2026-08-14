@@ -2,13 +2,18 @@
 dist/
 *.iso
 *.cpio.gz
-simpleclient
+# Leading slash matters: a bare "simpleclient" pattern also matches the
+# cmd/simpleclient/ directory, which would silently exclude the entry point
+# from the repository.
+/simpleclient
 
 # Documentation
 *.md
+!README.md
 
 # Go
-vendor/
+# vendor/ is committed on purpose: the grdp dependency does not compile on Linux
+# without local patches. See build/patches/ and build/vendor-patch.sh.
 *.test
 *.out
 
