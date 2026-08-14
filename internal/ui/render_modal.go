@@ -68,16 +68,20 @@ func renderModal(img *image.RGBA, state *UIState) {
 	// Dim everything behind it so the dialog is unmistakably the focus.
 	FillRectBlend(img, img.Bounds(), ColorOverlay)
 
-	FillRectBlend(img, l.Box.Add(image.Pt(5, 6)), ColorCardShadow)
-	FillRect(img, l.Box, ColorPanel)
-	DrawBorder(img, l.Box, ColorAccent)
+	DrawPanel(img, l.Box, ColorPanel, ColorAccent)
 
 	// ── Header: title, and which host is about to be connected to ────────────
-	FillRect(img, l.Header, ColorCardHeader)
-	DrawHLine(img, l.Header.Min.X, l.Header.Max.X, l.Header.Max.Y-1, ColorBorder)
+	strip := image.Rect(l.Header.Min.X+1, l.Header.Min.Y+1, l.Header.Max.X-1, l.Header.Max.Y)
+	FillNotchedTop(img, strip, ColorCardHeader)
+	DrawHLine(img, strip.Min.X+2, strip.Max.X-2, strip.Min.Y, ColorPanelEdge)
+	DrawHLine(img, strip.Min.X, strip.Max.X, strip.Max.Y-1, ColorBorder)
 
-	titleY := l.Header.Min.Y + (cardHeader-CharH)/2 - 3
-	DrawText(img, l.Header.Min.X+modalPad, titleY, i18n.T(i18n.ModalTitle), ColorText)
+	titleY := l.Header.Min.Y + (cardHeader-CharH)/2
+	FillRect(img, image.Rect(
+		l.Header.Min.X+modalPad, titleY+1,
+		l.Header.Min.X+modalPad+3, titleY+CharH-1,
+	), ColorAccent)
+	DrawText(img, l.Header.Min.X+modalPad+11, titleY, i18n.T(i18n.ModalTitle), ColorText)
 
 	if host := state.SelectedHost(); host != nil {
 		name := host.DisplayName()
@@ -113,19 +117,24 @@ func renderModal(img *image.RGBA, state *UIState) {
 // drawButton renders one dialog button. The primary button is filled; the
 // secondary one is outlined, so the default action reads at a glance.
 func drawButton(img *image.RGBA, r image.Rectangle, label string, focused, primary bool) {
-	switch {
-	case primary:
-		FillRect(img, r, ColorAccent)
-	default:
-		FillRect(img, r, ColorPanel)
-		DrawBorder(img, r, ColorBorder)
+	if focused {
+		// A ring outside the button rather than a colour swap inside it, so the
+		// primary button does not change meaning when it gains focus.
+		ring := r.Inset(-3)
+		FillNotched(img, ring, ColorFocus)
+		FillNotched(img, ring.Inset(2), ColorPanel)
 	}
 
-	if focused {
-		// A focus ring rather than a colour swap, so the primary button does not
-		// change meaning when it gains focus.
-		DrawBorder(img, r, ColorFocus)
-		DrawBorder(img, r.Inset(1), ColorFocus)
+	if primary {
+		FillNotched(img, r, ColorAccent)
+		// The lit top edge is what turns a coloured rectangle into a key that
+		// looks pressable, and it is the only thing distinguishing the primary
+		// button from the error banner, which is the same family of red.
+		DrawHLine(img, r.Min.X+2, r.Max.X-2, r.Min.Y, ColorText)
+	} else {
+		FillNotched(img, r, ColorBorder)
+		FillNotched(img, r.Inset(1), ColorPanel)
+		DrawHLine(img, r.Min.X+2, r.Max.X-2, r.Min.Y+1, ColorPanelEdge)
 	}
 
 	textColor := ColorText

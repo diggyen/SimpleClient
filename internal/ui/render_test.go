@@ -217,14 +217,36 @@ func TestDrawText_ScrollArrowsRender(t *testing.T) {
 	}
 }
 
-// Every spinner frame must be drawable — the previous braille frames were not.
-func TestSpinnerFrames_Render(t *testing.T) {
-	for _, f := range spinnerFrames {
-		img := newTestImage(4*CharW, 4*CharH)
-		DrawText(img, 0, 0, f, ColorText)
-		if countInk(img) == 0 {
-			t.Errorf("spinner frame %q rendered no pixels", f)
+// The spinner is drawn, not set as a glyph, so what it has to guarantee is that
+// the head actually moves: a loader stuck on one cell says "hung", which is the
+// opposite of what it is there to say.
+func TestDrawSpinner_HeadMoves(t *testing.T) {
+	const cell = 9
+	size := SpinnerSize(cell)
+
+	seen := map[string]bool{}
+	for tick := 0; tick < len(spinnerRing); tick++ {
+		img := newTestImage(size, size)
+		DrawSpinner(img, 0, 0, tick, cell, ColorAccent)
+
+		head := ""
+		for _, p := range spinnerRing {
+			x := p[0]*(cell+spinnerGap) + cell/2
+			y := p[1]*(cell+spinnerGap) + cell/2
+			if img.RGBAAt(x, y) == ColorAccent {
+				head = string(rune('a' + p[0] + 3*p[1]))
+			}
 		}
+		if head == "" {
+			t.Fatalf("tick %d lit no head cell", tick)
+		}
+		if seen[head] {
+			t.Fatalf("tick %d put the head back on a cell it has already used", tick)
+		}
+		seen[head] = true
+	}
+	if len(seen) != len(spinnerRing) {
+		t.Fatalf("the head visited %d of %d cells in a full cycle", len(seen), len(spinnerRing))
 	}
 }
 
@@ -278,21 +300,29 @@ func TestRenderDiscovery_FollowsLanguage(t *testing.T) {
 	}
 }
 
-// The bottom bar used to draw the project URL underneath the progress bar.
-// The URL is now dropped whenever it would collide, at either language width.
-func TestRenderDiscovery_BottomBarNoOverlap(t *testing.T) {
+// The footer legend and the header block are both built from translated
+// strings, so either can outgrow the screen when the language changes. Both
+// must still fit at the narrowest resolution the kiosk boots at.
+func TestRenderDiscovery_HeaderAndHintsFitEveryLanguage(t *testing.T) {
 	t.Cleanup(func() { i18n.Set(i18n.Default) })
 
 	for _, lang := range i18n.Available() {
 		i18n.Set(lang)
-		for _, w := range []int{800, 1024, 1280, 1920} {
+		for _, w := range []int{640, 800, 1024, 1280, 1920} {
 			fb := framebuffer.NewMock(w, 720)
 			back := image.NewRGBA(fb.Bounds())
 			renderDiscovery(back, &UIState{Screen: ScreenDiscovery})
 
-			hintsW := TextWidth(i18n.T(i18n.KeyHints), false)
-			if hintsW > w-2*padding {
+			if hintsW := keyHintsWidth(); hintsW > w-2*padding {
 				t.Errorf("lang=%s w=%d: key hints (%dpx) do not fit on screen", lang, w, hintsW)
+			}
+
+			logo := layoutLogo(w, logoTop)
+			if logo.Bounds.Min.X < padding || logo.Bounds.Max.X > w-padding {
+				t.Errorf("lang=%s w=%d: logo block %v runs off screen", lang, w, logo.Bounds)
+			}
+			if logo.Tagline.Max.X > w-padding {
+				t.Errorf("lang=%s w=%d: tagline runs off screen at x=%d", lang, w, logo.Tagline.Max.X)
 			}
 		}
 	}

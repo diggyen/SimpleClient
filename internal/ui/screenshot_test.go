@@ -44,6 +44,16 @@ func TestScreenshots(t *testing.T) {
 		}
 	}
 
+	// The mark is 64px on screen, which is too small to judge a sprite by. This
+	// blows it up so individual pixels can be reviewed.
+	shot("00-logo", 640, 320, func(b *image.RGBA) {
+		FillRect(b, b.Bounds(), ColorBG)
+		drawLogoMark(b, 40, 40, 12)
+		DrawPixelTextShadowed(b, 40, 250, logoWordA, 4, ColorText, ColorLogoShadow)
+		DrawPixelTextShadowed(b, 40+PixelTextWidth(logoWordA, 4)+4, 250, logoWordB, 4,
+			ColorAccent, ColorLogoShadow)
+	})
+
 	shot("01-scanning", 1280, 800, func(b *image.RGBA) {
 		renderDiscovery(b, &UIState{Screen: ScreenDiscovery, ScanProgress: 0.34, SpinnerTick: 1})
 	})
@@ -84,6 +94,15 @@ func TestScreenshots(t *testing.T) {
 		}
 		renderDiscovery(b, st)
 		renderConnecting(b, st)
+	})
+
+	// The narrowest panel the kiosk is expected to boot on. Everything has to
+	// fit here before it is worth judging at 1280.
+	shot("09-640x480", 640, 480, func(b *image.RGBA) {
+		renderDiscovery(b, &UIState{
+			Screen: ScreenDiscovery, Hosts: sampleHosts(6),
+			SelectedIdx: 1, ScanDone: true, ScanProgress: 1,
+		})
 	})
 
 	i18n.Set(i18n.LangTR)

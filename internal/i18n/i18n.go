@@ -45,9 +45,18 @@ const (
 	NoServersFound
 	SelectServer
 	ColumnServer
+	ColumnAddress
 	ColumnLatency
 	NoServersHint
-	KeyHints
+
+	// Key hints are held as one label per action rather than a single
+	// pre-joined sentence, so the footer can draw each key as its own cap.
+	HintSelect
+	HintConnect
+	HintRefresh
+	HintLanguage
+
+	Tagline // sits under the wordmark; keep it short enough to fit at 640px
 	ModalTitle
 	LabelUsername
 	LabelPassword
@@ -76,9 +85,14 @@ var catalogues = map[Lang]*catalogue{
 		NoServersFound: "No servers found",
 		SelectServer:   "Select a server",
 		ColumnServer:   "SERVER",
+		ColumnAddress:  "ADDRESS",
 		ColumnLatency:  "LATENCY",
 		NoServersHint:  "Nothing is listening on port 3389 in this subnet. Press F5 to scan again.",
-		KeyHints:       "↑↓ Select   Enter Connect   F5 Refresh   F2 Language",
+		HintSelect:     "Select",
+		HintConnect:    "Connect",
+		HintRefresh:    "Refresh",
+		HintLanguage:   "Language",
+		Tagline:        "REMOTE DESKTOP KIOSK",
 		ModalTitle:     "Connection Details",
 		LabelUsername:  "Username:",
 		LabelPassword:  "Password:",
@@ -100,9 +114,14 @@ var catalogues = map[Lang]*catalogue{
 		NoServersFound: "Sunucu bulunamadı",
 		SelectServer:   "Bir sunucu seçin",
 		ColumnServer:   "SUNUCU",
+		ColumnAddress:  "ADRES",
 		ColumnLatency:  "GECİKME",
 		NoServersHint:  "Bu ağda 3389 portunu dinleyen bir sunucu yok. Yeniden taramak için F5.",
-		KeyHints:       "↑↓ Seç   Enter Bağlan   F5 Yenile   F2 Dil",
+		HintSelect:     "Seç",
+		HintConnect:    "Bağlan",
+		HintRefresh:    "Yenile",
+		HintLanguage:   "Dil",
+		Tagline:        "UZAK MASAÜSTÜ İSTEMCİSİ",
 		ModalTitle:     "Bağlantı Bilgileri",
 		LabelUsername:  "Kullanıcı:",
 		LabelPassword:  "Parola:",

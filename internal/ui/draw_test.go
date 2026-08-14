@@ -87,33 +87,67 @@ func TestTextWidth_Large(t *testing.T) {
 	}
 }
 
-func TestDrawProgressBar_Empty(t *testing.T) {
+// countBarCells reports how many of the meter's cells are lit. The meter is
+// drawn as discrete cells with gaps between them, so a bar cannot be checked by
+// sweeping every pixel on a row — the gaps are deliberately left untouched.
+func countBarCells(t *testing.T, pct float64, fg, bg color.RGBA) (lit, total int) {
+	t.Helper()
 	img := newTestImage(200, 20)
+	r := image.Rect(0, 0, 200, 20)
+	DrawProgressBar(img, r, pct, fg, bg)
+
+	for i := 0; i < ProgressCells; i++ {
+		x := i * 200 / ProgressCells // the left edge of cell i, always painted
+		switch img.RGBAAt(x, 10) {
+		case fg:
+			lit++
+			total++
+		case bg:
+			total++
+		default:
+			t.Fatalf("pct=%v: cell at x=%d is neither fg nor bg", pct, x)
+		}
+	}
+	return lit, total
+}
+
+func TestDrawProgressBar_Empty(t *testing.T) {
 	fg := color.RGBA{R: 0, G: 128, B: 255, A: 255}
 	bg := color.RGBA{R: 40, G: 40, B: 40, A: 255}
-	r := image.Rect(0, 0, 200, 20)
-	DrawProgressBar(img, r, 0.0, fg, bg)
-	// All pixels should be bg.
-	for x := 0; x < 200; x++ {
-		got := img.RGBAAt(x, 10)
-		if got != bg {
-			t.Fatalf("at pct=0 pixel should be bg, got %v", got)
-		}
+	lit, total := countBarCells(t, 0.0, fg, bg)
+	if total == 0 {
+		t.Fatal("the meter drew no cells at all")
+	}
+	if lit != 0 {
+		t.Fatalf("at pct=0, %d of %d cells are lit, want none", lit, total)
 	}
 }
 
 func TestDrawProgressBar_Full(t *testing.T) {
-	img := newTestImage(200, 20)
 	fg := color.RGBA{R: 0, G: 255, B: 0, A: 255}
 	bg := color.RGBA{R: 40, G: 40, B: 40, A: 255}
-	r := image.Rect(0, 0, 200, 20)
-	DrawProgressBar(img, r, 1.0, fg, bg)
-	// All pixels should be fg.
-	for x := 0; x < 200; x++ {
-		got := img.RGBAAt(x, 10)
-		if got != fg {
-			t.Fatalf("at pct=1.0 pixel should be fg, got %v at x=%d", got, x)
+	lit, total := countBarCells(t, 1.0, fg, bg)
+	if total == 0 {
+		t.Fatal("the meter drew no cells at all")
+	}
+	if lit != total {
+		t.Fatalf("at pct=1, %d of %d cells are lit, want all", lit, total)
+	}
+}
+
+// The meter has to advance monotonically, or a scan appears to stall and then
+// jump rather than to progress.
+func TestDrawProgressBar_AdvancesMonotonically(t *testing.T) {
+	fg := color.RGBA{R: 0, G: 255, B: 0, A: 255}
+	bg := color.RGBA{R: 40, G: 40, B: 40, A: 255}
+
+	prev := -1
+	for _, pct := range []float64{0, 0.1, 0.25, 0.5, 0.75, 0.9, 1} {
+		lit, _ := countBarCells(t, pct, fg, bg)
+		if lit < prev {
+			t.Fatalf("at pct=%v the meter fell back to %d cells from %d", pct, lit, prev)
 		}
+		prev = lit
 	}
 }
 
