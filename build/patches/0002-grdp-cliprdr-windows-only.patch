@@ -1,0 +1,49 @@
+diff --git a/vendor/github.com/tomatome/grdp/plugin/cliprdr/cliprdr.go b/vendor/github.com/tomatome/grdp/plugin/cliprdr/cliprdr.go
+index 070b715..d008fbf 100644
+--- a/vendor/github.com/tomatome/grdp/plugin/cliprdr/cliprdr.go
++++ b/vendor/github.com/tomatome/grdp/plugin/cliprdr/cliprdr.go
+@@ -1,3 +1,12 @@
++//go:build windows
++// +build windows
++
++// PATCH (SimpleClient): upstream bu dosyaya build tag koymamış ama yalnızca
++// Windows'ta tanımlı sembolleri kullanıyor (EmptyClipboard, SetClipboardData,
++// FILE_ATTRIBUTE_DIRECTORY, GetFileInfo, ...). Tag olmadan paket Linux'ta
++// derlenmiyor ve protocol/t125 -> grdp/client zincirini komple kırıyor.
++// Linux tarafı için stub_notwindows.go'ya bakın. Bkz. build/patches/.
++
+ package cliprdr
+ 
+ import (
+diff --git a/vendor/github.com/tomatome/grdp/plugin/cliprdr/stub_notwindows.go b/vendor/github.com/tomatome/grdp/plugin/cliprdr/stub_notwindows.go
+new file mode 100644
+index 0000000..4162f04
+--- /dev/null
++++ b/vendor/github.com/tomatome/grdp/plugin/cliprdr/stub_notwindows.go
+@@ -0,0 +1,26 @@
++//go:build !windows
++// +build !windows
++
++// PATCH (SimpleClient): Linux/macOS derlemesi için cliprdr stub'ı.
++//
++// Upstream cliprdr.go yalnızca Windows'ta tanımlı sembolleri kullandığı için o
++// dosyaya "//go:build windows" eklendi. Ancak protocol/t125/mcs.go, Windows dışı
++// platformlarda da cliprdr.ChannelName ve cliprdr.ChannelOption sabitlerine
++// ihtiyaç duyuyor (SetClientCliprdr). Bu dosya yalnızca o iki sabiti sağlar;
++// değerler upstream cliprdr.go ile birebir aynıdır.
++//
++// Pano yönlendirme (clipboard redirection) kiosk'ta hiçbir zaman
++// etkinleştirilmiyor — yalnızca sanal kanal adı sunucuya bildiriliyor.
++
++package cliprdr
++
++import "github.com/tomatome/grdp/plugin"
++
++const (
++	// ChannelName is the MS-RDPECLIP static virtual channel name.
++	ChannelName = plugin.CLIPRDR_SVC_CHANNEL_NAME
++
++	// ChannelOption carries the channel initialisation flags.
++	ChannelOption = plugin.CHANNEL_OPTION_INITIALIZED | plugin.CHANNEL_OPTION_ENCRYPT_RDP |
++		plugin.CHANNEL_OPTION_COMPRESS_RDP | plugin.CHANNEL_OPTION_SHOW_PROTOCOL
++)

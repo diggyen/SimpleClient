@@ -1,0 +1,15 @@
+diff --git a/vendor/github.com/tomatome/grdp/plugin/channel.go b/vendor/github.com/tomatome/grdp/plugin/channel.go
+index b3e5ab2..6859601 100644
+--- a/vendor/github.com/tomatome/grdp/plugin/channel.go
++++ b/vendor/github.com/tomatome/grdp/plugin/channel.go
+@@ -1,6 +1,9 @@
+ package plugin
+ 
+-import "C"
++// PATCH (SimpleClient): upstream'deki `import "C"` kaldırıldı. Dosyada tek bir
++// C.* kullanımı yok, ama varlığı paketi cgo'ya bağımlı kılıyor; CGO_ENABLED=0
++// ile paket "build constraints exclude all Go files" hatası veriyor ve statik
++// binary üretilemiyor. Bkz. build/patches/.
+ import (
+ 	"bytes"
+ 	"fmt"
