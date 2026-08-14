@@ -15,9 +15,13 @@ import (
 )
 
 // TestScreenshots renders every UI state to PNG so the design can be reviewed
-// without booting the image. Skipped unless a destination is given:
+// without booting the image. Skipped unless a destination is given.
 //
-//	SIMPLECLIENT_UI_SHOTS=/tmp/ui go test ./internal/ui -run TestScreenshots
+// docs/screenshots/ holds the committed set; regenerate it in place after any
+// change to the rendering, and give an absolute path — the test runs with
+// internal/ui as its working directory, so a relative one lands there instead:
+//
+//	SIMPLECLIENT_UI_SHOTS=$PWD/docs/screenshots go test ./internal/ui -run TestScreenshots
 func TestScreenshots(t *testing.T) {
 	dir := os.Getenv("SIMPLECLIENT_UI_SHOTS")
 	if dir == "" {
