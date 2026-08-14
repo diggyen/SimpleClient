@@ -42,7 +42,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 	scanCh := scan.Start(ctx, []string{cidr})
 
 	ticker := time.NewTicker(16 * time.Millisecond) // ~60 FPS
-	dirty := true
+	state.Dirty = true
 	spinTick := 0
 
 	maxRows := (fb.Height() - 2*barH - 4) / rowH
@@ -55,7 +55,6 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 				state.Mu.Lock()
 				state.HandleScanEvent(ev)
 				state.Mu.Unlock()
-				dirty = true
 			}
 
 		// ── Input events ─────────────────────────────────────────────────────
@@ -65,6 +64,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 			current := session
 			if !inSession {
 				handleInput(ev, state, scan, cfg, fb, &ctx, &cancelScan, &scanCh, &session, maxRows)
+				state.Dirty = true
 			}
 			state.Mu.Unlock()
 
@@ -73,17 +73,19 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 			if inSession {
 				handleSessionInput(ev, state, current, input)
 			}
-			dirty = true
 
 		// ── Render tick ──────────────────────────────────────────────────────
 		case <-ticker.C:
 			state.Mu.Lock()
-			if dirty && state.Screen != ScreenSession {
+			// The connecting screen redraws every tick regardless: its spinner
+			// has to animate, and it is the one screen whose exit is driven by
+			// a background goroutine rather than by an event on this loop.
+			if state.Screen != ScreenSession && (state.Dirty || state.Screen == ScreenConnecting) {
 				spinTick++
 				state.SpinnerTick = spinTick / 4
 				mx, my := input.MousePos()
 				Render(fb, backBuf, state, mx, my)
-				dirty = false
+				state.Dirty = false
 			}
 			state.Mu.Unlock()
 		}

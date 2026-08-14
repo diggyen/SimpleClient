@@ -346,3 +346,44 @@ func TestLanguageToggle_F2_InModal(t *testing.T) {
 type errTest string
 
 func (e errTest) Error() string { return string(e) }
+
+// Anything that changes what is on screen must mark the state dirty, otherwise
+// the render loop never repaints. The connect goroutine relies on Transition
+// doing this — without it a failed connection leaves "Connecting..." on screen
+// forever.
+func TestTransition_MarksDirty(t *testing.T) {
+	state := &UIState{Screen: ScreenDiscovery}
+	state.Transition(ScreenModal)
+	if !state.Dirty {
+		t.Fatal("Transition should mark the state dirty")
+	}
+}
+
+func TestHandleScanEvent_MarksDirty(t *testing.T) {
+	state := &UIState{}
+	state.HandleScanEvent(domain.ScanEvent{Type: domain.EventScanProgress, Scanned: 1, Total: 10})
+	if !state.Dirty {
+		t.Fatal("HandleScanEvent should mark the state dirty")
+	}
+}
+
+func TestMoveSelection_MarksDirty(t *testing.T) {
+	state := &UIState{Hosts: []domain.Host{{IP: net.ParseIP("10.0.0.1")}}}
+	state.MoveSelection(1, 20)
+	if !state.Dirty {
+		t.Fatal("MoveSelection should mark the state dirty")
+	}
+}
+
+// A rejected transition still needs a repaint: the screen it was rejected from
+// may already have been redrawn over.
+func TestTransition_MarksDirtyEvenWhenBlocked(t *testing.T) {
+	state := &UIState{Screen: ScreenDiscovery}
+	state.Transition(ScreenSession) // not a permitted transition
+	if state.Screen != ScreenDiscovery {
+		t.Fatal("transition should have been blocked")
+	}
+	if !state.Dirty {
+		t.Fatal("blocked Transition should still mark the state dirty")
+	}
+}

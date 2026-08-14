@@ -63,10 +63,15 @@ RUN cp /bin/busybox.static /rootfs/bin/busybox \
 # kernel/net is not optional: af_packet lives there, and busybox udhcpc opens an
 # AF_PACKET socket to send its DHCP discover. Without it every boot silently
 # falls back to a link-local address and the network scan finds nothing.
+#
+# drivers/char carries hw_random, including virtio-rng. A diskless kiosk has
+# almost no entropy at boot, so getrandom() blocks and the RDP client's TLS
+# handshake stops dead. random.trust_cpu=on covers real hardware via RDRAND;
+# virtio-rng covers virtual machines, where RDRAND may not be available.
 RUN KVER=$(basename /lib/modules/*) \
  && echo "kernel: $KVER" \
  && mkdir -p "/rootfs/lib/modules/$KVER/kernel/drivers" \
- && for d in net gpu input hid usb virtio; do \
+ && for d in net gpu input hid usb virtio char; do \
         if [ -d "/lib/modules/$KVER/kernel/drivers/$d" ]; then \
             cp -a "/lib/modules/$KVER/kernel/drivers/$d" "/rootfs/lib/modules/$KVER/kernel/drivers/"; \
         fi; \

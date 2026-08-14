@@ -72,15 +72,43 @@ Or run everything — vet, race tests, static build — with `bash setup.sh`.
 Add `--iso` to build the image too, or `--headless` to also boot it in QEMU and
 capture a screenshot.
 
-### Try it in QEMU
+### See it running
+
+You do not need spare hardware — QEMU boots the ISO in a window, and it is the
+same image that goes on a USB stick.
 
 ```sh
-bash build/test-qemu.sh                        # interactive window
-bash build/test-qemu.sh --headless --fake-rdp  # boot, screenshot, exit
+make -f build/Makefile iso     # if you have not built it yet
+bash build/test-qemu.sh        # opens a window; watch it boot
 ```
 
-`--fake-rdp` opens port 3389 on the host, which QEMU's user-mode networking
-presents to the guest at `10.0.2.2`, so the scan finds something to list.
+You will get the GRUB menu (English / Türkçe / two debug entries), then the
+discovery screen. Arrow keys select, Enter opens the login dialog, F2 switches
+language. `Ctrl+Alt+G` releases the mouse back to your desktop.
+
+On its own the guest sits on QEMU's private `10.0.2.0/24`, so it will find
+nothing to connect to. Two ways to give it something:
+
+```sh
+# A host that appears in the list but will not complete a session:
+bash build/test-qemu.sh --fake-rdp
+
+# A real RDP server, bridged in so the guest can discover and use it:
+bash build/test-qemu.sh --proxy-rdp=10.0.0.5:3389
+```
+
+`--proxy-rdp` exists because the kiosk only scans its own subnet, and the guest's
+subnet is QEMU's, not yours. It forwards host port 3389 to your server, and the
+guest sees it as `10.0.2.2` — pick that, type your credentials, and you get the
+real desktop.
+
+Other options: `--headless` boots and writes a screenshot instead of opening a
+window, and `--entry=N` picks a boot menu entry (1 is Turkish, 2 logs the whole
+RDP handshake to `dist/qemu-serial.log`).
+
+If a connection fails and the on-screen message is not enough, boot the
+**RDP handshake debug** entry from the GRUB menu; it prints every protocol step
+to the serial console.
 
 ### Test against a real RDP server
 
@@ -109,7 +137,10 @@ nothing this decoder understands, and that looks exactly like a black screen.
   that send only those will show nothing. Every Windows server tested still
   falls back to legacy bitmap updates, which work.
 - **No manual host entry.** The kiosk connects to hosts it discovers on its own
-  subnet; there is no box to type an address into.
+  subnet; there is no box to type an address into. A server on another subnet
+  cannot be reached at all.
+- **Resolution follows the framebuffer** the kernel hands over, and the session
+  is opened at that size. There is no way to override it.
 - **Clipboard, audio and drive redirection are not implemented.**
 
 ## Layout

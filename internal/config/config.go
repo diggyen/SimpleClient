@@ -15,6 +15,7 @@ type Config struct {
 	ScanTimeout time.Duration
 	MaxWorkers  int
 	Language    string
+	RDPDebug    bool
 }
 
 // Load parses command-line flags and returns a Config.
@@ -28,6 +29,9 @@ func Load() Config {
 	flag.IntVar(&cfg.MaxWorkers, "workers", 256, "Concurrent scan workers")
 	flag.StringVar(&cfg.Language, "lang", string(i18n.Default),
 		"Startup UI language: en or tr (toggle at runtime with F2)")
+	flag.BoolVar(&cfg.RDPDebug, "rdp-debug", false,
+		"Log the full RDP handshake to stderr. Diagnostic only: the RDP library "+
+			"prints the password in clear text at this level.")
 	flag.Parse()
 	return cfg
 }

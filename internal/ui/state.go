@@ -25,7 +25,14 @@ type ModalState struct {
 
 // UIState is the complete mutable state of the UI layer.
 type UIState struct {
-	Mu           sync.Mutex
+	Mu sync.Mutex
+
+	// Dirty marks the state as needing a repaint. The render loop only draws
+	// when it is set, so anything that changes what is on screen has to set it
+	// — including the connect goroutine, whose result would otherwise never be
+	// painted and would leave the kiosk showing "Connecting..." forever.
+	Dirty bool
+
 	Screen       Screen
 	Hosts        []domain.Host
 	SelectedIdx  int
@@ -42,6 +49,8 @@ type UIState struct {
 // Transition moves the UI to a new screen.
 // Only whitelisted transitions are allowed per IMPLEMENTATION.md 2.1.
 func (s *UIState) Transition(to Screen) {
+	s.Dirty = true
+
 	allowed := map[Screen][]Screen{
 		ScreenDiscovery:  {ScreenModal},
 		ScreenModal:      {ScreenDiscovery, ScreenConnecting},
@@ -94,6 +103,8 @@ func (s *UIState) VisibleHosts(maxRows int) []domain.Host {
 
 // HandleScanEvent updates state in response to a scanner event.
 func (s *UIState) HandleScanEvent(ev domain.ScanEvent) {
+	s.Dirty = true
+
 	switch ev.Type {
 	case domain.EventHostFound:
 		if ev.Host != nil {
@@ -124,6 +135,8 @@ func (s *UIState) HandleScanEvent(ev domain.ScanEvent) {
 
 // MoveSelection moves the host list cursor by delta, clamped to valid range.
 func (s *UIState) MoveSelection(delta, maxRows int) {
+	s.Dirty = true
+
 	s.SelectedIdx += delta
 	if s.SelectedIdx < 0 {
 		s.SelectedIdx = 0

@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"testing"
+	"time"
 
 	"github.com/tomatome/grdp/client"
 )
@@ -154,4 +155,79 @@ func TestBitmapToImage_PositionedByDest(t *testing.T) {
 	if got != want {
 		t.Errorf("bounds = %v, want %v", got, want)
 	}
+}
+
+// Tiles must not be discarded when the consumer falls behind: RDP never resends
+// one, so a dropped tile is a hole in the desktop that never fills in. The
+// client queues deeply and then applies backpressure instead.
+func TestClient_TilesAreNotDropped(t *testing.T) {
+	c := newTestClient()
+	defer c.shutdown()
+
+	const n = 200
+	go func() {
+		for i := 0; i < n; i++ {
+			c.push(image.NewNRGBA(image.Rect(i, 0, i+1, 1)))
+		}
+	}()
+
+	for i := 0; i < n; i++ {
+		select {
+		case img := <-c.Frames():
+			if got := img.Bounds().Min.X; got != i {
+				t.Fatalf("tile %d arrived out of order (Min.X = %d)", i, got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of %d tiles arrived", i, n)
+		}
+	}
+}
+
+// Closing must unblock a consumer ranging over Frames, otherwise the UI stays
+// on a dead session forever.
+func TestClient_CloseEndsTheFrameRange(t *testing.T) {
+	c := newTestClient()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range c.Frames() {
+		}
+	}()
+
+	c.shutdown()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ranging over Frames did not return after shutdown")
+	}
+}
+
+// shutdown is called from both OnClose and Close and must tolerate that.
+func TestClient_ShutdownIsIdempotent(t *testing.T) {
+	c := newTestClient()
+	c.shutdown()
+	c.shutdown()
+	c.shutdown()
+}
+
+// A tile pushed during teardown must not panic on a closed channel.
+func TestClient_PushAfterShutdown(t *testing.T) {
+	c := newTestClient()
+	c.shutdown()
+	c.push(image.NewNRGBA(image.Rect(0, 0, 1, 1)))
+}
+
+// newTestClient builds a Client with its pump running but no live connection.
+func newTestClient() *Client {
+	c := &Client{
+		frames: make(chan image.Image, 8),
+		raw:    make(chan image.Image, tileBacklog),
+		done:   make(chan struct{}),
+		width:  1024,
+		height: 768,
+	}
+	go c.pump()
+	return c
 }

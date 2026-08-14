@@ -16,6 +16,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
+	"github.com/diggyen/SimpleClient/internal/rdp"
 	"github.com/diggyen/SimpleClient/internal/scanner"
 	"github.com/diggyen/SimpleClient/internal/ui"
 )
@@ -23,6 +24,7 @@ import (
 func main() {
 	cfg := config.Load()
 	i18n.Set(cfg.Lang())
+	rdp.Debug = cfg.RDPDebug
 
 	// The framebuffer is the only hard requirement: without it there is nothing
 	// to draw on and no way to tell the user anything.

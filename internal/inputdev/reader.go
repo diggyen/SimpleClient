@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+
 	"os"
 	"strings"
 	"sync"
@@ -290,27 +291,48 @@ func detectDevice(kind string) (string, error) {
 	}
 	defer f.Close()
 
-	// /proc/bus/input/devices lines look like:
-	// N: Name="AT Translated Set 2 keyboard"
-	// H: Handlers=sysrq kbd event0
+	return findDevice(f, kind)
+}
+
+// findDevice scans the /proc/bus/input/devices format for the first device
+// whose name matches kind, and returns its evdev node.
+//
+// A device block looks like:
+//
+//	I: Bus=0011 Vendor=0001 Product=0001 Version=ab41
+//	N: Name="AT Translated Set 2 keyboard"
+//	H: Handlers=sysrq kbd event0
+//
+// The handler list has to be split after stripping "Handlers=", not before:
+// when evdev is the only handler the line reads "H: Handlers=event1" and the
+// node is glued to the key. Splitting on whitespace alone finds the node for a
+// keyboard (which lists sysrq and kbd first) but silently misses a mouse.
+func findDevice(r io.Reader, kind string) (string, error) {
 	var name string
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "N: Name=") {
+		switch {
+		case strings.HasPrefix(line, "I: "):
+			// Start of a new device block; drop the previous name so a block
+			// without one cannot inherit it.
+			name = ""
+		case strings.HasPrefix(line, "N: Name="):
 			name = strings.ToLower(line)
-		}
-		if strings.HasPrefix(line, "H: Handlers=") {
-			if matchesKind(name, kind) {
-				// Extract event node.
-				fields := strings.Fields(line)
-				for _, f := range fields {
-					if strings.HasPrefix(f, "event") {
-						return "/dev/input/" + f, nil
-					}
+		case strings.HasPrefix(line, "H: Handlers="):
+			if !matchesKind(name, kind) {
+				continue
+			}
+			handlers := strings.TrimPrefix(line, "H: Handlers=")
+			for _, h := range strings.Fields(handlers) {
+				if strings.HasPrefix(h, "event") {
+					return "/dev/input/" + h, nil
 				}
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("reading input devices: %w", err)
 	}
 	return "", fmt.Errorf("no %s device found in /proc/bus/input/devices", kind)
 }

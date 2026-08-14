@@ -25,9 +25,14 @@ echo 0 > /proc/sys/kernel/printk 2>/dev/null
 #              to userspace and the kiosk cannot be operated at all
 #   af_packet  udhcpc opens an AF_PACKET socket to send its DHCP discover
 #   simpledrm  turns the framebuffer GRUB hands over into /dev/fb0
+#   virtio_rng   seeds the entropy pool in a VM. RDP's NLA handshake is the
+#                first thing here to want randomness, and on a machine with no
+#                disk, no entropy-gathering daemon and a CPU whose RDRAND the
+#                kernel does not trust, getrandom() blocks — the connection then
+#                fails with a timeout against a server that is answering fine.
 for m in evdev af_packet simpledrm bochs virtio_pci virtio_net virtio_gpu \
-         e1000 e1000e r8169 igb igc tg3 atkbd psmouse usbhid hid_generic \
-         xhci_pci ehci_pci; do
+         virtio_rng e1000 e1000e r8169 igb igc tg3 atkbd psmouse usbhid \
+         hid_generic xhci_pci ehci_pci; do
     modprobe "$m" 2>/dev/null
 done
 
@@ -42,17 +47,41 @@ else
     log "fb0: $(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null) bpp=$(cat /sys/class/graphics/fb0/bits_per_pixel 2>/dev/null) driver=$(cat /sys/class/graphics/fb0/name 2>/dev/null)"
 fi
 
+# ── Input ─────────────────────────────────────────────────────────────────────
+# Input devices do not all appear the moment their module loads: psmouse spends
+# about a second probing the PS/2 protocol, and USB devices take longer still to
+# enumerate. Starting the kiosk immediately means auto-detect runs before the
+# mouse exists and the session ends up keyboard-only. Wait for one, but never
+# hold up the boot for more than a few seconds — a machine with no mouse is
+# still perfectly usable with the arrow keys.
+i=0
+while [ "$i" -lt 20 ]; do
+    if grep -qiE '^N: Name=.*(mouse|touchpad)' /proc/bus/input/devices 2>/dev/null; then
+        break
+    fi
+    i=$((i + 1))
+    sleep 0.25
+done
+
+log "input: $(ls /dev/input/event* 2>/dev/null | tr '\n' ' ')"
+log "input names: $(grep -h '^N: Name=' /proc/bus/input/devices 2>/dev/null | tr '\n' ' ')"
+log "entropy: $(cat /proc/sys/kernel/random/entropy_avail 2>/dev/null) hwrng=$(cat /sys/class/misc/hw_random/rng_current 2>/dev/null)"
 if [ -z "$(ls /dev/input/event* 2>/dev/null)" ]; then
-    log "WARNING: no /dev/input/event* — keyboard will not work"
+    log "WARNING: no /dev/input/event* — the keyboard will not work"
 fi
 
 # ── Kernel command line options ───────────────────────────────────────────────
 # lang=tr on the GRUB command line selects the startup UI language. F2 still
 # toggles it at runtime.
+# rdpdebug logs the whole RDP handshake to the console, which grub.cfg points at
+# the serial port. Diagnostic only — the RDP library prints the password in
+# clear text at that level.
 LANG_ARG=""
+RDP_ARG=""
 for arg in $(cat /proc/cmdline 2>/dev/null); do
     case "$arg" in
-        lang=*) LANG_ARG="-lang=${arg#lang=}" ;;
+        lang=*)   LANG_ARG="-lang=${arg#lang=}" ;;
+        rdpdebug) RDP_ARG="-rdp-debug" ;;
     esac
 done
 
@@ -92,7 +121,7 @@ fi
 # ── Kiosk loop ────────────────────────────────────────────────────────────────
 # Restart simpleclient if it exits, so a crash does not leave a blank screen.
 while true; do
-    /sbin/simpleclient $LANG_ARG
+    /sbin/simpleclient $LANG_ARG $RDP_ARG
     log "simpleclient exited ($?); restarting in 2s"
     sleep 2
 done

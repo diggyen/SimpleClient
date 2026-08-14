@@ -18,30 +18,55 @@ type Credentials struct {
 	Domain   string
 }
 
-// connectTimeout bounds the whole handshake: TCP dial, x224, MCS, licensing and
-// capability exchange. Ten seconds is generous for a LAN and short enough that a
-// wrong password does not leave the kiosk staring at a spinner.
-const connectTimeout = 10 * time.Second
+// connectTimeout bounds the whole handshake: TCP dial, x224, NLA, MCS,
+// licensing and capability exchange.
+//
+// Thirty seconds rather than ten. The NLA step is CPU-bound public-key work,
+// and this runs on thin-client hardware — the sort of machine this image exists
+// for, and slower still under emulation. Ten seconds was enough on a developer
+// laptop and timed out on anything weaker, reporting "server unreachable" for a
+// server that was answering perfectly well. The connecting screen animates
+// throughout, so a longer wait reads as progress rather than a hang.
+const connectTimeout = 30 * time.Second
+
+// tileBacklog is how many screen-update tiles may be queued before the RDP
+// reader is made to wait.
+//
+// RDP never resends a tile it has already sent, so a dropped tile is a hole in
+// the desktop that stays there until something happens to repaint that exact
+// region. Queue deeply and then apply backpressure rather than discarding:
+// a session that briefly lags is far better than one permanently full of black
+// rectangles.
+const tileBacklog = 512
 
 // Client wraps grdp/client and provides frame streaming and input forwarding.
 type Client struct {
 	g      *client.Client
 	frames chan image.Image
+	raw    chan image.Image
 	done   chan struct{}
 	width  int
 	height int
 
-	// mu guards closed and serialises sends on frames against closing it.
-	mu     sync.Mutex
-	closed bool
+	// closeOnce guards done; frames is closed only by the pump goroutine, which
+	// is its sole owner, so no send can ever race with the close.
+	closeOnce sync.Once
 }
 
-// New creates and connects an RDP client. Times out after 10 seconds.
+// Debug turns on the RDP library's full handshake logging. It is a diagnostic
+// switch only: grdp prints the password in clear text at this level, which is
+// why the default stays at WARN.
+var Debug bool
+
+// New creates and connects an RDP client.
 func New(addr string, creds Credentials, width, height int) (*Client, error) {
 	setting := client.NewSetting()
 	setting.Width = width
 	setting.Height = height
 	setting.LogLevel = glog.WARN
+	if Debug {
+		setting.LogLevel = glog.DEBUG
+	}
 
 	// For domain authentication pass "domain\user" as the user string.
 	user := creds.Username
@@ -53,11 +78,13 @@ func New(addr string, creds Credentials, width, height int) (*Client, error) {
 
 	c := &Client{
 		g:      g,
-		frames: make(chan image.Image, 4),
+		frames: make(chan image.Image, 8),
+		raw:    make(chan image.Image, tileBacklog),
 		done:   make(chan struct{}),
 		width:  width,
 		height: height,
 	}
+	go c.pump()
 
 	// Login has to come first. grdp's RdpClient is an empty struct until Login
 	// builds the protocol stack, and every On* registration dereferences the
@@ -114,41 +141,39 @@ func New(addr string, creds Credentials, width, height int) (*Client, error) {
 	}
 }
 
-// push hands a decoded tile to the frame consumer, dropping the oldest frame
-// when the consumer has fallen behind. Sends are serialised with shutdown so a
-// tile arriving during teardown cannot be written to a closed channel.
+// push queues a decoded tile, blocking once the backlog is full so that the
+// server is slowed down rather than tiles being thrown away. raw is never
+// closed, so this can never send on a closed channel.
 func (c *Client) push(img image.Image) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return
-	}
 	select {
-	case c.frames <- img:
-	default:
+	case c.raw <- img:
+	case <-c.done:
+	}
+}
+
+// pump owns frames: it is the only goroutine that sends on it and the only one
+// that closes it. Closing is what lets the UI's "for frame := range Frames()"
+// loop return and put the kiosk back on the discovery screen; without it a
+// dropped session left the UI stuck on a dead one.
+func (c *Client) pump() {
+	defer close(c.frames)
+	for {
 		select {
-		case <-c.frames:
-		default:
-		}
-		select {
-		case c.frames <- img:
-		default:
+		case <-c.done:
+			return
+		case img := <-c.raw:
+			select {
+			case c.frames <- img:
+			case <-c.done:
+				return
+			}
 		}
 	}
 }
 
-// shutdown closes the frame channel exactly once. Closing it is what lets the
-// UI's "for frame := range client.Frames()" loop return and put the kiosk back
-// on the discovery screen; without it a dropped session left the UI stuck.
+// shutdown signals teardown exactly once.
 func (c *Client) shutdown() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return
-	}
-	c.closed = true
-	close(c.done)
-	close(c.frames)
+	c.closeOnce.Do(func() { close(c.done) })
 }
 
 // Frames returns the channel of incoming video frames.
