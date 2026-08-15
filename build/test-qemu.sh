@@ -14,9 +14,28 @@
 #           server elsewhere on your network can never be discovered directly;
 #           this bridges it in as 10.0.2.2 for a full click-through demo.
 #   bash build/test-qemu.sh --entry=1           boot the Turkish menu entry
+#   bash build/test-qemu.sh --usb               attach the ISO as a USB disk
+#   bash build/test-qemu.sh --uefi              boot via UEFI firmware, not BIOS
 #
 # The headless mode is the end-to-end check: it proves the ISO boots, the
 # framebuffer comes up and the UI actually draws, none of which unit tests cover.
+#
+# --usb and --uefi exist because the default here is neither of the ways this
+# actually ships. A plain run attaches the ISO to an emulated CD-ROM and boots
+# it with SeaBIOS, which exercises El Torito and legacy BIOS — but the image
+# goes onto a USB stick, and most machines that stick goes into are UEFI. Those
+# use different structures entirely (the hybrid MBR/GPT, the EFI system
+# partition, BOOTX64.EFI), so a green CD-ROM run says nothing about them. Run
+# all four combinations before trusting an ISO on real hardware:
+#
+#   bash build/test-qemu.sh --headless
+#   bash build/test-qemu.sh --headless --usb
+#   bash build/test-qemu.sh --headless --uefi
+#   bash build/test-qemu.sh --headless --usb --uefi
+#
+# Secure Boot is still not covered: the firmware below enrols no keys, so it
+# never enforces. GRUB's BOOTX64.EFI here is unsigned and a machine that does
+# enforce will refuse it — silently, looking exactly like an empty stick.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -25,10 +44,15 @@ ISO="${ROOT_DIR}/dist/simpleclient.iso"
 
 HEADLESS=0
 FAKE_RDP=0
+USB=0
+UEFI=0
 PROXY_TARGET=""
 # Which GRUB menu entry to boot: 0 = English, 1 = Turkish, 2 = verbose debug.
 ENTRY=0
-BOOT_WAIT="${BOOT_WAIT:-45}"
+# Overridable, but the default has to follow the firmware: OVMF spends roughly
+# 20s enumerating devices before it even reaches the boot entry, so the BIOS
+# default times out mid-boot under --uefi and reports a working image as broken.
+BOOT_WAIT_DEFAULT=45
 SHOT="${SHOT:-${ROOT_DIR}/dist/qemu-screenshot.png}"
 SERIAL_LOG="${SERIAL_LOG:-${ROOT_DIR}/dist/qemu-serial.log}"
 
@@ -38,6 +62,8 @@ for arg in "$@"; do
         --fake-rdp)    FAKE_RDP=1 ;;
         --proxy-rdp=*) PROXY_TARGET="${arg#--proxy-rdp=}" ;;
         --entry=*)     ENTRY="${arg#--entry=}" ;;
+        --usb)         USB=1 ;;
+        --uefi)        UEFI=1 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -54,6 +80,7 @@ cleanup() {
     [ -n "${QEMU_PID:-}" ] && kill "$QEMU_PID" 2>/dev/null
     [ -n "$HELPER_PID" ] && kill "$HELPER_PID" 2>/dev/null
     [ -n "$MON" ] && rm -f "$MON"
+    [ -n "${OVMF_VARS_COPY:-}" ] && rm -f "$OVMF_VARS_COPY"
     return 0
 }
 trap cleanup EXIT INT TERM
@@ -146,6 +173,63 @@ elif [ "$FAKE_RDP" = "1" ]; then
     start_fake_rdp
 fi
 
+# ── How the image is attached, and which firmware boots it ────────────────────
+
+# MEDIA_ARGS presents the ISO either as a CD-ROM or as a USB mass-storage
+# device. The USB form is what a written stick looks like to the firmware: it
+# has to find the hybrid MBR or the GPT rather than an El Torito catalogue.
+if [ "$USB" = "1" ]; then
+    MEDIA_ARGS=(
+        -drive "if=none,id=usbstick,format=raw,readonly=on,file=${ISO}"
+        -device qemu-xhci
+        -device usb-storage,drive=usbstick,bootindex=0
+    )
+else
+    MEDIA_ARGS=(-boot d -cdrom "$ISO")
+fi
+
+FIRMWARE_ARGS=()
+OVMF_VARS_COPY=""
+if [ "$UEFI" = "1" ]; then
+    # Package layout differs per distribution; take the first that exists.
+    OVMF_CODE=""
+    OVMF_VARS=""
+    for pair in \
+        "/opt/homebrew/share/qemu/edk2-x86_64-code.fd:/opt/homebrew/share/qemu/edk2-i386-vars.fd" \
+        "/usr/local/share/qemu/edk2-x86_64-code.fd:/usr/local/share/qemu/edk2-i386-vars.fd" \
+        "/usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd" \
+        "/usr/share/edk2/ovmf/OVMF_CODE.fd:/usr/share/edk2/ovmf/OVMF_VARS.fd" \
+        "/usr/share/qemu/edk2-x86_64-code.fd:/usr/share/qemu/edk2-i386-vars.fd"
+    do
+        if [ -f "${pair%%:*}" ] && [ -f "${pair##*:}" ]; then
+            OVMF_CODE="${pair%%:*}"; OVMF_VARS="${pair##*:}"; break
+        fi
+    done
+    if [ -z "$OVMF_CODE" ]; then
+        echo "ERROR: --uefi needs OVMF/edk2 firmware, which was not found." >&2
+        echo "  macOS:  brew install qemu (ships it)" >&2
+        echo "  Debian: apt install ovmf" >&2
+        exit 1
+    fi
+
+    # The variable store is written during boot, so it cannot be the read-only
+    # packaged copy. A fresh one each run also means no stale boot entry can
+    # make a broken image look bootable.
+    OVMF_VARS_COPY="$(mktemp /tmp/simpleclient-ovmf-vars.XXXXXX)"
+    cp "$OVMF_VARS" "$OVMF_VARS_COPY"
+    FIRMWARE_ARGS=(
+        -machine q35
+        -drive "if=pflash,format=raw,unit=0,readonly=on,file=${OVMF_CODE}"
+        -drive "if=pflash,format=raw,unit=1,file=${OVMF_VARS_COPY}"
+    )
+    echo "firmware: UEFI ($(basename "$OVMF_CODE"))"
+    BOOT_WAIT_DEFAULT=75
+else
+    echo "firmware: legacy BIOS (SeaBIOS)"
+fi
+BOOT_WAIT="${BOOT_WAIT:-$BOOT_WAIT_DEFAULT}"
+[ "$USB" = "1" ] && echo "media: USB mass storage" || echo "media: CD-ROM"
+
 # ── Interactive ───────────────────────────────────────────────────────────────
 if [ "$HEADLESS" = "0" ]; then
     cat <<'EOF'
@@ -163,8 +247,8 @@ EOF
         -name simpleclient \
         -m 512M \
         -smp 2 \
-        -boot d \
-        -cdrom "$ISO" \
+        ${FIRMWARE_ARGS[@]+"${FIRMWARE_ARGS[@]}"} \
+        ${MEDIA_ARGS[@]+"${MEDIA_ARGS[@]}"} \
         -vga std \
         -device virtio-rng-pci \
         -device e1000,netdev=net0 \
@@ -185,8 +269,8 @@ qemu-system-x86_64 \
     -name simpleclient-headless \
     -m 512M \
     -smp 2 \
-    -boot d \
-    -cdrom "$ISO" \
+    ${FIRMWARE_ARGS[@]+"${FIRMWARE_ARGS[@]}"} \
+    ${MEDIA_ARGS[@]+"${MEDIA_ARGS[@]}"} \
     -vga std \
     -display none \
     -monitor "unix:${MON},server,nowait" \
