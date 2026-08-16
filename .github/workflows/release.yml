@@ -33,6 +33,7 @@ jobs:
       - name: Build ISO
         run: |
           docker buildx build \
+            --build-arg VERSION=${{ github.ref_name }} \
             --target export \
             --output type=local,dest=dist \
             -f build/Dockerfile .

@@ -176,6 +176,20 @@ gh release download v0.3.2 --repo diggyen/SimpleClient --dir /tmp/rel
 cd /tmp/rel && shasum -a 256 -c SHA256SUMS
 ```
 
+## Versioning
+
+The version is stamped at link time into `internal/version` and drawn along the
+bottom of the discovery screen. The kiosk has no shell, so that line is the only
+way to tell which build is in front of you — which is why the issue template
+asks for it.
+
+`make` derives it from `git describe`, so a working tree that is not exactly a
+tag says so (`v0.3.1-1-g0ebf4aa-dirty`). A plain `go build` leaves it at `dev`:
+a binary not built from a tag should not claim to be a release. The release
+workflow passes the tag; CI passes `git describe`, which is why the ISO job
+checks out with `fetch-depth: 0` — the default shallow clone has no tags to
+describe against.
+
 ## Conventions
 
 - **Comments explain why, not what.** The code says what it does. A comment

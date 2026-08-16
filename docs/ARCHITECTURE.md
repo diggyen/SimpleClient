@@ -62,7 +62,9 @@ machine came up with a working mouse and a dead keyboard and there was nothing
 to look at.
 
 The GRUB menu's debug entry adds `console=ttyS0` verbosity and the full RDP
-handshake trace.
+handshake trace. For the same reason the build version is drawn along the bottom
+of the discovery screen: it is the only way to tell which image is running
+without taking the stick out.
 
 ## Rendering
 

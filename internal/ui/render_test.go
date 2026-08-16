@@ -10,6 +10,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
+	"github.com/diggyen/SimpleClient/internal/version"
 )
 
 func TestRenderDiscovery_Empty(t *testing.T) {
@@ -410,5 +411,54 @@ func TestRenderModal_ShowsSelectedHost(t *testing.T) {
 
 	if bytes.Equal(withHost.Pix, withoutHost.Pix) {
 		t.Fatal("the dialog should name the selected host in its header")
+	}
+}
+
+// The footer separator is non-ASCII. Go Mono covers it, but the braille spinner
+// frames this project once shipped were also "obviously fine" and rendered as
+// nothing at all.
+func TestDrawText_FooterSeparatorRenders(t *testing.T) {
+	img := newTestImage(8*CharW, 4*CharH)
+	DrawText(img, 0, 0, buildSep, ColorText)
+	if countInk(img) == 0 {
+		t.Fatalf("separator %q rendered no pixels", buildSep)
+	}
+}
+
+// The kiosk has no shell and no other way to be asked what it is, so the build
+// has to be readable off the screen — the issue template asks reporters for it.
+func TestRenderDiscovery_ShowsTheVersion(t *testing.T) {
+	orig := version.Version
+	t.Cleanup(func() { version.Version = orig })
+
+	render := func() *image.RGBA {
+		fb := framebuffer.NewMock(1280, 800)
+		back := image.NewRGBA(fb.Bounds())
+		renderDiscovery(back, &UIState{Screen: ScreenDiscovery, ScanDone: true})
+		return back
+	}
+
+	version.Version = "v9.9.9"
+	a := render()
+	version.Version = "v1.1.1"
+	b := render()
+
+	if bytes.Equal(a.Pix, b.Pix) {
+		t.Fatal("the discovery screen renders identically for two different builds")
+	}
+}
+
+// Whatever the version string is, the footer must stay on screen: a dirty
+// working tree produces something far longer than a tag.
+func TestRenderDiscovery_LongVersionStaysOnScreen(t *testing.T) {
+	orig := version.Version
+	t.Cleanup(func() { version.Version = orig })
+	version.Version = "v0.3.1-14-gdeadbee-dirty"
+
+	for _, w := range []int{640, 800, 1024, 1280, 1920} {
+		footer := TextWidth(gitURL+buildSep+version.Version, false)
+		if footer > w-2*padding {
+			t.Errorf("w=%d: footer line is %dpx and does not fit", w, footer)
+		}
 	}
 }

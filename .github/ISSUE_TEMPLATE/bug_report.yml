@@ -25,7 +25,9 @@ body:
     id: version
     attributes:
       label: Version
-      description: The release tag, and the sha256 of the ISO you wrote.
+      description: >
+        The kiosk prints this along the bottom of the discovery screen. Include
+        the sha256 of the ISO you wrote as well.
       placeholder: v0.3.1 — d3179b6a…
     validations:
       required: true

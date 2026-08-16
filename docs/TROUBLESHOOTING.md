@@ -193,5 +193,6 @@ Open an issue with:
 
 - the full serial console output from the debug entry — this is the single most
   useful thing, and only you can capture it
-- the release version, and the `sha256` of the ISO you wrote
+- the version, which the kiosk prints along the bottom of the discovery screen,
+  and the `sha256` of the ISO you wrote
 - the machine: make/model, firmware mode (UEFI or legacy), Secure Boot state

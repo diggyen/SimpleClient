@@ -15,7 +15,13 @@ CGO_ENABLED := 0
 # vendor/ is committed and patched (see build/patches/), so every go invocation
 # must use it rather than the module cache.
 GOFLAGS     := -mod=vendor
-LDFLAGS     := -s -w
+
+# Stamped into the binary and drawn on the discovery screen. The kiosk has no
+# shell, so reading it off the screen is the only way to tell which build is in
+# front of you. A working tree that is not exactly a tag says so.
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION_PKG := github.com/diggyen/SimpleClient/internal/version
+LDFLAGS     := -s -w -X $(VERSION_PKG).Version=$(VERSION)
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //'
@@ -45,6 +51,7 @@ iso: docker-build
 docker-build:
 	@mkdir -p $(OUT_DIR)
 	docker build \
+	    --build-arg VERSION=$(VERSION) \
 	    --target export \
 	    --output type=local,dest=$(OUT_DIR) \
 	    -f build/Dockerfile .

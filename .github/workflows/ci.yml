@@ -67,6 +67,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # git describe stamps the version into the binary, and the default
+          # shallow checkout fetches no tags for it to describe against.
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -74,6 +78,7 @@ jobs:
       - name: Build ISO
         run: |
           docker buildx build \
+            --build-arg VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)" \
             --target export \
             --output type=local,dest=dist \
             -f build/Dockerfile .

@@ -7,12 +7,17 @@ import (
 
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/i18n"
+	"github.com/diggyen/SimpleClient/internal/version"
 )
 
 const (
 	padding = 8 // general padding
 
 	gitURL = "github.com/diggyen/SimpleClient"
+
+	// Separator between the project and the build on the footer line. Go Mono
+	// covers U+00B7; TestDrawText_FooterSeparatorRenders keeps it honest.
+	buildSep = "  \u00b7  "
 )
 
 // Discovery card metrics. The card is centred rather than stretched edge to
@@ -429,8 +434,18 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout) {
 		x += TextWidth(h[1], false) + pairGap
 	}
 
+	// Project and build, on one centred line. The version is a shade brighter
+	// than the URL: it is the one thing on this screen someone reporting a fault
+	// has to be able to read back, and the kiosk offers no other way to ask.
+	ver := version.Version
+	x = l.Screen.Min.X + (l.Screen.Dx()-TextWidth(gitURL+buildSep+ver, false))/2
 	urlY := y + CharH + 18
-	DrawText(img, l.Screen.Min.X+(l.Screen.Dx()-TextWidth(gitURL, false))/2, urlY, gitURL, ColorFaint)
+
+	DrawText(img, x, urlY, gitURL, ColorFaint)
+	x += TextWidth(gitURL, false)
+	DrawText(img, x, urlY, buildSep, ColorFaint)
+	x += TextWidth(buildSep, false)
+	DrawText(img, x, urlY, ver, ColorDim)
 }
 
 // drawScrollBar shows the visible portion of a list too long for the card.

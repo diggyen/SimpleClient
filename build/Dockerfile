@@ -16,6 +16,10 @@ ARG ALPINE_VERSION=3.20
 # ── Go binary ─────────────────────────────────────────────────────────────────
 FROM --platform=linux/amd64 golang:1.23-alpine AS go-builder
 
+# Passed in rather than derived here: .git is not in the build context, so the
+# tag can only be known on the host.
+ARG VERSION=dev
+
 WORKDIR /src
 
 # vendor/ is committed, so there is nothing to download and no network needed.
@@ -25,7 +29,9 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -mod=vendor -ldflags '-s -w' -o /out/simpleclient ./cmd/simpleclient
+    go build -mod=vendor \
+      -ldflags "-s -w -X github.com/diggyen/SimpleClient/internal/version.Version=${VERSION}" \
+      -o /out/simpleclient ./cmd/simpleclient
 
 # ── Kernel + initramfs ────────────────────────────────────────────────────────
 FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS rootfs-builder
