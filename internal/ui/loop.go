@@ -266,7 +266,7 @@ func handleMouseClick(
 	case ScreenDiscovery:
 		// Hit-testing goes through the same layout the renderer used, so a
 		// click always lands on the row the user actually sees.
-		rowIdx := layoutDiscoveryFor(fb.Bounds(), len(state.Hosts)).rowAt(mx, my)
+		rowIdx := layoutDiscoveryFor(fb.Bounds(), state.Hosts).rowAt(mx, my)
 		if rowIdx < 0 {
 			return
 		}

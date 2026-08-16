@@ -20,7 +20,7 @@ func TestRenderDiscovery_Empty(t *testing.T) {
 	Render(fb, back, state, 640, 360)
 
 	// The host list lives on a centred card, not an edge-to-edge bar.
-	l := layoutDiscoveryFor(fb.Bounds(), len(state.Hosts))
+	l := layoutDiscoveryFor(fb.Bounds(), state.Hosts)
 	// Sample the header strip between the title and the count, clear of text.
 	if got := back.RGBAAt(l.Card.Min.X+l.Card.Dx()/2, l.Card.Min.Y+4); got != ColorCardHeader {
 		t.Fatalf("card header = %v, want ColorCardHeader", got)
@@ -126,7 +126,7 @@ func TestRenderDiscovery_ThreeHosts(t *testing.T) {
 	Render(fb, back, state, 0, 0)
 
 	// The list area should have non-bg pixels (host rows rendered).
-	l := layoutDiscoveryFor(fb.Bounds(), len(state.Hosts))
+	l := layoutDiscoveryFor(fb.Bounds(), state.Hosts)
 	row := l.rowRect(0)
 	hasContent := false
 	for x := row.Min.X; x < row.Max.X; x++ {
@@ -153,7 +153,7 @@ func TestRenderDiscovery_SelectedRow(t *testing.T) {
 	renderDiscovery(back, state)
 
 	// The selected row carries the accent bar on its leading edge.
-	l := layoutDiscoveryFor(fb.Bounds(), len(state.Hosts))
+	l := layoutDiscoveryFor(fb.Bounds(), state.Hosts)
 	row := l.rowRect(0)
 	if got := back.RGBAAt(row.Min.X, row.Min.Y+row.Dy()/2); got != ColorAccent {
 		t.Fatalf("selected row leading edge = %v, want the accent bar", got)
@@ -336,7 +336,7 @@ func TestLayoutDiscovery_CardGrowsWithTheList(t *testing.T) {
 	screen := image.Rect(0, 0, 1280, 800)
 	full := layoutDiscovery(screen)
 
-	short := layoutDiscoveryFor(screen, 3)
+	short := layoutDiscoveryFor(screen, sampleHosts(3))
 	if short.Rows >= full.Rows {
 		t.Errorf("a 3-host card shows %d rows, the full card %d — it should be smaller",
 			short.Rows, full.Rows)
@@ -345,7 +345,7 @@ func TestLayoutDiscovery_CardGrowsWithTheList(t *testing.T) {
 		t.Error("a short list should produce a shorter card")
 	}
 
-	long := layoutDiscoveryFor(screen, 500)
+	long := layoutDiscoveryFor(screen, sampleHosts(500))
 	if long != full {
 		t.Error("a list longer than the screen must use the same layout as Run's")
 	}
@@ -459,6 +459,57 @@ func TestRenderDiscovery_LongVersionStaysOnScreen(t *testing.T) {
 		footer := TextWidth(gitURL+buildSep+version.Version, false)
 		if footer > w-2*padding {
 			t.Errorf("w=%d: footer line is %dpx and does not fit", w, footer)
+		}
+	}
+}
+
+// A list of bare IPs gets a narrower card: with no reverse DNS the address
+// column would repeat the name column, and paying for it leaves the card mostly
+// whitespace around fifteen characters of text.
+func TestLayoutDiscovery_NarrowsWhenThereAreNoHostnames(t *testing.T) {
+	screen := image.Rect(0, 0, 1280, 800)
+
+	named := make([]domain.Host, 3)
+	bare := make([]domain.Host, 3)
+	for i := range named {
+		ip := net.IPv4(10, 0, 0, byte(i+1))
+		named[i] = domain.Host{IP: ip, Hostname: "dc0" + string(rune('1'+i))}
+		bare[i] = domain.Host{IP: ip}
+	}
+
+	wide := layoutDiscoveryFor(screen, named)
+	narrow := layoutDiscoveryFor(screen, bare)
+
+	if !wide.Address {
+		t.Error("a list with hostnames should carry the address column")
+	}
+	if narrow.Address {
+		t.Error("a list of bare IPs should not carry the address column")
+	}
+	if narrow.Card.Dx() >= wide.Card.Dx() {
+		t.Errorf("narrow card is %dpx, wide is %dpx — it should be smaller",
+			narrow.Card.Dx(), wide.Card.Dx())
+	}
+	if left, right := narrow.Card.Min.X, screen.Max.X-narrow.Card.Max.X; left != right {
+		t.Errorf("narrow card is not centred (%d left, %d right)", left, right)
+	}
+}
+
+// Run sizes its scrolling window from layoutDiscovery, but hit-tests clicks
+// against the layout for the hosts actually on screen. If the card's width
+// could change how many rows fit, those two would disagree and a click would
+// select a different host from the one under the pointer.
+func TestLayoutDiscovery_RowCountIsIndependentOfWidth(t *testing.T) {
+	for _, s := range [][2]int{{640, 480}, {1024, 768}, {1280, 800}, {1920, 1080}} {
+		screen := image.Rect(0, 0, s[0], s[1])
+		wide := layoutDiscoveryRows(screen, 1<<30, true)
+		narrow := layoutDiscoveryRows(screen, 1<<30, false)
+
+		if wide.Rows != narrow.Rows {
+			t.Errorf("%dx%d: %d rows wide, %d narrow", s[0], s[1], wide.Rows, narrow.Rows)
+		}
+		if wide.RowH != narrow.RowH || wide.List.Min.Y != narrow.List.Min.Y {
+			t.Errorf("%dx%d: the rows do not start at the same place", s[0], s[1])
 		}
 	}
 }

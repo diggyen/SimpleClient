@@ -24,8 +24,14 @@ const (
 // edge: a full-width list on a 1280px screen puts the hostname and its latency
 // so far apart that they stop reading as one row.
 const (
-	cardMaxW    = 860
-	cardMinW    = 440
+	// Two widths, because the list has two shapes. With reverse DNS the rows
+	// carry a name and an address; without it — the common case on a flat
+	// office network — the name column holds the IP and the address column is
+	// empty, and a card sized for both columns is mostly whitespace around
+	// fifteen characters of text.
+	cardMaxW    = 700
+	cardNarrowW = 470
+	cardMinW    = 400
 	cardMaxH    = 620
 	cardMargin  = 48 // minimum gap between the card and the screen edge
 	cardHeader  = 44
@@ -33,7 +39,7 @@ const (
 	cardFooter  = 56
 	cardRowH    = 28
 	cardPad     = 18
-	cardMinRows = 6 // keeps the card from collapsing around one or two hosts
+	cardMinRows = 4 // keeps the card from collapsing around one or two hosts
 	scrollBarW  = 4
 	logoTop     = 44 // top of the header block
 	logoGap     = 40 // between the header block and the card
@@ -42,7 +48,7 @@ const (
 
 // Column geometry, in character cells from the left edge of the list.
 const (
-	colNameChars    = 24 // hostname column, wide enough for a FQDN-ish label
+	colNameChars    = 18 // name column: a short hostname, or an IPv4 address
 	latencyNumChars = 7  // "9999 ms" — a fixed column, so the bars stay aligned
 	meterGap        = 9  // between the signal bars and the number
 )
@@ -59,27 +65,43 @@ type discoveryLayout struct {
 	List    image.Rectangle
 	Footer  image.Rectangle
 	RowH    int
-	Rows    int // how many rows fit in List
+	Rows    int  // how many rows fit in List
+	Address bool // whether the address column is drawn, and paid for in width
 }
 
 // layoutDiscovery returns the card at its full height. Run uses it to size the
 // scrolling window, which must stay fixed even as the card grows during a scan.
 func layoutDiscovery(screen image.Rectangle) discoveryLayout {
-	return layoutDiscoveryRows(screen, 1<<30)
+	return layoutDiscoveryRows(screen, 1<<30, true)
 }
 
 // layoutDiscoveryFor sizes the card to the number of hosts on offer, so a short
 // list does not sit in a mostly empty panel. Once the list is longer than the
 // screen allows this is identical to layoutDiscovery, which is why the scroll
 // arithmetic stays consistent.
-func layoutDiscoveryFor(screen image.Rectangle, hostCount int) discoveryLayout {
-	return layoutDiscoveryRows(screen, hostCount)
+func layoutDiscoveryFor(screen image.Rectangle, hosts []domain.Host) discoveryLayout {
+	return layoutDiscoveryRows(screen, len(hosts), anyHostname(hosts))
 }
 
-func layoutDiscoveryRows(screen image.Rectangle, rows int) discoveryLayout {
+// anyHostname reports whether any host resolved to a name. If none did, the
+// address column would repeat what the name column already shows.
+func anyHostname(hosts []domain.Host) bool {
+	for _, h := range hosts {
+		if h.Hostname != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func layoutDiscoveryRows(screen image.Rectangle, rows int, address bool) discoveryLayout {
 	w, h := screen.Dx(), screen.Dy()
 
-	cardW := clampInt(w-2*cardMargin, cardMinW, cardMaxW)
+	maxW := cardNarrowW
+	if address {
+		maxW = cardMaxW
+	}
+	cardW := clampInt(w-2*cardMargin, cardMinW, maxW)
 
 	// The band the wordmark and the card share, above the pinned key hints.
 	regionTop := logoTop
@@ -115,13 +137,14 @@ func layoutDiscoveryRows(screen image.Rectangle, rows int) discoveryLayout {
 		Add(image.Pt((w-cardW)/2, logo.Bounds.Max.Y+logoGap))
 
 	l := discoveryLayout{
-		Screen: screen,
-		Logo:   logo,
-		Card:   card,
-		Header: image.Rect(card.Min.X, card.Min.Y, card.Max.X, card.Min.Y+cardHeader),
-		Footer: image.Rect(card.Min.X, card.Max.Y-cardFooter, card.Max.X, card.Max.Y),
-		RowH:   cardRowH,
-		Rows:   rows,
+		Screen:  screen,
+		Logo:    logo,
+		Card:    card,
+		Header:  image.Rect(card.Min.X, card.Min.Y, card.Max.X, card.Min.Y+cardHeader),
+		Footer:  image.Rect(card.Min.X, card.Max.Y-cardFooter, card.Max.X, card.Max.Y),
+		RowH:    cardRowH,
+		Rows:    rows,
+		Address: address,
 	}
 	l.Columns = image.Rect(card.Min.X+1, l.Header.Max.Y, card.Max.X-1, l.Header.Max.Y+cardColumns)
 	l.List = image.Rect(
@@ -161,7 +184,7 @@ func (l discoveryLayout) rowAt(x, y int) int {
 
 // renderDiscovery draws the main host-discovery screen.
 func renderDiscovery(img *image.RGBA, state *UIState) {
-	l := layoutDiscoveryFor(img.Bounds(), len(state.Hosts))
+	l := layoutDiscoveryFor(img.Bounds(), state.Hosts)
 
 	FillRect(img, l.Screen, ColorBG)
 
@@ -222,8 +245,10 @@ func renderColumnHeadings(img *image.RGBA, l discoveryLayout, state *UIState) {
 	const tracking = 1
 
 	DrawTextTracked(img, l.List.Min.X+cardPad+11, y, i18n.T(i18n.ColumnServer), tracking, ColorDim)
-	DrawTextTracked(img, l.List.Min.X+cardPad+11+colNameChars*CharW, y,
-		i18n.T(i18n.ColumnAddress), tracking, ColorDim)
+	if l.Address {
+		DrawTextTracked(img, l.List.Min.X+cardPad+11+colNameChars*CharW, y,
+			i18n.T(i18n.ColumnAddress), tracking, ColorDim)
+	}
 
 	latency := i18n.T(i18n.ColumnLatency)
 	DrawTextTracked(img, l.rightEdge(state)-TrackedWidth(latency, tracking), y,
@@ -276,8 +301,9 @@ func renderHostRows(img *image.RGBA, l discoveryLayout, state *UIState, visible 
 
 		DrawText(img, nameX, textY, host.DisplayName(), nameColor)
 
-		// The IP is redundant when it is already the display name.
-		if host.Hostname != "" && ipX+TextWidth(host.IP.String(), false) < rightEdge-90 {
+		// The IP is redundant when it is already the display name, and the
+		// column is not there at all when no host has a name.
+		if l.Address && host.Hostname != "" && ipX+TextWidth(host.IP.String(), false) < rightEdge-90 {
 			DrawText(img, ipX, textY, host.IP.String(), ipColor)
 		}
 

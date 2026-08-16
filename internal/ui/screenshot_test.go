@@ -102,6 +102,19 @@ func TestScreenshots(t *testing.T) {
 
 	// The narrowest panel the kiosk is expected to boot on. Everything has to
 	// fit here before it is worth judging at 1280.
+	// No reverse DNS: the shape a flat office network produces, and the one the
+	// card is narrowed for.
+	shot("11-bare-ips", 1280, 800, func(b *image.RGBA) {
+		hosts := sampleHosts(5)
+		for i := range hosts {
+			hosts[i].Hostname = ""
+		}
+		renderDiscovery(b, &UIState{
+			Screen: ScreenDiscovery, Hosts: hosts,
+			SelectedIdx: 1, ScanDone: true, ScanProgress: 1,
+		})
+	})
+
 	shot("09-640x480", 640, 480, func(b *image.RGBA) {
 		renderDiscovery(b, &UIState{
 			Screen: ScreenDiscovery, Hosts: sampleHosts(6),
