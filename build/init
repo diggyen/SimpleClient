@@ -64,7 +64,17 @@ while [ "$i" -lt 20 ]; do
 done
 
 log "input: $(ls /dev/input/event* 2>/dev/null | tr '\n' ' ')"
-log "input names: $(grep -h '^N: Name=' /proc/bus/input/devices 2>/dev/null | tr '\n' ' ')"
+
+# The capability lines, not just the names. Which device is the keyboard is
+# decided from these bitmaps, so when a machine comes up with a working mouse
+# and a dead keyboard they are what says why — and they can only be read off the
+# machine that failed.
+#
+# One grep, one line. Reading the file with a shell `while read` loop instead
+# hung init here on the very first boot that tried it, before it ever reached
+# the UI; a single pass by an external tool is what this file already did for
+# the names, and it works.
+log "input caps: $(grep -hE '^(N: |H: |B: (EV|KEY|REL|ABS)=)' /proc/bus/input/devices 2>/dev/null | tr '\n' '|')"
 log "entropy: $(cat /proc/sys/kernel/random/entropy_avail 2>/dev/null) hwrng=$(cat /sys/class/misc/hw_random/rng_current 2>/dev/null)"
 if [ -z "$(ls /dev/input/event* 2>/dev/null)" ]; then
     log "WARNING: no /dev/input/event* — the keyboard will not work"

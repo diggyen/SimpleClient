@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -294,55 +295,168 @@ func detectDevice(kind string) (string, error) {
 	return findDevice(f, kind)
 }
 
-// findDevice scans the /proc/bus/input/devices format for the first device
-// whose name matches kind, and returns its evdev node.
+// Capability bits from the kernel's input headers. Detection keys off these
+// rather than off the device name: the name is the USB product string, so a
+// real keyboard is as likely to announce itself as "Logitech USB Receiver" or
+// "HID 046a:0011" as it is to contain the word "keyboard". Matching the name
+// worked in QEMU, whose emulated keyboard is called "AT Translated Set 2
+// keyboard", and failed on the hardware this is built for.
+const (
+	evKeyBit = 0x01 // EV_KEY
+	evRelBit = 0x02 // EV_REL
+	evAbsBit = 0x03 // EV_ABS
+
+	keyEnter = 28
+	keyA     = 30
+	keyZ     = 44
+	keySpace = 57
+
+	btnLeft  = 0x110
+	btnTouch = 0x14a
+)
+
+// bitmap is a capability bitmap from a "B: " line, indexed from bit 0 up.
+type bitmap []uint64
+
+// parseBitmap reads the kernel's bitmap format: groups of hex longs, separated
+// by spaces, highest-order group printed first.
+//
+// The group width is the kernel's BITS_PER_LONG. This binary is built for
+// linux/amd64 only, so that is 64; on a 32-bit kernel every bit above 31 would
+// land in the wrong group.
+func parseBitmap(v string) bitmap {
+	fields := strings.Fields(v)
+	b := make(bitmap, len(fields))
+	for i, f := range fields {
+		n, err := strconv.ParseUint(f, 16, 64)
+		if err != nil {
+			continue
+		}
+		b[len(fields)-1-i] = n
+	}
+	return b
+}
+
+func (b bitmap) has(bit int) bool {
+	i := bit / 64
+	if i < 0 || i >= len(b) {
+		return false
+	}
+	return b[i]&(1<<uint(bit%64)) != 0
+}
+
+// inputBlock is one device stanza from /proc/bus/input/devices.
+type inputBlock struct {
+	name     string
+	handlers []string
+	ev       bitmap
+	key      bitmap
+	rel      bitmap
+}
+
+// isKeyboard reports whether the device can type.
+//
+// The test is for ordinary letter keys, which is what separates a keyboard from
+// the other things the kernel gives a "kbd" handler to. A power button, a lid
+// switch and an ACPI video bus are all EV_KEY devices carrying a handful of
+// codes, and on real hardware they enumerate ahead of the keyboard — so keying
+// off the handler list, or off EV_KEY alone, picks the power button.
+func (d inputBlock) isKeyboard() bool {
+	if !d.ev.has(evKeyBit) {
+		return false
+	}
+	for _, k := range []int{keyA, keyZ, keyEnter, keySpace} {
+		if !d.key.has(k) {
+			return false
+		}
+	}
+	return true
+}
+
+// isPointer reports whether the device can move a cursor: a relative device
+// with both axes and a left button, or a touchpad.
+func (d inputBlock) isPointer() bool {
+	if d.ev.has(evRelBit) && d.rel.has(relX) && d.rel.has(relY) && d.key.has(btnLeft) {
+		return true
+	}
+	return d.ev.has(evAbsBit) && d.key.has(btnTouch)
+}
+
+// node returns the device's evdev path, or "" if it has no event handler.
+//
+// The handler list has to be split after stripping "Handlers=", not before:
+// when evdev is the only handler the line reads "H: Handlers=event1" and the
+// node is glued to the key.
+func (d inputBlock) node() string {
+	for _, h := range d.handlers {
+		if strings.HasPrefix(h, "event") {
+			return "/dev/input/" + h
+		}
+	}
+	return ""
+}
+
+// findDevice scans the /proc/bus/input/devices format for the first device with
+// the capabilities kind implies, and returns its evdev node.
 //
 // A device block looks like:
 //
 //	I: Bus=0011 Vendor=0001 Product=0001 Version=ab41
 //	N: Name="AT Translated Set 2 keyboard"
 //	H: Handlers=sysrq kbd event0
-//
-// The handler list has to be split after stripping "Handlers=", not before:
-// when evdev is the only handler the line reads "H: Handlers=event1" and the
-// node is glued to the key. Splitting on whitespace alone finds the node for a
-// keyboard (which lists sysrq and kbd first) but silently misses a mouse.
+//	B: EV=120013
+//	B: KEY=402000000 3803078f800d001 feffffdfffefffff fffffffffffffffe
 func findDevice(r io.Reader, kind string) (string, error) {
-	var name string
+	var (
+		cur   inputBlock
+		found string
+	)
+
+	match := func(d inputBlock) bool {
+		switch kind {
+		case "keyboard":
+			return d.isKeyboard()
+		case "mouse":
+			return d.isPointer()
+		}
+		return false
+	}
+
+	flush := func() {
+		if found != "" {
+			return
+		}
+		if match(cur) {
+			found = cur.node()
+		}
+	}
+
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
 		switch {
 		case strings.HasPrefix(line, "I: "):
-			// Start of a new device block; drop the previous name so a block
-			// without one cannot inherit it.
-			name = ""
+			flush()
+			cur = inputBlock{}
 		case strings.HasPrefix(line, "N: Name="):
-			name = strings.ToLower(line)
+			cur.name = strings.Trim(strings.TrimPrefix(line, "N: Name="), `"`)
 		case strings.HasPrefix(line, "H: Handlers="):
-			if !matchesKind(name, kind) {
-				continue
-			}
-			handlers := strings.TrimPrefix(line, "H: Handlers=")
-			for _, h := range strings.Fields(handlers) {
-				if strings.HasPrefix(h, "event") {
-					return "/dev/input/" + h, nil
-				}
-			}
+			cur.handlers = strings.Fields(strings.TrimPrefix(line, "H: Handlers="))
+		case strings.HasPrefix(line, "B: EV="):
+			cur.ev = parseBitmap(strings.TrimPrefix(line, "B: EV="))
+		case strings.HasPrefix(line, "B: KEY="):
+			cur.key = parseBitmap(strings.TrimPrefix(line, "B: KEY="))
+		case strings.HasPrefix(line, "B: REL="):
+			cur.rel = parseBitmap(strings.TrimPrefix(line, "B: REL="))
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("reading input devices: %w", err)
 	}
-	return "", fmt.Errorf("no %s device found in /proc/bus/input/devices", kind)
-}
+	flush() // the last block has no "I: " after it
 
-func matchesKind(nameLine, kind string) bool {
-	switch kind {
-	case "keyboard":
-		return strings.Contains(nameLine, "keyboard")
-	case "mouse":
-		return strings.Contains(nameLine, "mouse") || strings.Contains(nameLine, "touchpad")
+	if found == "" {
+		return "", fmt.Errorf("no %s device found in /proc/bus/input/devices", kind)
 	}
-	return false
+	return found, nil
 }

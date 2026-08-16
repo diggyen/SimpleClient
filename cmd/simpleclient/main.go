@@ -35,6 +35,13 @@ func main() {
 	defer fb.Close()
 
 	kbd, mouse := resolveInputDevices(cfg)
+
+	// Say which nodes were picked. When a kiosk comes up with a working mouse
+	// and a dead keyboard there is nothing on screen to explain it, and this
+	// line on the serial console is the difference between a guess and a
+	// diagnosis. -kbd and -mouse override it.
+	warnf("input: keyboard=%s mouse=%s", orNone(kbd), orNone(mouse))
+
 	if kbd == "" && mouse == "" {
 		// Not fatal — the discovery screen still renders and reports what it
 		// finds, which is far more useful than a boot loop with no output.
@@ -75,6 +82,13 @@ func resolveInputDevices(cfg config.Config) (kbd, mouse string) {
 		mouse = detected
 	}
 	return kbd, mouse
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
 }
 
 func warnf(format string, args ...any) {
