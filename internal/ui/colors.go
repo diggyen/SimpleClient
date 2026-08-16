@@ -23,9 +23,7 @@ var (
 	ColorBorder   = color.RGBA{R: 40, G: 52, B: 90, A: 255}    // #28345a hairlines
 	ColorFocus    = ColorAccent                                // focused input ring
 	ColorOverlay  = color.RGBA{A: 190}                         // scrim behind dialogs
-	ColorBar      = ColorPanel
 	ColorCursor   = color.RGBA{R: 255, G: 255, B: 255, A: 255} // pointer body
-	ColorLatency  = ColorSuccess
 
 	// Card and list.
 	ColorCardHeader = color.RGBA{R: 33, G: 43, B: 76, A: 255}    // #212b4c header strip

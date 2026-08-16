@@ -1,0 +1,83 @@
+name: Bug report
+description: Something in the kiosk does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please try [docs/TROUBLESHOOTING.md](../blob/main/docs/TROUBLESHOOTING.md)
+        first — it covers sticks that will not boot, dead keyboards, empty host
+        lists and black sessions, and tells you how to capture the console.
+
+        The kiosk keeps no logs and cannot report anything except what it draws,
+        so the serial console below is usually the only real evidence. It can
+        only be captured from the machine that failed.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag, and the sha256 of the ISO you wrote.
+      placeholder: v0.3.1 — d3179b6a…
+    validations:
+      required: true
+
+  - type: dropdown
+    id: firmware
+    attributes:
+      label: Firmware
+      options:
+        - UEFI
+        - Legacy BIOS / CSM
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: secureboot
+    attributes:
+      label: Secure Boot
+      description: >
+        Secure Boot rejects this image without printing anything, which looks
+        exactly like an empty drive.
+      options:
+        - "Off"
+        - "On"
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: machine
+    attributes:
+      label: Machine
+      description: Make and model, or the virtualiser and how the image was attached.
+      placeholder: Dell OptiPlex 3070 / QEMU, ISO as USB mass storage
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Serial console output
+      description: >
+        Boot the "RDP handshake debug" entry from the GRUB menu and paste
+        everything. Include the `input caps:` and `input:` lines even if the
+        problem seems unrelated to input — they identify the hardware.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Photos of the screen are welcome when there is nothing to copy.

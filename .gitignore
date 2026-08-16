@@ -7,9 +7,11 @@ dist/
 # from the repository.
 /simpleclient
 
-# Documentation
-*.md
-!README.md
+# Scratch design notes get written at the top level and are not worth keeping.
+# The pattern is anchored so it stays out of docs/ and .github/, which hold
+# documentation that is meant to be read.
+/*.md
+!/README.md
 
 # Go
 # vendor/ is committed on purpose: the grdp dependency does not compile on Linux
@@ -23,3 +25,8 @@ dist/
 *.swo
 .idea/
 .vscode/
+
+# Agent tooling. Loosening the *.md rule above so docs/ could be tracked pulled
+# .agents/ in with it; none of this is project content.
+.agents/
+skills-lock.json

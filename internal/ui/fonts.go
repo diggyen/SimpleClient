@@ -3,7 +3,6 @@ package ui
 import (
 	"image"
 	"image/color"
-	"image/draw"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gomono"
@@ -98,9 +97,4 @@ func drawWithFace(img *image.RGBA, x, y int, text string, c color.RGBA, face fon
 		Dot:  fixed.P(x, y+baseline),
 	}
 	d.DrawString(text)
-}
-
-// FillUniform fills img with a uniform color (used as background clearing helper).
-func FillUniform(img *image.RGBA, c color.RGBA) {
-	draw.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{}, draw.Src)
 }

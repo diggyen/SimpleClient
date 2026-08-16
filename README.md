@@ -32,16 +32,18 @@ write it to a USB stick:
 sudo dd if=simpleclient.iso of=/dev/sdX bs=4M status=progress conv=fsync
 
 # macOS  (diskutil list to find the number; use rdiskN, not diskN)
+diskutil unmountDisk /dev/diskN
 sudo dd if=simpleclient.iso of=/dev/rdiskN bs=4m
+sync
 ```
 
-Verify first if you like:
+Verify it first if you like: `shasum -a 256 -c SHA256SUMS`.
 
-```sh
-sha256sum -c SHA256SUMS
-```
-
-Boots on both UEFI and legacy BIOS machines.
+Boots on UEFI and legacy BIOS machines. **Secure Boot must be off** — the
+bootloader is unsigned, and a machine enforcing Secure Boot refuses the stick
+without printing anything, which looks exactly like an empty drive. If it does
+not boot, [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-usb-stick-does-not-boot)
+walks through the causes in order of likelihood.
 
 ## Use it
 
@@ -61,146 +63,77 @@ Each host is listed with the round trip of that handshake, graded onto four
 signal bars, so a link too slow to work as a desktop session is visible before
 you connect to it rather than after.
 
-## Build it from source
+The kiosk reaches **its own subnet only**. There is no box to type an address
+into, and a server elsewhere on the network cannot be connected to at all.
 
-Everything below runs from the repository root.
+## Build it
 
-### Bootable ISO
-
-Needs Docker. The kernel, initramfs and ISO are all produced inside the build
+Needs Docker. The kernel, initramfs and ISO are produced inside the build
 container, so the result is the same on macOS, Linux and CI.
 
 ```sh
 make -f build/Makefile iso     # -> dist/simpleclient.iso
-```
-
-### Binary only
-
-```sh
-make -f build/Makefile binary  # -> dist/simpleclient  (static, linux/amd64)
+make -f build/Makefile binary  # -> dist/simpleclient (static, linux/amd64)
 make -f build/Makefile test
 ```
 
-Or run everything — vet, race tests, static build — with `bash setup.sh`.
-Add `--iso` to build the image too, or `--headless` to also boot it in QEMU and
-capture a screenshot.
-
-### See it running
-
-You do not need spare hardware — QEMU boots the ISO in a window, and it is the
-same image that goes on a USB stick.
+You do not need spare hardware to try it — QEMU boots the same image that goes
+on the stick:
 
 ```sh
-make -f build/Makefile iso     # if you have not built it yet
-bash build/test-qemu.sh        # opens a window; watch it boot
+bash build/test-qemu.sh                  # opens a window
+bash build/test-qemu.sh --fake-rdp       # plus a host that appears in the list
 ```
 
-You will get the GRUB menu (English / Türkçe / two debug entries), then the
-discovery screen. Arrow keys select, Enter opens the login dialog, F2 switches
-language. `Ctrl+Alt+G` releases the mouse back to your desktop.
+[DEVELOPMENT.md](docs/DEVELOPMENT.md) covers the rest: iterating on the UI
+without booting anything, the four boot combinations to run before trusting an
+image, testing against a real RDP server, and cutting a release.
 
-On its own the guest sits on QEMU's private `10.0.2.0/24`, so it will find
-nothing to connect to. Two ways to give it something:
+## Documentation
 
-```sh
-# A host that appears in the list but will not complete a session:
-bash build/test-qemu.sh --fake-rdp
-
-# A real RDP server, bridged in so the guest can discover and use it:
-bash build/test-qemu.sh --proxy-rdp=10.0.0.5:3389
-```
-
-`--proxy-rdp` exists because the kiosk only scans its own subnet, and the guest's
-subnet is QEMU's, not yours. It forwards host port 3389 to your server, and the
-guest sees it as `10.0.2.2` — pick that, type your credentials, and you get the
-real desktop.
-
-Other options: `--headless` boots and writes a screenshot instead of opening a
-window, and `--entry=N` picks a boot menu entry (1 is Turkish, 2 logs the whole
-RDP handshake to `dist/qemu-serial.log`).
-
-If a connection fails and the on-screen message is not enough, boot the
-**RDP handshake debug** entry from the GRUB menu; it prints every protocol step
-to the serial console.
-
-### Test against a real RDP server
-
-Everything in `internal/rdp` is unit-tested against synthetic tiles except the
-handshake itself. `TestLiveConnect` drives a real server — NLA authentication,
-the session PDUs and the bitmap stream — and is skipped unless you point it at
-one:
-
-```sh
-SIMPLECLIENT_RDP_ADDR=10.0.0.5:3389 \
-SIMPLECLIENT_RDP_USER=administrator \
-SIMPLECLIENT_RDP_PASS=... \
-SIMPLECLIENT_RDP_SHOT=/tmp/desktop.png \
-go test -mod=vendor ./internal/rdp -run TestLiveConnect -v
-```
-
-`SIMPLECLIENT_RDP_SHOT` composites the incoming tiles into a PNG, which is the
-only way to confirm the decode is right: a session can be live and still send
-nothing this decoder understands, and that looks exactly like a black screen.
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how the image boots, how the UI
+  is drawn, how devices are found, and the decisions behind each
+- **[DEVELOPMENT.md](docs/DEVELOPMENT.md)** — building, testing, releasing
+- **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** — symptom to diagnosis, and
+  how to read the serial console
 
 ## Known limitations
 
+Design boundaries, not bugs waiting to be filed:
+
+- **Secure Boot is not supported.** The bootloader is unsigned.
+- **No RemoteFX/GFX codecs.** A server sending only those shows a black screen
+  on a session that is genuinely live. Every Windows server tested falls back to
+  legacy bitmap updates, which work.
 - **Colour depth is whatever the server picks.** Windows commonly negotiates
   16bpp, which is what the tile decoder is tuned for.
-- **No RemoteFX/GFX codecs.** grdp ignores surface-command updates, so servers
-  that send only those will show nothing. Every Windows server tested still
-  falls back to legacy bitmap updates, which work.
-- **No manual host entry.** The kiosk connects to hosts it discovers on its own
-  subnet; there is no box to type an address into. A server on another subnet
-  cannot be reached at all.
-- **Resolution follows the framebuffer** the kernel hands over, and the session
-  is opened at that size. There is no way to override it.
-- **Clipboard, audio and drive redirection are not implemented.**
+- **Resolution follows the framebuffer** the kernel hands over; there is no
+  override.
+- **No manual host entry**, no clipboard, no audio, no drive redirection.
+- **One keyboard and one pointer.** On a machine with two keyboards, the first
+  recognised wins.
 
-## Layout
+## Repository layout
 
 ```
 cmd/simpleclient/     entry point: opens the framebuffer, wires everything up
-internal/ui/          kiosk render loop, screens, input handling
+internal/ui/          render loop, screens, layout, the 8-bit mark and face
 internal/scanner/     concurrent TCP scan of the subnet for port 3389
 internal/rdp/         RDP client wrapper around tomatome/grdp
 internal/framebuffer/ mmap'd /dev/fb0
 internal/inputdev/    evdev keyboard and mouse reader
 internal/i18n/        message catalogue (en, tr)
 build/                Dockerfile, init, GRUB config, Makefile, vendor patches
-docs/screenshots/     every screen, rendered by TestScreenshots
+docs/                 architecture, development, troubleshooting, screenshots
 ```
 
-The screens under `docs/` are generated, not hand-captured. Regenerate them in
-place after changing anything that draws, so a rendering change can be reviewed
-as a diff of the pictures rather than of the arithmetic behind them:
-
-```sh
-SIMPLECLIENT_UI_SHOTS=$PWD/docs/screenshots \
-go test -mod=vendor ./internal/ui -run TestScreenshots -count=1
-```
-
-The path has to be absolute: the test runs with `internal/ui` as its working
-directory, so a relative one silently writes there instead.
-
-## A note on `vendor/`
-
-The vendor directory is committed, which is unusual. It has to be:
-`github.com/tomatome/grdp` does not compile for Linux as published. Two upstream
-defects need patching — a `cliprdr` source file that uses Windows-only symbols
-without a build tag, and a vestigial `import "C"` that forces cgo and so blocks
-static linking. Both fixes live in `build/patches/`.
-
-After changing a dependency in `go.mod`, regenerate the tree with:
-
-```sh
-bash build/vendor-patch.sh   # go mod vendor + re-apply patches + verify
-```
-
-CI fails if the patches go missing.
+`vendor/` is committed on purpose: `tomatome/grdp` does not compile for Linux as
+published, and three local patches in `build/patches/` fix it. CI fails if they
+go missing. See [ARCHITECTURE.md](docs/ARCHITECTURE.md#rdp).
 
 ## Requirements
 
-- x86-64 machine, UEFI or BIOS
+- x86-64 machine, UEFI or BIOS, Secure Boot off
 - 512 MB RAM
 - A wired or wireless NIC with a driver in Alpine's `linux-lts` kernel
-- Somewhere on the network actually listening on 3389
+- Somewhere on the same subnet actually listening on 3389

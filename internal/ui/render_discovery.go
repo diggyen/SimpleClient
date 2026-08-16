@@ -10,9 +10,7 @@ import (
 )
 
 const (
-	barH    = 28 // modal title bar height
-	rowH    = 22 // legacy row height, still used by the modal's field metrics
-	padding = 8  // general padding
+	padding = 8 // general padding
 
 	gitURL = "github.com/diggyen/SimpleClient"
 )

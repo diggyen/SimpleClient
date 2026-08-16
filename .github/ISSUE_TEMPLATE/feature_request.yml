@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest something the kiosk should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Some things are deliberate boundaries rather than gaps — Secure Boot,
+        RemoteFX/GFX codecs, manual host entry, clipboard, audio and drive
+        redirection are all listed under
+        [Known limitations](../blob/main/docs/ARCHITECTURE.md#known-limitations).
+        Asking for one of those is fine; say why the current boundary does not
+        work for you and it becomes a much better issue.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The situation, not the solution. What are you doing with the kiosk when
+        you run into this?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: Any workaround, however ugly. It tells us how much this costs you.
