@@ -225,3 +225,44 @@ func TestParseBitmap_GroupOrder(t *testing.T) {
 		}
 	}
 }
+
+// A password typed on the number pad used to produce nothing while the rest of
+// the keyboard worked, which reads as a field refusing input rather than as a
+// missing mapping.
+func TestKeycodeToRune_NumericKeypad(t *testing.T) {
+	pad := map[int]rune{
+		71: '7', 72: '8', 73: '9',
+		75: '4', 76: '5', 77: '6',
+		79: '1', 80: '2', 81: '3',
+		82: '0', 83: '.',
+	}
+	for code, want := range pad {
+		for _, shifted := range []bool{false, true} {
+			if got := KeycodeToRune(code, shifted); got != want {
+				t.Errorf("keycode %d (shift=%v) = %q, want %q", code, shifted, got, want)
+			}
+		}
+	}
+}
+
+// Every letter must produce a rune in both cases: the credential dialog is the
+// only place text is typed, and a gap here is invisible until someone cannot
+// log in.
+func TestKeycodeToRune_CoversTheAlphabet(t *testing.T) {
+	seen := map[rune]bool{}
+	for code := 0; code < 128; code++ {
+		lower := KeycodeToRune(code, false)
+		upper := KeycodeToRune(code, true)
+		if lower >= 'a' && lower <= 'z' {
+			seen[lower] = true
+			if upper != lower-32 {
+				t.Errorf("keycode %d: shifted %q is not the capital of %q", code, upper, lower)
+			}
+		}
+	}
+	for c := 'a'; c <= 'z'; c++ {
+		if !seen[c] {
+			t.Errorf("no keycode produces %q", c)
+		}
+	}
+}

@@ -129,6 +129,19 @@ simpleclient: warning: input: keyboard=/dev/input/event0 mouse=/dev/input/event1
 Only one keyboard is read. On a machine with both a built-in and a USB keyboard
 the first match wins, and it may not be the one you are typing on.
 
+### Typing works on the host list but not in the credential dialog
+
+If arrows, F2 and F5 respond but letters do not appear in the username or
+password field, the keyboard is being read and the problem is elsewhere:
+
+- **On a slow machine, before v0.3.3**, the render loop spun at 100% of a core
+  once the first scan finished, and every keystroke needs a repaint to show. It
+  looked exactly like a dead field. Update.
+- **The number pad produced nothing before v0.3.3.** Try the digit row.
+- **Check the focus.** Text only goes into a focused field — `Tab` moves between
+  username, password, domain and the two buttons, and clicking a field focuses
+  it. With a button focused there is nowhere for a letter to go.
+
 > This class of bug is why the logging exists. Detection used to match the word
 > "keyboard" in the device name; most real keyboards do not contain it, so the
 > kiosk came up on hardware with a working mouse and a dead keyboard while every

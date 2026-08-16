@@ -83,6 +83,30 @@ var linuxKeycodeToRune = map[int][2]rune{
 	52: {'.', '>'},
 	53: {'/', '?'},
 	57: {' ', ' '},
+
+	// The numeric keypad. Without these a password typed on the number pad
+	// produces nothing at all, while the rest of the keyboard works — which
+	// looks like the field is refusing input rather than like a missing
+	// mapping. Num Lock is not tracked: the kiosk has no cursor keys to lose,
+	// so the digits are always digits.
+	71: {'7', '7'},
+	72: {'8', '8'},
+	73: {'9', '9'},
+	74: {'-', '-'},
+	75: {'4', '4'},
+	76: {'5', '5'},
+	77: {'6', '6'},
+	78: {'+', '+'},
+	79: {'1', '1'},
+	80: {'2', '2'},
+	81: {'3', '3'},
+	82: {'0', '0'},
+	83: {'.', '.'},
+	98: {'/', '/'},
+	55: {'*', '*'},
+
+	// The extra key European layouts have between left shift and Z.
+	86: {'\\', '|'},
 }
 
 // KeycodeToRune returns the printable rune for a keycode, considering shift.

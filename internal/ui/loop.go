@@ -56,11 +56,17 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		select {
 		// ── Scan events ──────────────────────────────────────────────────────
 		case ev, ok := <-scanCh:
-			if ok {
-				state.Mu.Lock()
-				state.HandleScanEvent(ev)
-				state.Mu.Unlock()
+			if !ok {
+				// A closed channel is ready forever, so leaving it in the
+				// select spins this loop at 100% of a core for as long as the
+				// kiosk is up — every scan ends, so that is always. Nil blocks
+				// instead; F5 puts a live channel back.
+				scanCh = nil
+				continue
 			}
+			state.Mu.Lock()
+			state.HandleScanEvent(ev)
+			state.Mu.Unlock()
 
 		// ── Input events ─────────────────────────────────────────────────────
 		case ev := <-input.Events():

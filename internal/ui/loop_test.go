@@ -5,6 +5,7 @@ import (
 	"image"
 	"net"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -386,4 +387,52 @@ func TestTransition_MarksDirtyEvenWhenBlocked(t *testing.T) {
 	if !state.Dirty {
 		t.Fatal("blocked Transition should still mark the state dirty")
 	}
+}
+
+// Run's select loop must not stay hot once the scan finishes.
+//
+// A closed channel is ready forever, so leaving the finished scan in the select
+// made the loop spin at ~100% of a core for as long as the kiosk was up — and
+// every scan finishes, so that was always. On the low-power CPUs this runs on,
+// that starves the render tick and input handling badly enough that typing into
+// the credential dialog looks like a dead keyboard.
+//
+// This is a CPU property, so it is measured as one: the loop is left to run and
+// the process's own CPU time is compared against elapsed wall time.
+func TestRun_DoesNotSpinOnceTheScanIsDone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing-sensitive")
+	}
+
+	fb := framebuffer.NewMock(640, 480)
+	reader, err := inputdev.New("", "", fb.Width(), fb.Height())
+	if err != nil {
+		t.Fatalf("input reader: %v", err)
+	}
+	t.Cleanup(reader.Close)
+
+	// A scanner whose channel is already closed: the state Run settles into
+	// within seconds of boot.
+	go Run(fb, reader, &mockScanner{}, config.Config{})
+
+	time.Sleep(200 * time.Millisecond) // let it start and drain
+	start, wall := cpuTime(t), time.Now()
+	time.Sleep(700 * time.Millisecond)
+	used, elapsed := cpuTime(t)-start, time.Since(wall)
+
+	// Blocking costs ~0. Spinning costs a whole core, and more with the render
+	// tick on top. Half of one core is far above the former and far below the
+	// latter, so this does not turn into a flaky timing test on a loaded runner.
+	if ratio := used.Seconds() / elapsed.Seconds(); ratio > 0.5 {
+		t.Fatalf("the loop burned %.0f%% of a core while idle — it is spinning", ratio*100)
+	}
+}
+
+func cpuTime(t *testing.T) time.Duration {
+	t.Helper()
+	var ru syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
+		t.Fatalf("getrusage: %v", err)
+	}
+	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
 }
