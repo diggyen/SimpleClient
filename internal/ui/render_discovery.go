@@ -7,6 +7,7 @@ import (
 
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/i18n"
+	"github.com/diggyen/SimpleClient/internal/inputdev"
 	"github.com/diggyen/SimpleClient/internal/version"
 )
 
@@ -211,9 +212,23 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 // drawLanguageBadge puts the active language in the top-right corner as a cap,
 // so it looks like the F2-toggled control it is rather than stray text.
 func drawLanguageBadge(img *image.RGBA, screen image.Rectangle) {
-	code := strings.ToUpper(string(i18n.Current()))
-	w := TextWidth(code, false) + 10
-	DrawKeycap(img, screen.Max.X-padding*3-w, padding*2, code)
+	// Layout first, then language, both as caps: F3 changes the left one and F2
+	// the right, in the order they sit in the footer.
+	caps := []string{
+		inputdev.CurrentLayout().Label(),
+		strings.ToUpper(string(i18n.Current())),
+	}
+
+	total := 0
+	for _, c := range caps {
+		total += TextWidth(c, false) + 10
+	}
+	total += (len(caps) - 1) * 6
+
+	x := screen.Max.X - padding*3 - total
+	for _, c := range caps {
+		x += DrawKeycap(img, x, padding*2, c) + 6
+	}
 }
 
 // renderCardHeader draws the card's title strip.
@@ -431,6 +446,7 @@ func keyHints() [][2]string {
 		{"Enter", i18n.T(i18n.HintConnect)},
 		{"F5", i18n.T(i18n.HintRefresh)},
 		{"F2", i18n.T(i18n.HintLanguage)},
+		{"F3", i18n.T(i18n.HintKeyboard)},
 	}
 }
 

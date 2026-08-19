@@ -266,3 +266,95 @@ func TestKeycodeToRune_CoversTheAlphabet(t *testing.T) {
 		}
 	}
 }
+
+// Turkish Q is the layout that matters here: choosing Türkçe selects it, and
+// the dotted/dotless i pair is the part everyone gets wrong. The key in the US
+// "i" position types ı; the key in the US apostrophe position types i.
+func TestKeycodeToRuneIn_TurkishQ(t *testing.T) {
+	cases := []struct {
+		code             int
+		unshift, shifted rune
+	}{
+		{23, 'ı', 'I'},
+		{40, 'i', 'İ'},
+		{26, 'ğ', 'Ğ'},
+		{27, 'ü', 'Ü'},
+		{39, 'ş', 'Ş'},
+		{51, 'ö', 'Ö'},
+		{52, 'ç', 'Ç'},
+		{30, 'a', 'A'}, // unchanged from US, and must stay so
+		{57, ' ', ' '},
+	}
+	for _, c := range cases {
+		if got := KeycodeToRuneIn(LayoutTRQ, c.code, false); got != c.unshift {
+			t.Errorf("TR-Q keycode %d = %q, want %q", c.code, got, c.unshift)
+		}
+		if got := KeycodeToRuneIn(LayoutTRQ, c.code, true); got != c.shifted {
+			t.Errorf("TR-Q keycode %d shifted = %q, want %q", c.code, got, c.shifted)
+		}
+	}
+}
+
+// F moves the letters themselves, so a few spot checks that would be wrong on
+// both US and Q.
+func TestKeycodeToRuneIn_TurkishF(t *testing.T) {
+	for code, want := range map[int]rune{16: 'f', 17: 'g', 30: 'u', 33: 'a', 44: 'j'} {
+		if got := KeycodeToRuneIn(LayoutTRF, code, false); got != want {
+			t.Errorf("TR-F keycode %d = %q, want %q", code, got, want)
+		}
+	}
+}
+
+// Every layout must still produce something for the keys a credential is made
+// of. A layout that silently drops the digits or the keypad would look like the
+// field refusing input, which is the bug this project has already shipped once.
+func TestLayouts_CoverDigitsAndKeypad(t *testing.T) {
+	digits := []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+	keypad := []int{71, 72, 73, 75, 76, 77, 79, 80, 81, 82}
+
+	for _, l := range LayoutOrder {
+		for _, code := range append(append([]int{}, digits...), keypad...) {
+			if got := KeycodeToRuneIn(l, code, false); got == 0 {
+				t.Errorf("layout %s: keycode %d produces nothing", l, code)
+			}
+		}
+		// And the alphabet, in whatever positions this layout puts it.
+		seen := map[rune]bool{}
+		for code := 0; code < 128; code++ {
+			if r := KeycodeToRuneIn(l, code, false); r >= 'a' && r <= 'z' {
+				seen[r] = true
+			}
+		}
+		for c := 'a'; c <= 'z'; c++ {
+			if !seen[c] {
+				t.Errorf("layout %s: no key produces %q", l, c)
+			}
+		}
+	}
+}
+
+// The language picker sets the layout, so Türkçe must not leave a Turkish user
+// on a US keymap.
+func TestLayoutForLanguage(t *testing.T) {
+	if got := LayoutForLanguage("tr"); got != LayoutTRQ {
+		t.Errorf("tr -> %s, want %s", got, LayoutTRQ)
+	}
+	if got := LayoutForLanguage("en"); got != LayoutUS {
+		t.Errorf("en -> %s, want %s", got, LayoutUS)
+	}
+}
+
+func TestNextLayout_CyclesAndReturns(t *testing.T) {
+	t.Cleanup(func() { SetLayout(LayoutUS) })
+	SetLayout(LayoutUS)
+	seen := map[Layout]bool{}
+	for range LayoutOrder {
+		seen[NextLayout()] = true
+	}
+	if len(seen) != len(LayoutOrder) {
+		t.Fatalf("cycling visited %d of %d layouts", len(seen), len(LayoutOrder))
+	}
+	if CurrentLayout() != LayoutUS {
+		t.Errorf("a full cycle ended on %s, want back at %s", CurrentLayout(), LayoutUS)
+	}
+}

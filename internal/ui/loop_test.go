@@ -436,3 +436,72 @@ func cpuTime(t *testing.T) time.Duration {
 	}
 	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
 }
+
+// Reconnecting to the same machine is the normal case at a kiosk — a dropped
+// session, a reboot at the far end — and retyping the account every time is
+// most of the work. The password is deliberately not part of this.
+func TestOpenModalFor_PrefillsTheAccountThatWorked(t *testing.T) {
+	host := domain.Host{IP: net.ParseIP("10.0.0.5")}
+	state := &UIState{Hosts: []domain.Host{host}}
+
+	// Nothing remembered yet: an empty dialog, cursor in the username field.
+	state.OpenModalFor()
+	if state.Modal.Fields[0] != "" || state.Modal.FocusIdx != 0 {
+		t.Fatalf("first visit gave %q at focus %d, want an empty username field",
+			state.Modal.Fields[0], state.Modal.FocusIdx)
+	}
+
+	state.RememberCredential(host.AddrRDP(), "administrator", "CORP")
+	state.OpenModalFor()
+
+	if state.Modal.Fields[0] != "administrator" {
+		t.Errorf("username = %q, want it filled in", state.Modal.Fields[0])
+	}
+	if state.Modal.Fields[2] != "CORP" {
+		t.Errorf("domain = %q, want it filled in", state.Modal.Fields[2])
+	}
+	if state.Modal.Fields[1] != "" {
+		t.Fatalf("the password was carried over as %q — it must never be stored",
+			state.Modal.Fields[1])
+	}
+	if state.Modal.FocusIdx != 1 {
+		t.Errorf("focus is on field %d, want the password field so the user can just type",
+			state.Modal.FocusIdx)
+	}
+}
+
+// The hint is per host: the account for one machine must not be offered for
+// another.
+func TestOpenModalFor_IsPerHost(t *testing.T) {
+	a := domain.Host{IP: net.ParseIP("10.0.0.5")}
+	b := domain.Host{IP: net.ParseIP("10.0.0.6")}
+	state := &UIState{Hosts: []domain.Host{a, b}}
+
+	state.RememberCredential(a.AddrRDP(), "administrator", "")
+
+	state.SelectedIdx = 1
+	state.OpenModalFor()
+	if state.Modal.Fields[0] != "" {
+		t.Fatalf("host b offered %q, which belongs to host a", state.Modal.Fields[0])
+	}
+
+	state.SelectedIdx = 0
+	state.OpenModalFor()
+	if state.Modal.Fields[0] != "administrator" {
+		t.Errorf("host a lost its remembered account")
+	}
+}
+
+// A blank username is not worth remembering, and would otherwise move the
+// cursor to the password field with nothing above it.
+func TestRememberCredential_IgnoresEmpty(t *testing.T) {
+	host := domain.Host{IP: net.ParseIP("10.0.0.5")}
+	state := &UIState{Hosts: []domain.Host{host}}
+
+	state.RememberCredential(host.AddrRDP(), "", "CORP")
+	state.OpenModalFor()
+
+	if state.Modal.FocusIdx != 0 {
+		t.Errorf("focus is on field %d, want the username field", state.Modal.FocusIdx)
+	}
+}

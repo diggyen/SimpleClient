@@ -128,8 +128,27 @@ handler, and on real hardware they enumerate ahead of the keyboard. A keyboard
 is identified by carrying ordinary letter keys; a pointer by being a relative
 device with both axes and a left button, or a touchpad.
 
+Layouts (US, Turkish Q, Turkish F) are override tables over the US map, so a key
+that a layout does not move is carried once. They affect the credential dialog
+only: inside a session the raw keycode is forwarded and the remote machine
+applies its own layout, which is what anyone connecting to a Windows desktop
+expects. The layout is paired with the UI language wherever the language is set
+— the boot flag and `F2` both — and `F3` overrides it.
+
 Only one keyboard and one pointer are read. On a machine with both an internal
 and a USB keyboard, the first match wins. `-kbd` and `-mouse` override.
+
+### Remembered accounts
+
+A host that connects successfully has its username and domain kept against its
+address, so reopening its dialog fills them in and puts the cursor in the
+password field. Only the successful attempt is recorded: an account that was
+rejected is not one to offer back.
+
+This is a map in `UIState` and nothing more. The image boots from a read-only
+initramfs, so it does not survive a power cycle, and making it do so would mean
+adding a writable partition to the image. The password is deliberately never
+part of it.
 
 ## Discovery
 

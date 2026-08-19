@@ -55,6 +55,7 @@ const (
 	HintConnect
 	HintRefresh
 	HintLanguage
+	HintKeyboard
 
 	Tagline // sits under the wordmark; keep it short enough to fit at 640px
 	ModalTitle
@@ -92,6 +93,7 @@ var catalogues = map[Lang]*catalogue{
 		HintConnect:    "Connect",
 		HintRefresh:    "Refresh",
 		HintLanguage:   "Language",
+		HintKeyboard:   "Keyboard",
 		Tagline:        "REMOTE DESKTOP KIOSK",
 		ModalTitle:     "Connection Details",
 		LabelUsername:  "Username:",
@@ -121,6 +123,7 @@ var catalogues = map[Lang]*catalogue{
 		HintConnect:    "Bağlan",
 		HintRefresh:    "Yenile",
 		HintLanguage:   "Dil",
+		HintKeyboard:   "Klavye",
 		Tagline:        "UZAK MASAÜSTÜ İSTEMCİSİ",
 		ModalTitle:     "Bağlantı Bilgileri",
 		LabelUsername:  "Kullanıcı:",

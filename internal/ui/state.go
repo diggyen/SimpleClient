@@ -43,7 +43,58 @@ type UIState struct {
 	ErrorMsg     string // Transient info/error banner
 	MouseX       int
 	MouseY       int
-	SpinnerTick  int // Used for connecting-screen spinner animation
+
+	// lastUser remembers, per host address, the username and domain that last
+	// connected successfully. Reconnecting to the same machine is the normal
+	// case — a dropped session, a reboot at the far end — and retyping the
+	// account every time is the bulk of the work at a kiosk with no keyboard
+	// of its own worth speaking of.
+	//
+	// It lives only in RAM. The image boots from a read-only initramfs, so
+	// nothing here survives a power cycle, and the password is deliberately
+	// never part of it.
+	lastUser    map[string]credentialHint
+	SpinnerTick int // Used for connecting-screen spinner animation
+}
+
+// credentialHint is the non-secret half of a credential.
+type credentialHint struct {
+	Username string
+	Domain   string
+}
+
+// RememberCredential records the account that just connected to addr.
+// The password is not stored, and callers must not pass it.
+func (s *UIState) RememberCredential(addr, username, domain string) {
+	if addr == "" || username == "" {
+		return
+	}
+	if s.lastUser == nil {
+		s.lastUser = make(map[string]credentialHint)
+	}
+	s.lastUser[addr] = credentialHint{Username: username, Domain: domain}
+}
+
+// OpenModalFor prepares the credential dialog for the selected host, filling in
+// the account that last worked on it and putting the cursor where there is
+// still something to type.
+func (s *UIState) OpenModalFor() {
+	s.Modal = ModalState{}
+
+	host := s.SelectedHost()
+	if host == nil {
+		return
+	}
+	hint, ok := s.lastUser[host.AddrRDP()]
+	if !ok {
+		return
+	}
+
+	s.Modal.Fields[0] = hint.Username
+	s.Modal.Fields[2] = hint.Domain
+	// Straight to the password: it is the only field left to fill, and the only
+	// one that cannot be remembered.
+	s.Modal.FocusIdx = 1
 }
 
 // Transition moves the UI to a new screen.

@@ -135,8 +135,14 @@ func handleInput(
 	// F2 cycles the UI language from any non-session screen. Handled before the
 	// per-screen switch so it also works while the credential modal is open —
 	// F2 produces no rune, so it never collides with text entry.
+	if ev.KeyCode == inputdev.KeyF3 {
+		inputdev.NextLayout()
+		state.Dirty = true
+		return
+	}
+
 	if ev.KeyCode == inputdev.KeyF2 {
-		i18n.Next()
+		inputdev.SetLayout(inputdev.LayoutForLanguage(string(i18n.Next())))
 		return
 	}
 
@@ -168,7 +174,7 @@ func handleDiscoveryKey(
 		state.MoveSelection(maxRows, maxRows)
 	case inputdev.KeyEnter:
 		if len(state.Hosts) > 0 {
-			state.Modal = ModalState{}
+			state.OpenModalFor()
 			state.Transition(ScreenModal)
 		}
 	case inputdev.KeyF5:
@@ -279,7 +285,7 @@ func handleMouseClick(
 		absIdx := state.ScrollOffset + rowIdx
 		if absIdx >= 0 && absIdx < len(state.Hosts) {
 			state.SelectedIdx = absIdx
-			state.Modal = ModalState{}
+			state.OpenModalFor()
 			state.Transition(ScreenModal)
 		}
 
@@ -339,6 +345,9 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 
 	writer := &rdp.FrameWriter{FB: fb}
 	state.Mu.Lock()
+	// Only now, with the session up: an account that was rejected is not one to
+	// offer back the next time.
+	state.RememberCredential(addr, creds.Username, creds.Domain)
 	*session = &SessionState{
 		Host:      selected,
 		Client:    client,

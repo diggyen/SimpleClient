@@ -147,6 +147,16 @@ password field, the keyboard is being read and the problem is elsewhere:
 > kiosk came up on hardware with a working mouse and a dead keyboard while every
 > test passed. Devices are now classified by capability.
 
+### The wrong characters appear
+
+Check the left-hand cap in the top-right corner — it is the active keyboard
+layout. `F3` cycles US, TR-Q and TR-F. Choosing Türkçe selects TR-Q, which is
+wrong if your keyboard is a Turkish F or a US board with a Turkish UI.
+
+Only the credential dialog is affected. Inside a session the keycode is
+forwarded raw and the remote machine decides, so a session that types the wrong
+characters is the remote layout, not this one.
+
 ---
 
 ## No servers are found

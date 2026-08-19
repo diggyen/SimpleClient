@@ -54,7 +54,8 @@ walks through the causes in order of likelihood.
 | `Tab` | Move between username / password / domain / buttons |
 | `Esc` | Close the dialog |
 | `F5` | Rescan the network |
-| `F2` | Switch language (English ⇄ Türkçe) |
+| `F2` | Switch language (English ⇄ Türkçe), and the keyboard layout with it |
+| `F3` | Switch keyboard layout on its own (US ⇄ TR-Q ⇄ TR-F) |
 | `Ctrl`+`Alt`+`End` | Disconnect from an active session |
 
 The scan probes TCP port 3389 across the subnet the machine got from DHCP. If
@@ -62,6 +63,17 @@ there is no DHCP server it falls back to a link-local address and scans that.
 Each host is listed with the round trip of that handshake, graded onto four
 signal bars, so a link too slow to work as a desktop session is visible before
 you connect to it rather than after.
+
+The two caps in the top-right corner show the active keyboard layout and
+language. Choosing Türkçe — from the boot menu or with `F2` — selects the
+Turkish Q layout with it; `F3` overrides that if your keyboard says otherwise.
+The layout applies to the credential dialog only: inside a session the raw
+keycode is forwarded and the remote machine applies its own.
+
+Once a host has been connected to, its username and domain are filled in the
+next time you open its dialog, with the cursor in the password field. That
+memory lives in RAM and is gone after a power cycle — the image boots read-only
+and has nowhere to write. The password is never stored.
 
 The kiosk reaches **its own subnet only**. There is no box to type an address
 into, and a server elsewhere on the network cannot be connected to at all.

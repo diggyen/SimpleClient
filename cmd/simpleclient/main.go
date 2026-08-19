@@ -23,7 +23,13 @@ import (
 
 func main() {
 	cfg := config.Load()
-	i18n.Set(cfg.Lang())
+	// Language and keyboard layout are set together. Picking Türkçe from the
+	// GRUB menu and then finding the keyboard still on a US keymap is the same
+	// surprise as picking it with F2 and finding that, and the boot path used
+	// to have the bug the F2 path does not.
+	lang := cfg.Lang()
+	i18n.Set(lang)
+	inputdev.SetLayout(inputdev.LayoutForLanguage(string(lang)))
 	rdp.Debug = cfg.RDPDebug
 
 	// The framebuffer is the only hard requirement: without it there is nothing

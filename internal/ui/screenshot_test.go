@@ -12,6 +12,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
+	"github.com/diggyen/SimpleClient/internal/inputdev"
 )
 
 // TestScreenshots renders every UI state to PNG so the design can be reviewed
@@ -30,7 +31,10 @@ func TestScreenshots(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { i18n.Set(i18n.Default) })
+	t.Cleanup(func() {
+		i18n.Set(i18n.Default)
+		inputdev.SetLayout(inputdev.LayoutUS)
+	})
 
 	shot := func(name string, w, h int, draw func(*image.RGBA)) {
 		t.Helper()
@@ -123,6 +127,7 @@ func TestScreenshots(t *testing.T) {
 	})
 
 	i18n.Set(i18n.LangTR)
+	inputdev.SetLayout(inputdev.LayoutForLanguage(string(i18n.LangTR)))
 	shot("08-turkish", 1280, 800, func(b *image.RGBA) {
 		renderDiscovery(b, &UIState{
 			Screen: ScreenDiscovery, Hosts: sampleHosts(5),
