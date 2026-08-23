@@ -236,8 +236,9 @@ func handleSessionInput(
 	session *SessionState,
 	input *inputdev.Reader,
 ) {
-	// Ctrl+Alt+End disconnects.
-	if ev.Type == inputdev.EvKey && ev.KeyCode == inputdev.KeyEnd &&
+	// Ctrl+Alt+End disconnects. Gated on the press: releases are forwarded now
+	// too, and without this the combination would fire twice.
+	if ev.Type == inputdev.EvKey && ev.Pressed && ev.KeyCode == inputdev.KeyEnd &&
 		input.CtrlDown() && input.AltDown() {
 		disconnect(state, session)
 		return

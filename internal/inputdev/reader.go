@@ -34,6 +34,15 @@ type InputEvent struct {
 	Pressed bool // true on press, false on release
 }
 
+// storeBool sets an atomic flag used as a bool.
+func storeBool(p *int32, v bool) {
+	var n int32
+	if v {
+		n = 1
+	}
+	atomic.StoreInt32(p, n)
+}
+
 // linuxInputEvent mirrors the 24-byte Linux struct input_event.
 type linuxInputEvent struct {
 	Sec   int64
@@ -155,46 +164,42 @@ func (r *Reader) readKeyboard() {
 		}
 
 		code := int(ev.Code)
-		pressed := ev.Value == keyPress || ev.Value == keyRepeat
+		// Auto-repeat counts as another press: holding backspace in a dialog
+		// should erase, and a remote session expects the repeats its keyboard
+		// is generating.
+		down := ev.Value == keyPress || ev.Value == keyRepeat
 
-		// Track modifier keys.
+		// Track the modifiers — and then forward them like any other key.
+		//
+		// They used to be swallowed here, which was fine while the only consumer
+		// was the local UI: it reads the tracked flags, not the events. But a
+		// live RDP session forwards these events to the remote machine, and a
+		// remote with no Shift, Ctrl or Alt cannot be typed on, never mind
+		// driven.
 		switch code {
 		case KeyLeftShift, KeyRightShift:
-			if pressed {
-				atomic.StoreInt32(&r.shiftOn, 1)
-			} else {
-				atomic.StoreInt32(&r.shiftOn, 0)
-			}
-			continue
+			storeBool(&r.shiftOn, down)
 		case KeyCtrl:
-			if pressed {
-				atomic.StoreInt32(&r.ctrlOn, 1)
-			} else {
-				atomic.StoreInt32(&r.ctrlOn, 0)
-			}
-			continue
+			storeBool(&r.ctrlOn, down)
 		case KeyAlt:
-			if pressed {
-				atomic.StoreInt32(&r.altOn, 1)
-			} else {
-				atomic.StoreInt32(&r.altOn, 0)
-			}
-			continue
+			storeBool(&r.altOn, down)
 		}
 
-		if !pressed {
-			continue
+		// Releases are emitted too. Sending only presses left every key held
+		// down on the remote for the rest of the session — one keystroke and
+		// the far end is stuck repeating it. Local screens ignore releases;
+		// see handleInput.
+		var ch rune
+		if down {
+			ch = KeycodeToRune(code, atomic.LoadInt32(&r.shiftOn) == 1)
 		}
-
-		shifted := atomic.LoadInt32(&r.shiftOn) == 1
-		ch := KeycodeToRune(code, shifted)
 
 		select {
 		case r.events <- InputEvent{
 			Type:    EvKey,
 			KeyCode: code,
 			Rune:    ch,
-			Pressed: true,
+			Pressed: down,
 		}:
 		case <-r.quit:
 			return

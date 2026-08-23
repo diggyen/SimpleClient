@@ -192,6 +192,23 @@ step, and the last one to appear is the one that failed.
 
 ---
 
+## The session connects but the remote cannot be controlled
+
+Keys do nothing, or the remote behaves as though a key were held down.
+
+**Before v0.4.1 this was always the case.** The input reader emitted key presses
+but never releases, so every key pressed stayed down on the remote for the rest
+of the session — one keystroke and the far end is stuck repeating it. Shift,
+Ctrl and Alt were swallowed entirely and never reached the remote at all.
+Update.
+
+Still missing: keys that RDP marks *extended* — the arrow cluster, Home, End,
+Page Up/Down, Insert, Delete — are sent without that flag, so the remote sees
+the numpad scancode and behaves according to its Num Lock. Right Ctrl and right
+Alt (AltGr) are not mapped at all; use the left-hand ones.
+
+---
+
 ## The session connects but the screen stays black
 
 Almost always a codec problem, not a connection problem.

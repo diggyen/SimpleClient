@@ -122,6 +122,9 @@ Design boundaries, not bugs waiting to be filed:
 - **Resolution follows the framebuffer** the kernel hands over; there is no
   override.
 - **No manual host entry**, no clipboard, no audio, no drive redirection.
+- **Extended keys are not flagged.** The arrow cluster and the navigation keys
+  reach a session as their numpad equivalents; right Ctrl and right Alt are not
+  mapped.
 - **One keyboard and one pointer.** On a machine with two keyboards, the first
   recognised wins.
 

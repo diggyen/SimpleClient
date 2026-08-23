@@ -135,6 +135,16 @@ applies its own layout, which is what anyone connecting to a Windows desktop
 expects. The layout is paired with the UI language wherever the language is set
 — the boot flag and `F2` both — and `F3` overrides it.
 
+Every key transition is emitted — presses, repeats and releases, modifiers
+included. The local screens ignore releases; a live session forwards all of
+them, and must, because a remote that is sent presses without releases has
+every key held down and a remote with no Shift, Ctrl or Alt cannot be driven.
+
+Not yet forwarded correctly: RDP's *extended* flag. grdp's KeyDown/KeyUp take a
+bare scancode with no way to set it, so the arrow cluster and the navigation
+keys arrive as their numpad equivalents. Fixing it means a fourth patch in
+`build/patches/`.
+
 Only one keyboard and one pointer are read. On a machine with both an internal
 and a USB keyboard, the first match wins. `-kbd` and `-mouse` override.
 

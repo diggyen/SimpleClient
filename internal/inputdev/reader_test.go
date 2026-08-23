@@ -1,8 +1,12 @@
 package inputdev
 
 import (
+	"encoding/binary"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestKeycodeToRune_Unshifted(t *testing.T) {
@@ -356,5 +360,127 @@ func TestNextLayout_CyclesAndReturns(t *testing.T) {
 	}
 	if CurrentLayout() != LayoutUS {
 		t.Errorf("a full cycle ended on %s, want back at %s", CurrentLayout(), LayoutUS)
+	}
+}
+
+// writeEvents lays a raw evdev stream into a file the Reader can open.
+func writeEvents(t *testing.T, evs ...linuxInputEvent) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "event0")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for _, e := range evs {
+		if err := binary.Write(f, binary.LittleEndian, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
+}
+
+func key(code, value int) linuxInputEvent {
+	return linuxInputEvent{Type: evTypeKey, Code: uint16(code), Value: int32(value)}
+}
+
+// drain collects everything the reader emits for a finite stream.
+func drain(t *testing.T, path string) []InputEvent {
+	t.Helper()
+	r, err := New(path, "", 800, 600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	var got []InputEvent
+	for {
+		select {
+		case ev := <-r.Events():
+			got = append(got, ev)
+		case <-time.After(300 * time.Millisecond):
+			return got
+		}
+	}
+}
+
+// Sending only key presses left every key held down on the remote for the rest
+// of the session: one keystroke and the far end is stuck repeating it. A live
+// RDP session is the only consumer that cares, and it is the one that made the
+// kiosk unable to drive the remote machine at all.
+func TestReadKeyboard_EmitsReleases(t *testing.T) {
+	got := drain(t, writeEvents(t, key(KeyA, keyPress), key(KeyA, keyRelease)))
+
+	if len(got) != 2 {
+		t.Fatalf("got %d events for one press and one release: %+v", len(got), got)
+	}
+	if !got[0].Pressed || got[0].KeyCode != KeyA {
+		t.Errorf("first event = %+v, want a press of KeyA", got[0])
+	}
+	if got[1].Pressed || got[1].KeyCode != KeyA {
+		t.Errorf("second event = %+v, want a release of KeyA", got[1])
+	}
+	if got[0].Rune != 'a' {
+		t.Errorf("press carried rune %q, want 'a'", got[0].Rune)
+	}
+}
+
+// Modifiers were tracked and then swallowed. That was invisible locally — the
+// UI reads the tracked flags — but a remote with no Shift, Ctrl or Alt cannot
+// be typed on, never mind driven.
+func TestReadKeyboard_ForwardsModifiers(t *testing.T) {
+	got := drain(t, writeEvents(t,
+		key(KeyLeftShift, keyPress),
+		key(KeyA, keyPress),
+		key(KeyA, keyRelease),
+		key(KeyLeftShift, keyRelease),
+		key(KeyCtrl, keyPress),
+		key(KeyAlt, keyPress),
+	))
+
+	var codes []int
+	for _, e := range got {
+		codes = append(codes, e.KeyCode)
+	}
+	for _, want := range []int{KeyLeftShift, KeyCtrl, KeyAlt} {
+		found := false
+		for _, c := range codes {
+			if c == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("keycode %d never reached the session; emitted %v", want, codes)
+		}
+	}
+
+	// And the tracking still works: 'a' pressed while shift is held is 'A'.
+	for _, e := range got {
+		if e.KeyCode == KeyA && e.Pressed && e.Rune != 'A' {
+			t.Errorf("shifted A carried rune %q, want 'A'", e.Rune)
+		}
+	}
+}
+
+// Auto-repeat is another press, so holding backspace in a dialog erases and the
+// remote gets the repeats its keyboard is generating.
+func TestReadKeyboard_RepeatIsAPress(t *testing.T) {
+	got := drain(t, writeEvents(t, key(KeyA, keyPress), key(KeyA, keyRepeat), key(KeyA, keyRelease)))
+
+	if len(got) != 3 {
+		t.Fatalf("got %d events, want press, repeat, release: %+v", len(got), got)
+	}
+	if !got[1].Pressed || got[1].Rune != 'a' {
+		t.Errorf("repeat = %+v, want another press carrying 'a'", got[1])
+	}
+}
+
+// A release must not carry a rune: the local screens gate on Pressed, but a
+// stray rune on a release is one guard away from typing every character twice.
+func TestReadKeyboard_ReleaseCarriesNoRune(t *testing.T) {
+	for _, ev := range drain(t, writeEvents(t, key(KeyA, keyPress), key(KeyA, keyRelease))) {
+		if !ev.Pressed && ev.Rune != 0 {
+			t.Errorf("release carried rune %q", ev.Rune)
+		}
 	}
 }
