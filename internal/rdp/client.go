@@ -202,12 +202,31 @@ func (c *Client) SendMouse(x, y int, _ uint16) error {
 
 // SendMouseDown sends a mouse button press. button: 1=left, 2=right, 3=middle.
 func (c *Client) SendMouseDown(button, x, y int) {
-	c.g.MouseDown(button, x, y)
+	c.g.MouseDown(grdpButton(button), x, y)
 }
 
 // SendMouseUp sends a mouse button release.
 func (c *Client) SendMouseUp(button, x, y int) {
-	c.g.MouseUp(button, x, y)
+	c.g.MouseUp(grdpButton(button), x, y)
+}
+
+// grdpButton translates this package's button numbering to grdp's.
+//
+// grdp's switch reads 0 as left, 2 as right and 1 as middle — a numbering that
+// matches neither evdev nor RDP nor its own parameter name, and is documented
+// nowhere. Passing 1 for left therefore arrived at the server as BUTTON3, so
+// every left click was delivered as a middle click: windows highlighted under
+// the pointer, and nothing ever activated. Passing 3 for middle fell through to
+// the default and was sent as a bare move.
+func grdpButton(button int) int {
+	switch button {
+	case 2:
+		return 2 // right
+	case 3:
+		return 1 // middle
+	default:
+		return 0 // left
+	}
 }
 
 // Close disconnects from the RDP server and unblocks anyone ranging over

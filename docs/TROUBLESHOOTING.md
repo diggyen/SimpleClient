@@ -196,7 +196,12 @@ step, and the last one to appear is the one that failed.
 
 Keys do nothing, or the remote behaves as though a key were held down.
 
-**Before v0.4.1 this was always the case.** The input reader emitted key presses
+**Before v0.4.2 clicks did nothing.** grdp numbers mouse buttons 0=left,
+2=right, 1=middle — not what its own parameter name, evdev or RDP use — so this
+client's 1 for left was delivered to the server as a *middle* click. Windows
+highlighted whatever was under the pointer and never activated it. Update.
+
+**Before v0.4.1** keys were as bad. The input reader emitted key presses
 but never releases, so every key pressed stayed down on the remote for the rest
 of the session — one keystroke and the far end is stuck repeating it. Shift,
 Ctrl and Alt were swallowed entirely and never reached the remote at all.
