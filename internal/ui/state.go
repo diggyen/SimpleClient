@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"net"
 	"sync"
+	"time"
 
 	"github.com/diggyen/SimpleClient/internal/domain"
 )
@@ -55,6 +57,26 @@ type UIState struct {
 	// never part of it.
 	lastUser    map[string]credentialHint
 	SpinnerTick int // Used for connecting-screen spinner animation
+}
+
+// AddStaticHost puts a hand-configured address into the list ahead of any
+// scanning. The kiosk discovers its own subnet only, and this is the one door
+// past that boundary: rdphost=<ip> on the kernel command line. The scanner
+// deduplicates by IP, so if the address is also discoverable the scan simply
+// fills in its latency.
+func (s *UIState) AddStaticHost(raw string) bool {
+	ip := net.ParseIP(raw)
+	if ip == nil {
+		return false
+	}
+	for _, h := range s.Hosts {
+		if h.IP.Equal(ip) {
+			return true
+		}
+	}
+	s.Hosts = append(s.Hosts, domain.Host{IP: ip, DiscoveredAt: time.Now()})
+	s.Dirty = true
+	return true
 }
 
 // credentialHint is the non-secret half of a credential.

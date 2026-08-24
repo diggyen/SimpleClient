@@ -39,6 +39,10 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 	// in the top-left corner.
 	state.MouseX, state.MouseY = input.MousePos()
 
+	if cfg.StaticHost != "" && !state.AddStaticHost(cfg.StaticHost) {
+		state.ErrorMsg = "rdphost: " + cfg.StaticHost + "?"
+	}
+
 	var session *SessionState
 
 	// Start initial scan.

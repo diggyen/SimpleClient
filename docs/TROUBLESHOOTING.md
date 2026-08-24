@@ -169,8 +169,9 @@ The kiosk probes TCP 3389 across **its own subnet only**.
 2. **No `DHCP` line at all** means the NIC has no driver. `/init` `insmod`s a
    fixed list (`e1000`, `e1000e`, `r8169`, `igb`, `igc`, `tg3`); there is no
    autoloading. A NIC outside that list cannot be used without adding it.
-3. **A server on a different subnet cannot be reached.** There is no manual
-   address entry. This is a design limit, not a fault.
+3. **A server on a different subnet** is not discovered — the scan only reaches
+   the local one — but it can be added by hand: put `rdphost=<ip>` on the GRUB
+   command line and it appears in the list ready to connect.
 4. Confirm the target really listens: `nc -vz <ip> 3389` from another machine.
 
 Press **F5** to rescan.
@@ -196,12 +197,16 @@ step, and the last one to appear is the one that failed.
 
 Keys do nothing, or the remote behaves as though a key were held down.
 
-**Before v0.4.2 clicks did nothing.** grdp numbers mouse buttons 0=left,
-2=right, 1=middle — not what its own parameter name, evdev or RDP use — so this
-client's 1 for left was delivered to the server as a *middle* click. Windows
-highlighted whatever was under the pointer and never activated it. Update.
+**Before v0.4.2 nothing could be controlled.** grdp numbers mouse buttons
+0=left, 2=right, 1=middle — not what its own parameter name, evdev or RDP use —
+so this client's 1 for left reached the server as a *middle* click. Nothing
+activated, so no field could be focused, so the keyboard looked dead too:
+pointer moved, clicks did nothing, typing went nowhere. Verified fixed against a
+live Windows server — a left click focuses a field and typing lands in it.
+Update.
 
-**Before v0.4.1** keys were as bad. The input reader emitted key presses
+**Before v0.4.1** keys had a second fault on top: presses were sent without
+releases, and the modifiers never at all. The input reader emitted key presses
 but never releases, so every key pressed stayed down on the remote for the rest
 of the session — one keystroke and the far end is stuck repeating it. Shift,
 Ctrl and Alt were swallowed entirely and never reached the remote at all.

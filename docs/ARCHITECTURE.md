@@ -171,9 +171,11 @@ before the reverse DNS lookup so a slow resolver is not charged to the host. It
 never reports zero for a live host: a switched LAN answers in well under a
 millisecond, and the list reads zero as "not measured" and draws nothing.
 
-The kiosk scans **its own subnet only**. There is no box to type an address
-into. A server on another subnet cannot be reached at all — see
-[Known limitations](#known-limitations).
+The kiosk scans **its own subnet only**. A server on another subnet is not
+discovered, but `rdphost=<ip>` on the kernel command line seeds the list with a
+hand-picked address before the scan; the scanner deduplicates by IP, so if that
+address is also local the scan just fills in its latency. This is the one door
+past the subnet boundary — see [Known limitations](#known-limitations).
 
 ## RDP
 

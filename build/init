@@ -88,10 +88,12 @@ fi
 # clear text at that level.
 LANG_ARG=""
 RDP_ARG=""
+HOST_ARG=""
 for arg in $(cat /proc/cmdline 2>/dev/null); do
     case "$arg" in
         lang=*)   LANG_ARG="-lang=${arg#lang=}" ;;
         rdpdebug) RDP_ARG="-rdp-debug" ;;
+        rdphost=*) HOST_ARG="-host=${arg#rdphost=}" ;;
     esac
 done
 
@@ -131,7 +133,7 @@ fi
 # ── Kiosk loop ────────────────────────────────────────────────────────────────
 # Restart simpleclient if it exits, so a crash does not leave a blank screen.
 while true; do
-    /sbin/simpleclient $LANG_ARG $RDP_ARG
+    /sbin/simpleclient $LANG_ARG $RDP_ARG $HOST_ARG
     log "simpleclient exited ($?); restarting in 2s"
     sleep 2
 done

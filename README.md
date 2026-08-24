@@ -75,8 +75,9 @@ next time you open its dialog, with the cursor in the password field. That
 memory lives in RAM and is gone after a power cycle — the image boots read-only
 and has nowhere to write. The password is never stored.
 
-The kiosk reaches **its own subnet only**. There is no box to type an address
-into, and a server elsewhere on the network cannot be connected to at all.
+The kiosk reaches **its own subnet only**. A server on another subnet is not
+discovered, but it can be added by hand: `rdphost=<ip>` on the GRUB command line
+puts it in the list ready to connect.
 
 ## Build it
 
@@ -121,7 +122,9 @@ Design boundaries, not bugs waiting to be filed:
   16bpp, which is what the tile decoder is tuned for.
 - **Resolution follows the framebuffer** the kernel hands over; there is no
   override.
-- **No manual host entry**, no clipboard, no audio, no drive redirection.
+- **No in-UI host entry.** A server off the local subnet has to be named at boot
+  with `rdphost=<ip>`; there is no box to type one into while running.
+- **No clipboard, audio or drive redirection.**
 - **Extended keys are not flagged.** The arrow cluster and the navigation keys
   reach a session as their numpad equivalents; right Ctrl and right Alt are not
   mapped.

@@ -16,6 +16,7 @@ type Config struct {
 	MaxWorkers  int
 	Language    string
 	RDPDebug    bool
+	StaticHost  string
 }
 
 // Load parses command-line flags and returns a Config.
@@ -29,6 +30,10 @@ func Load() Config {
 	flag.IntVar(&cfg.MaxWorkers, "workers", 256, "Concurrent scan workers")
 	flag.StringVar(&cfg.Language, "lang", string(i18n.Default),
 		"Startup UI language: en or tr (toggle at runtime with F2)")
+	flag.StringVar(&cfg.StaticHost, "host", "",
+		"IP address to add to the host list without scanning. The kiosk only "+
+			"discovers its own subnet; this is the one way to reach a server "+
+			"beyond it. Set from GRUB with rdphost=<ip>.")
 	flag.BoolVar(&cfg.RDPDebug, "rdp-debug", false,
 		"Log the full RDP handshake to stderr. Diagnostic only: the RDP library "+
 			"prints the password in clear text at this level.")

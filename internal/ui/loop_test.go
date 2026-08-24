@@ -505,3 +505,22 @@ func TestRememberCredential_IgnoresEmpty(t *testing.T) {
 		t.Errorf("focus is on field %d, want the username field", state.Modal.FocusIdx)
 	}
 }
+
+// rdphost=<ip> is the one door past the scan-your-own-subnet boundary, so it
+// must land in the list exactly once and reject garbage rather than show a row
+// that can never connect.
+func TestAddStaticHost(t *testing.T) {
+	state := &UIState{}
+	if !state.AddStaticHost("10.7.7.107") {
+		t.Fatal("a valid address was rejected")
+	}
+	if state.AddStaticHost("10.7.7.107"); len(state.Hosts) != 1 {
+		t.Fatalf("adding the same address twice left %d rows", len(state.Hosts))
+	}
+	if state.AddStaticHost("not-an-ip") {
+		t.Error("garbage was accepted")
+	}
+	if got := state.Hosts[0].AddrRDP(); got != "10.7.7.107:3389" {
+		t.Errorf("static host dials %q", got)
+	}
+}
