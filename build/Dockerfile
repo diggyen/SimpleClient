@@ -209,7 +209,10 @@ RUN cd /rootfs && find . | cpio -oH newc --quiet | gzip -9 > /out/initramfs.cpio
 # done by hand because grub-mkrescue only knows how to make an unsigned EFI
 # image:
 #   BIOS     GRUB i386-pc as an El Torito image, and boot_hybrid.img as the
-#            MBR boot code when the ISO is a disk.
+#            MBR boot code when the ISO is a disk. GRUB loads a partition map
+#            only when told to, so the ones a USB stick has are built in, with
+#            FAT: without them the grubenv on SC_EFI is never found, and a
+#            kernel that fails is never swapped for the other.
 #   UEFI     a FAT image holding shim as \EFI\boot\bootx64.efi, with Debian's
 #            signed CD GRUB next to it as grubx64.efi — the name shim loads. It
 #            is both the El Torito EFI image and a GPT partition, for the CD and
@@ -236,7 +239,8 @@ RUN set -e; \
     echo "SimpleClient" > /iso/.disk/info; \
     cp /usr/lib/grub/i386-pc/*.mod /usr/lib/grub/i386-pc/*.lst /iso/boot/grub/i386-pc/; \
     cp /usr/share/grub/unicode.pf2 /iso/boot/grub/fonts/; \
-    grub-mkimage -O i386-pc-eltorito -p /boot/grub -o /iso/boot/grub/i386-pc/eltorito.img biosdisk iso9660; \
+    grub-mkimage -O i386-pc-eltorito -p /boot/grub -o /iso/boot/grub/i386-pc/eltorito.img \
+        biosdisk iso9660 part_gpt part_msdos fat search search_label loadenv; \
     cp /signed/usr/lib/shim/shimx64.efi.signed /efi/EFI/boot/bootx64.efi; \
     cp /signed/usr/lib/shim/mmx64.efi.signed /efi/EFI/boot/mmx64.efi; \
     cp /signed/usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed /efi/EFI/boot/grubx64.efi; \
