@@ -23,11 +23,15 @@
 # It can be run again: to upgrade, or after a distribution upgrade has
 # replaced the libraries xrdp was built against.
 #
-# Usage:  sudo bash simpleclient-server.sh [--session NAME] [--no-audio] [--no-usb]
+# Usage:  sudo bash simpleclient-server.sh [--session NAME] [--h264] [--no-audio] [--no-usb]
 #   --session NAME  the desktop for remote sessions, a file name from
 #                   /usr/share/xsessions without .desktop (cinnamon, mate,
 #                   xfce, plasmax11, ubuntu-xorg, ...); default: the first of
 #                   those this machine has
+#   --h264          H.264 before RemoteFX, for kiosks on a link slower than a
+#                   LAN: an eighth of the data for desktop work and a third
+#                   for video, at half the frame rate and five times xrdp's
+#                   CPU
 #   --no-audio      leave sound alone
 #   --no-usb        no USB/IP agent: drives still come, by name
 set -Eeuo pipefail
@@ -54,12 +58,14 @@ die() {
 }
 
 WANT_SESSION=""
+CODEC=rfx
 AUDIO=1
 USB=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --session) WANT_SESSION=${2:-}; shift ;;
         --session=*) WANT_SESSION=${1#--session=} ;;
+        --h264) CODEC=h264 ;;
         --no-audio) AUDIO=0 ;;
         --no-usb) USB=0 ;;
         -h|--help) sed -n '2,/^set -Eeuo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
@@ -201,10 +207,24 @@ configure_xrdp() {
     say "xrdp ayarlanıyor"
     local ini=/etc/xrdp/xrdp.ini gfx=/etc/xrdp/gfx.toml kb=/etc/xrdp/xrdp_keyboard.ini
 
-    # A frame every 8 ms, where the default is 16: what the kiosks show at up
-    # to 120 Hz instead of 60. Full colour.
+    # A frame every 8 ms, where the defaults are 16 for H.264 and 32 for
+    # RemoteFX: what the kiosks show at up to 120 Hz. Full colour.
     set_key "$ini" h264_frame_interval 8
+    set_key "$ini" rfx_frame_interval 8
     set_key "$ini" max_bpp 32
+
+    # RemoteFX before H.264. It encodes only the 64x64 tiles that changed,
+    # where x264 takes every frame whole, on one core. Measured on a 4-vCPU
+    # VM, a window dragged across a 1920x1080 kiosk: 105 fps against 47,
+    # xrdp at 17% of a core against 88%; across 3440x1440, 45 against 20. It
+    # sends more — 8 Mbit/s against 1 for the drag, 43 against 13 for video
+    # played full screen — which a LAN carries and a slow link does not:
+    # --h264 keeps H.264 first.
+    local order='[ "RFX", "H.264" ]'
+    if [ "$CODEC" = h264 ]; then
+        order='[ "H.264", "RFX" ]'
+    fi
+    sed -i -E "s/^order[[:space:]]*=.*/order = $order/" "$gfx"
 
     # x264 told the frame rate it now gets, and, with cores to spare, two
     # threads: each frame is cut in two slices, encoded side by side.
@@ -347,6 +367,16 @@ else
         [ -n "$NAMES" ] && export XDG_CURRENT_DESKTOP="$NAMES"
     fi
 fi
+
+# A remote session has no GPU. KDE's compositor would draw every frame of the
+# desktop in software, on every core, and so would the Qt Quick parts of the
+# desktop (panel, lock screen): at 3440x1440, kwin took 96% of the CPU while
+# a window was dragged and the lock screen 87% doing nothing. Without the
+# compositor a moved window is a copy the X server makes, and Qt Quick's own
+# software renderer draws only what changed: 2% and 1%.
+case "${XDG_CURRENT_DESKTOP:-}" in
+    *KDE*) export KWIN_COMPOSE=N QT_QUICK_BACKEND=software ;;
+esac
 
 # The distribution's Xsession sets up what its display manager would (D-Bus,
 # agents, input methods) before running the session.
@@ -1001,10 +1031,14 @@ start_services
 
 case $(systemd-detect-virt 2>/dev/null || true) in
     vmware|kvm|microsoft|oracle|xen)
-        say "Sanal makine: H.264 işlemcide kodlanır. Aynı anda bağlanan her kiosk için 2 vCPU ayırın"
-        say "(şu an $(nproc)); masaüstü de yazılımla çizilir, Cinnamon yerine MATE ya da Xfce daha hafiftir."
+        say "Sanal makine: görüntü işlemcide kodlanır, masaüstü yazılımla çizilir. Aynı anda bağlanan"
+        say "her kiosk için 2 vCPU ayırın (şu an $(nproc)); Cinnamon yerine MATE ya da Xfce daha hafiftir."
         ;;
 esac
+CODECS="RemoteFX, H.264 ($H264)"
+if [ "$CODEC" = h264 ]; then
+    CODECS="H.264 ($H264), RemoteFX"
+fi
 ADDR=$(ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
-say "Hazır: xrdp $XRDP_VERSION ($H264), port 3389${ADDR:+, adres $ADDR}."
+say "Hazır: xrdp $XRDP_VERSION ($CODECS), port 3389${ADDR:+, adres $ADDR}."
 say "Kiosk bu sunucuyu ağ taramasında bulur; başka bir alt ağdaysa F7 ile adresini girin."
