@@ -219,12 +219,12 @@ func drawLanguageBadge(img *image.RGBA, screen image.Rectangle) {
 	// The sound output F4 cycles, when there is any sound hardware at all.
 	if rdp.Audio != nil {
 		if d, ok := rdp.Audio.Sel.Output(); ok {
-			caps = append(caps, d.Label())
+			caps = append(caps, i18n.T(i18n.BadgeSound)+": "+d.Label())
 		}
 	}
 	caps = append(caps,
-		inputdev.CurrentLayout().Label(),
-		strings.ToUpper(string(i18n.Current())),
+		i18n.T(i18n.BadgeKeyboard)+": "+inputdev.CurrentLayout().Label(),
+		i18n.T(i18n.BadgeLanguage)+": "+strings.ToUpper(string(i18n.Current())),
 	)
 
 	total := 0

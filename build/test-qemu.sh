@@ -47,7 +47,8 @@ FAKE_RDP=0
 USB=0
 UEFI=0
 PROXY_TARGET=""
-# Which GRUB menu entry to boot: 0 = English, 1 = Turkish, 2 = verbose debug.
+# Which GRUB menu entry to boot: 0 = English, 1 = Turkish (the default),
+# 2 = RDP handshake debug, 3 = verbose debug.
 ENTRY=0
 # Overridable, but the default has to follow the firmware: OVMF spends roughly
 # 20s enumerating devices before it even reaches the boot entry, so the BIOS

@@ -106,6 +106,15 @@ RUN cp /bin/busybox.static /rootfs/bin/busybox \
 # almost no entropy at boot, so getrandom() blocks and the RDP client's TLS
 # handshake stops dead. random.trust_cpu=on covers real hardware via RDRAND;
 # virtio-rng covers virtual machines, where RDRAND may not be available.
+#
+# A driver in these trees often needs a module that lives elsewhere: the HD
+# Audio codec driver needs drivers/leds (ledtrig-audio), igb drivers/dca, tg3
+# and every PTP-capable NIC drivers/ptp and drivers/pps, b44 drivers/ssb. With
+# one missing, modprobe fails on "Unknown symbol" and the hardware is dead —
+# no sound on any HD Audio board, no network on a Broadcom one. So after the
+# trees, every dependency modules.dep names for a copied module is copied too,
+# wherever it lives. modules.dep lists each module's dependencies transitively,
+# so a single pass is complete.
 RUN KVER=$(basename /lib/modules/*) \
  && echo "kernel: $KVER" \
  && mkdir -p "/rootfs/lib/modules/$KVER/kernel/drivers" \
@@ -125,6 +134,17 @@ RUN KVER=$(basename /lib/modules/*) \
            "/rootfs/lib/modules/$KVER/kernel/net/wireless" \
            "/rootfs/lib/modules/$KVER/kernel/net/mac80211" \
            "/rootfs/lib/modules/$KVER/kernel/net/bluetooth" \
+ && cd "/lib/modules/$KVER" \
+ && (cd "/rootfs/lib/modules/$KVER" && find kernel -name '*.ko*') > /tmp/have \
+ && awk -F': ?' 'NR == FNR { have[$1] = 1; next } \
+        ($1 in have) { n = split($2, d, " "); for (i = 1; i <= n; i++) if (!(d[i] in have)) print d[i] }' \
+        /tmp/have modules.dep | sort -u > /tmp/need \
+ && while read -r m; do \
+        mkdir -p "/rootfs/lib/modules/$KVER/$(dirname "$m")"; \
+        cp -a "$m" "/rootfs/lib/modules/$KVER/$m"; \
+    done < /tmp/need \
+ && echo "dependencies outside the copied trees: $(wc -l < /tmp/need)" && cat /tmp/need \
+ && cd / \
  && mkdir -p /rootfs/lib/firmware \
  && for d in bnx2 bnx2x rtl_nic tigon e100; do \
         if [ -d "/lib/firmware/$d" ]; then cp -a "/lib/firmware/$d" /rootfs/lib/firmware/; fi; \

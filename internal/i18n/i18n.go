@@ -57,6 +57,9 @@ const (
 	HintLanguage
 	HintKeyboard
 	HintSound
+	BadgeSound
+	BadgeKeyboard
+	BadgeLanguage
 
 	Tagline // sits under the wordmark; keep it short enough to fit at 640px
 	ModalTitle
@@ -96,6 +99,9 @@ var catalogues = map[Lang]*catalogue{
 		HintLanguage:   "Language",
 		HintKeyboard:   "Keyboard",
 		HintSound:      "Sound",
+		BadgeSound:     "Sound",
+		BadgeKeyboard:  "Keyboard",
+		BadgeLanguage:  "Language",
 		Tagline:        "REMOTE DESKTOP KIOSK",
 		ModalTitle:     "Connection Details",
 		LabelUsername:  "Username:",
@@ -127,6 +133,9 @@ var catalogues = map[Lang]*catalogue{
 		HintLanguage:   "Dil",
 		HintKeyboard:   "Klavye",
 		HintSound:      "Ses",
+		BadgeSound:     "Ses",
+		BadgeKeyboard:  "Klavye",
+		BadgeLanguage:  "Dil",
 		Tagline:        "UZAK MASAÜSTÜ İSTEMCİSİ",
 		ModalTitle:     "Bağlantı Bilgileri",
 		LabelUsername:  "Kullanıcı:",

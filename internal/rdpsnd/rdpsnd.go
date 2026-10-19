@@ -70,6 +70,9 @@ type Channel struct {
 	pending *block
 	waveLen int
 
+	// streaming and warned keep the log to one line per stream.
+	streaming, warned bool
+
 	// Blocks are played on their own goroutine. Writing to the sound device
 	// blocks for as long as the sound lasts, and doing that on the protocol
 	// reader would hold up every screen update behind it.
@@ -118,6 +121,7 @@ func (c *Channel) Process(s []byte) {
 	case sndcWave2:
 		c.onWave2(body)
 	case sndcClose:
+		c.streaming = false
 		c.player.Stop()
 	case sndcSetVolume:
 		// The server scales the samples itself; nothing to do.
@@ -207,7 +211,7 @@ func (c *Channel) onWaveInfo(s []byte) {
 		received:  time.Now(),
 	}
 	formatNo := int(binary.LittleEndian.Uint16(body[2:4]))
-	if formatNo < len(c.formats) {
+	if c.noteStream(formatNo) {
 		b.format = c.formats[formatNo]
 	}
 	b.pcm = append([]byte(nil), body[8:12]...)
@@ -239,10 +243,28 @@ func (c *Channel) onWave2(body []byte) {
 		pcm:       append([]byte(nil), body[12:]...),
 	}
 	formatNo := int(binary.LittleEndian.Uint16(body[2:4]))
-	if formatNo < len(c.formats) {
+	if c.noteStream(formatNo) {
 		b.format = c.formats[formatNo]
 	}
 	c.enqueue(b)
+}
+
+// noteStream reports whether formatNo is one the kiosk offered, logging the
+// first block of each stream and the first block in a format it never
+// offered — which would otherwise be silence without a trace.
+func (c *Channel) noteStream(formatNo int) bool {
+	if formatNo >= len(c.formats) {
+		if !c.warned {
+			c.warned = true
+			log.Printf("rdpsnd: block in format %d, only %d were offered", formatNo, len(c.formats))
+		}
+		return false
+	}
+	if !c.streaming {
+		c.streaming = true
+		log.Printf("rdpsnd: stream started: %s", c.formats[formatNo])
+	}
+	return true
 }
 
 // enqueue hands a block to the player. If the player has fallen hopelessly

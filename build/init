@@ -8,6 +8,12 @@
 
 log() { echo "[simpleclient-init] $*" > /dev/console 2>/dev/null; }
 
+# The kernel starts /init with no PATH at all. Busybox finds its own applets
+# regardless, but everything it starts inherits the empty PATH, and the kiosk
+# could not find aplay/arecord in /usr/bin: sessions negotiated sound and then
+# played nothing.
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
 mount -t proc proc /proc 2>/dev/null
 mount -t sysfs sysfs /sys 2>/dev/null
 mount -t devtmpfs devtmpfs /dev 2>/dev/null
@@ -77,8 +83,11 @@ coldplug() {
         [ -r "$f" ] || continue
         alias=$(cat "$f" 2>/dev/null)
         [ -n "$alias" ] || continue
+        # platform:pcspkr is the board's beeper. Its sound driver, snd_pcsp,
+        # registers as a sound card and would be picked to play the session's
+        # audio — as clicks through a buzzer. The kiosk never beeps either.
         case "$alias" in
-            pci:*bc03sc*) continue ;;
+            pci:*bc03sc*|platform:pcspkr) continue ;;
         esac
         modprobe -q "$alias" 2>/dev/null
     done
@@ -97,6 +106,10 @@ for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     [ -w "$g" ] && echo performance > "$g" 2>/dev/null
 done
 log "modules: $(wc -l < /proc/modules 2>/dev/null) loaded; cpufreq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_driver 2>/dev/null)"
+# The kiosk has no shell; these lines on the serial console are how a machine
+# with a missing driver gets diagnosed.
+log "loaded: $(cut -d' ' -f1 /proc/modules 2>/dev/null | tr '\n' ' ')"
+log "sound cards: $(sed -n 's/^ *\([0-9]*\) \[\([^] ]*\) *\]: \(.*\)/\1=\2 (\3)/p' /proc/asound/cards 2>/dev/null | tr '\n' ' ')"
 
 # ── Display ───────────────────────────────────────────────────────────────────
 if [ ! -e /dev/fb0 ]; then

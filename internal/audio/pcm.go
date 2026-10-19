@@ -3,6 +3,7 @@ package audio
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -52,7 +53,7 @@ func (o *Output) Stop() {
 }
 
 func (o *Output) startLocked(dev string, f Format) error {
-	cmd := exec.Command("aplay", "-q", "-D", dev, "-t", "raw",
+	cmd := exec.Command(tool("aplay"), "-q", "-D", dev, "-t", "raw",
 		"-f", f.alsaFormat(), "-c", fmt.Sprint(f.Channels), "-r", fmt.Sprint(f.SamplesPerSec),
 		"--buffer-time="+fmt.Sprint(bufferTime.Microseconds()))
 	cmd.Stderr = os.Stderr
@@ -63,6 +64,7 @@ func (o *Output) startLocked(dev string, f Format) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("aplay: %w", err)
 	}
+	log.Printf("audio: playing %s on %s", f, dev)
 	o.cmd, o.in, o.dev, o.format = cmd, in, dev, f
 	return nil
 }
@@ -99,7 +101,7 @@ type Input struct {
 // with each packet of exactly packetBytes bytes.
 func (in *Input) Start(dev Device, f Format, packetBytes int, deliver func([]byte)) error {
 	in.Stop()
-	cmd := exec.Command("arecord", "-q", "-D", dev.ALSA(), "-t", "raw",
+	cmd := exec.Command(tool("arecord"), "-q", "-D", dev.ALSA(), "-t", "raw",
 		"-f", f.alsaFormat(), "-c", fmt.Sprint(f.Channels), "-r", fmt.Sprint(f.SamplesPerSec),
 		"--buffer-time=100000")
 	cmd.Stderr = os.Stderr
@@ -110,6 +112,7 @@ func (in *Input) Start(dev Device, f Format, packetBytes int, deliver func([]byt
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("arecord: %w", err)
 	}
+	log.Printf("audio: recording %s from %s", f, dev.ALSA())
 	done := make(chan struct{})
 	in.mu.Lock()
 	in.cmd, in.done = cmd, done
@@ -169,14 +172,14 @@ func ensureMixer(card int) {
 	mixerMu.Unlock()
 
 	c := fmt.Sprint(card)
-	_ = exec.Command("alsactl", "init", c).Run()
-	out, err := exec.Command("amixer", "-c", c, "scontents").Output()
+	_ = exec.Command(tool("alsactl"), "init", c).Run()
+	out, err := exec.Command(tool("amixer"), "-c", c, "scontents").Output()
 	if err != nil {
 		return
 	}
 	for _, ctl := range parseControls(string(out)) {
 		for _, args := range mixerSettings(ctl) {
-			_ = exec.Command("amixer", append([]string{"-q", "-c", c, "sset", ctl.id}, args...)...).Run()
+			_ = exec.Command(tool("amixer"), append([]string{"-q", "-c", c, "sset", ctl.id}, args...)...).Run()
 		}
 	}
 }
@@ -244,4 +247,21 @@ func mixerSettings(c mixerControl) [][]string {
 		s = append(s, []string{"capture", "cap"})
 	}
 	return s
+}
+
+// tool is the path of one of the ALSA utilities. The image carries them in
+// /usr/bin; the absolute path keeps sound working whatever PATH the kiosk was
+// started with.
+func tool(name string) string {
+	for _, dir := range []string{"/usr/bin", "/bin"} {
+		if p := dir + "/" + name; fileExists(p) {
+			return p
+		}
+	}
+	return name
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }

@@ -54,6 +54,22 @@ func (d Device) Label() string {
 	return d.Kind.String()
 }
 
+// String describes the endpoint for the log, e.g.
+// `plughw:0,0 Analog "ALC662 rev3 Analog" play rec`.
+func (d Device) String() string {
+	s := fmt.Sprintf("%s %s %q", d.ALSA(), d.Kind, d.Name)
+	if d.Playback {
+		s += " play"
+	}
+	if d.Capture {
+		s += " rec"
+	}
+	if d.Monitor {
+		s += " monitor"
+	}
+	return s
+}
+
 // procRoot is where /proc/asound is read from; tests point it elsewhere.
 var procRoot = "/proc/asound"
 
@@ -82,6 +98,10 @@ func Scan() []Device {
 		card, err1 := strconv.Atoi(cs)
 		dev, err2 := strconv.Atoi(ds)
 		if err1 != nil || err2 != nil {
+			continue
+		}
+		if ids[card] == "pcsp" {
+			// The PC speaker driver: a buzzer on the board, not a sound output.
 			continue
 		}
 		parts := strings.Split(rest, ":")

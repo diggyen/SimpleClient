@@ -75,7 +75,9 @@ func main() {
 	// with no card present, so a USB headset plugged in later just works.
 	go audio.InitMixer()
 	rdp.Audio = audio.NewSink(&audio.Selector{})
-	warnf("sound: %d endpoints", len(audio.Scan()))
+	for _, d := range audio.Scan() {
+		warnf("sound: %s", d)
+	}
 
 	scan := scanner.New(cfg.MaxWorkers, cfg.ScanTimeout)
 
