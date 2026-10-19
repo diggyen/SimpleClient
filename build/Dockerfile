@@ -11,7 +11,9 @@
 # carries a patch removing a vestigial `import "C"` from grdp/plugin — see
 # build/patches/.
 
-ARG ALPINE_VERSION=3.20
+# 3.24: supported until mid-2028, and its linux-lts (6.18) knows the GPUs, NICs
+# and audio codecs of current machines while still running the old ones.
+ARG ALPINE_VERSION=3.24
 
 # ── Go binary ─────────────────────────────────────────────────────────────────
 FROM --platform=linux/amd64 golang:1.23-alpine AS go-builder
