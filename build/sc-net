@@ -1,0 +1,87 @@
+#!/bin/sh
+# sc-net apply — bring the network up the way the kiosk's network settings say:
+# DHCP, or a fixed address with its gateway and DNS servers.
+#
+# The settings are in /run/sc-network, key=value lines:
+#   mode=dhcp | static
+#   interface=eth0            (optional; the first interface otherwise)
+#   address=192.168.1.50/24   (static only)
+#   gateway=192.168.1.1       (static, optional)
+#   dns=192.168.1.1 1.1.1.1   (static, optional)
+# /init writes the file at boot — from sc.ip= on the kernel command line, or
+# from what the network dialog saved — and the dialog rewrites it and runs this
+# again to apply a change on the spot. A missing file means DHCP.
+#
+# Interfaces other than the one configured keep DHCP: on a machine with two
+# NICs the second goes on working as before.
+CONF=${SC_NETCONF:-/run/sc-network}
+
+mode=dhcp interface="" address="" gateway="" dns=""
+if [ -r "$CONF" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            mode) mode=$v ;;
+            interface) interface=$v ;;
+            address) address=$v ;;
+            gateway) gateway=$v ;;
+            dns) dns=$v ;;
+        esac
+    done < "$CONF"
+fi
+
+ifaces() { ls /sys/class/net 2>/dev/null | grep -v '^lo$'; }
+[ -n "$interface" ] || interface=$(ifaces | head -1)
+[ -n "$interface" ] || { echo "sc-net: no network interface" >&2; exit 1; }
+
+# udhcpc_pid IFACE prints the pid of the udhcpc running on IFACE, if any.
+udhcpc_pid() {
+    for p in /proc/[0-9]*; do
+        tr '\0' ' ' < "$p/cmdline" 2>/dev/null | grep -q "^udhcpc .*-i $1 " && echo "${p#/proc/}"
+    done
+}
+
+dhcp() {
+    ip link set "$1" up 2>/dev/null
+    [ -n "$(udhcpc_pid "$1")" ] && return 0
+    ip addr flush dev "$1" 2>/dev/null
+    udhcpc -i "$1" -b -t 4 -T 2 -A 5 >/dev/null 2>&1
+}
+
+case "$1" in
+    apply) ;;
+    *) echo "usage: sc-net apply" >&2; exit 2 ;;
+esac
+
+if [ "$mode" != static ]; then
+    for i in $(ifaces); do dhcp "$i"; done
+    exit 0
+fi
+
+# A fixed address. The lease udhcpc may be holding goes first, or the kiosk
+# ends up with two addresses and a default route through the DHCP gateway.
+for p in $(udhcpc_pid "$interface"); do kill "$p" 2>/dev/null; done
+ip link set "$interface" up 2>/dev/null
+ip addr flush dev "$interface" 2>/dev/null
+ip addr add "$address" dev "$interface" || { echo "sc-net: bad address $address" >&2; exit 1; }
+if [ -n "$gateway" ]; then
+    ip route replace default via "$gateway" dev "$interface" 2>/dev/null ||
+        echo "sc-net: gateway $gateway not reachable from $address" >&2
+fi
+if [ -n "$dns" ]; then
+    : > /etc/resolv.conf
+    for d in $dns; do echo "nameserver $d" >> /etc/resolv.conf; done
+fi
+for i in $(ifaces); do
+    [ "$i" = "$interface" ] || dhcp "$i"
+done
+
+# A NIC takes a second or two to bring its link up after being switched on.
+# With DHCP the wait for the lease covers that; a fixed address is in place at
+# once, and the kiosk's first scan went out over a link that was not up yet
+# and found nothing. So wait for the cable, up to five seconds.
+i=0
+while [ "$i" -lt 20 ] && [ "$(cat "/sys/class/net/$interface/carrier" 2>/dev/null)" != 1 ]; do
+    sleep 0.25
+    i=$((i + 1))
+done
+exit 0

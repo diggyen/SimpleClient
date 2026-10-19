@@ -63,9 +63,11 @@ const (
 
 	Tagline // sits under the wordmark; keep it short enough to fit at 640px
 	ModalTitle
+	LabelServer
 	LabelUsername
 	LabelPassword
 	LabelDomain
+	HintDomain // the toggle that shows the optional domain field
 	ButtonConnect
 	ButtonCancel
 	Connecting
@@ -73,7 +75,51 @@ const (
 	ErrTimeout
 	ErrRefused
 	ErrAuthFailed
+	ErrBadAddress
 	LanguageName // Native name of the active language, e.g. "Türkçe"
+
+	// Installing to disk, offered when running from a USB stick or CD.
+	HintAddress // F7: connect to a server typed in by hand
+	HintInstall
+	InstallTitle
+	InstallPick
+	InstallNoDisk
+	InstallErase  // "%s" is the disk
+	InstallTable  // "%s" is GPT or MBR
+	InstallKeys   // "%s" is the confirming letter
+	InstallLetter // the letter that confirms: Y, E
+	InstallStepMedium
+	InstallStepPartition
+	InstallStepFormat
+	InstallStepCopy
+	InstallStepBootloader
+	InstallStepFirmware
+	InstallDone
+	InstallFailed // "%s" is the reason
+
+	// Network settings (F8).
+	HintNetwork
+	NetTitle
+	NetMode
+	NetDHCP
+	NetStatic
+	NetAddress
+	NetMask
+	NetGateway
+	NetDNS1
+	NetDNS2
+	NetSave
+	NetCable   // "%s" is the interface
+	NetNoCable // "%s" is the interface
+	NetNoAddress
+	NetApplying
+	NetSaved
+	NetSessionOnly
+	NetErrAddress
+	NetErrMask
+	NetErrGateway
+	NetErrDNS
+	NetErrApply // "%s" is the reason
 
 	numKeys // must stay last
 )
@@ -92,7 +138,7 @@ var catalogues = map[Lang]*catalogue{
 		ColumnServer:   "SERVER",
 		ColumnAddress:  "ADDRESS",
 		ColumnLatency:  "LATENCY",
-		NoServersHint:  "Nothing is listening on port 3389 in %s. Press F5 to scan again.",
+		NoServersHint:  "Nothing is listening on port 3389 in %s. F5 scans again, F7 connects to an address, F8 sets up the network.",
 		HintSelect:     "Select",
 		HintConnect:    "Connect",
 		HintRefresh:    "Refresh",
@@ -104,9 +150,11 @@ var catalogues = map[Lang]*catalogue{
 		BadgeLanguage:  "Language",
 		Tagline:        "REMOTE DESKTOP KIOSK",
 		ModalTitle:     "Connection Details",
+		LabelServer:    "Server:",
 		LabelUsername:  "Username:",
 		LabelPassword:  "Password:",
 		LabelDomain:    "Domain:",
+		HintDomain:     "Domain",
 		ButtonConnect:  "Connect",
 		ButtonCancel:   "Cancel",
 		Connecting:     "Connecting... %s",
@@ -114,7 +162,49 @@ var catalogues = map[Lang]*catalogue{
 		ErrTimeout:     "Timeout: server unreachable",
 		ErrRefused:     "Connection refused",
 		ErrAuthFailed:  "Authentication failed",
+		ErrBadAddress:  "Server address not found",
 		LanguageName:   "English",
+
+		HintAddress:           "Address",
+		HintInstall:           "Install",
+		InstallTitle:          "Install to disk",
+		InstallPick:           "Choose the disk to install on:",
+		InstallNoDisk:         "No disk to install on (at least 4 GB, not the stick this runs from).",
+		InstallErase:          "Everything on %s will be erased.",
+		InstallTable:          "Partition table: %s",
+		InstallKeys:           "Press %s to install, Esc to go back.",
+		InstallLetter:         "Y",
+		InstallStepMedium:     "Reading the installation medium...",
+		InstallStepPartition:  "Partitioning the disk...",
+		InstallStepFormat:     "Creating file systems...",
+		InstallStepCopy:       "Copying the system...",
+		InstallStepBootloader: "Installing the boot loader...",
+		InstallStepFirmware:   "Adding the UEFI boot entry...",
+		InstallDone:           "Installed. Remove the USB stick or CD and press Enter to restart.",
+		InstallFailed:         "Installation failed: %s",
+
+		HintNetwork:    "Network",
+		NetTitle:       "Network settings",
+		NetMode:        "Connection:",
+		NetDHCP:        "DHCP (automatic)",
+		NetStatic:      "Manual",
+		NetAddress:     "IP address:",
+		NetMask:        "Subnet mask:",
+		NetGateway:     "Gateway:",
+		NetDNS1:        "Preferred DNS:",
+		NetDNS2:        "Alternate DNS:",
+		NetSave:        "Save",
+		NetCable:       "%s: cable in",
+		NetNoCable:     "%s: no cable",
+		NetNoAddress:   "no address",
+		NetApplying:    "Applying...",
+		NetSaved:       "Saved.",
+		NetSessionOnly: "Applied until restart: a CD has nowhere to save settings.",
+		NetErrAddress:  "Invalid IP address",
+		NetErrMask:     "Invalid subnet mask",
+		NetErrGateway:  "The gateway is not in this subnet",
+		NetErrDNS:      "Invalid DNS server address",
+		NetErrApply:    "Could not apply: %s",
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
@@ -126,7 +216,7 @@ var catalogues = map[Lang]*catalogue{
 		ColumnServer:   "SUNUCU",
 		ColumnAddress:  "ADRES",
 		ColumnLatency:  "GECİKME",
-		NoServersHint:  "%s ağında 3389 portunu dinleyen bir sunucu yok. Yeniden taramak için F5.",
+		NoServersHint:  "%s ağında 3389 portunu dinleyen bir sunucu yok. F5 yeniden tarar, F7 adres girer, F8 ağ ayarlarını açar.",
 		HintSelect:     "Seç",
 		HintConnect:    "Bağlan",
 		HintRefresh:    "Yenile",
@@ -138,9 +228,11 @@ var catalogues = map[Lang]*catalogue{
 		BadgeLanguage:  "Dil",
 		Tagline:        "UZAK MASAÜSTÜ İSTEMCİSİ",
 		ModalTitle:     "Bağlantı Bilgileri",
+		LabelServer:    "Sunucu:",
 		LabelUsername:  "Kullanıcı:",
 		LabelPassword:  "Parola:",
 		LabelDomain:    "Etki alanı:",
+		HintDomain:     "Etki alanı",
 		ButtonConnect:  "Bağlan",
 		ButtonCancel:   "İptal",
 		Connecting:     "Bağlanıyor... %s",
@@ -148,7 +240,49 @@ var catalogues = map[Lang]*catalogue{
 		ErrTimeout:     "Zaman aşımı: sunucuya ulaşılamıyor",
 		ErrRefused:     "Bağlantı reddedildi",
 		ErrAuthFailed:  "Kimlik doğrulama başarısız",
+		ErrBadAddress:  "Sunucu adresi bulunamadı",
 		LanguageName:   "Türkçe",
+
+		HintAddress:           "Adres gir",
+		HintInstall:           "Diske kur",
+		InstallTitle:          "Diske kurulum",
+		InstallPick:           "Kurulacak diski seçin:",
+		InstallNoDisk:         "Kurulabilecek disk yok (en az 4 GB, çalışılan bellek hariç).",
+		InstallErase:          "%s üzerindeki HER ŞEY silinecek.",
+		InstallTable:          "Bölüm tablosu: %s",
+		InstallKeys:           "Kurmak için %s, geri dönmek için Esc.",
+		InstallLetter:         "E",
+		InstallStepMedium:     "Kurulum ortamı okunuyor...",
+		InstallStepPartition:  "Disk bölümleniyor...",
+		InstallStepFormat:     "Dosya sistemleri oluşturuluyor...",
+		InstallStepCopy:       "Sistem kopyalanıyor...",
+		InstallStepBootloader: "Önyükleyici kuruluyor...",
+		InstallStepFirmware:   "UEFI önyükleme kaydı ekleniyor...",
+		InstallDone:           "Kurulum tamam. USB belleği veya CD'yi çıkarıp Enter'a basın.",
+		InstallFailed:         "Kurulum başarısız: %s",
+
+		HintNetwork:    "Ağ",
+		NetTitle:       "Ağ ayarları",
+		NetMode:        "Bağlantı:",
+		NetDHCP:        "DHCP (otomatik)",
+		NetStatic:      "Manuel",
+		NetAddress:     "IP adresi:",
+		NetMask:        "Alt ağ maskesi:",
+		NetGateway:     "Ağ geçidi:",
+		NetDNS1:        "Tercih edilen DNS:",
+		NetDNS2:        "Alternatif DNS:",
+		NetSave:        "Kaydet",
+		NetCable:       "%s: kablo takılı",
+		NetNoCable:     "%s: kablo yok",
+		NetNoAddress:   "adres yok",
+		NetApplying:    "Uygulanıyor...",
+		NetSaved:       "Kaydedildi.",
+		NetSessionOnly: "Yeniden başlatılana dek uygulandı: CD'de ayar kaydedilecek yer yok.",
+		NetErrAddress:  "IP adresi geçersiz",
+		NetErrMask:     "Alt ağ maskesi geçersiz",
+		NetErrGateway:  "Ağ geçidi bu alt ağda değil",
+		NetErrDNS:      "DNS sunucusu adresi geçersiz",
+		NetErrApply:    "Uygulanamadı: %s",
 	},
 }
 

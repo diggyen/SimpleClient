@@ -207,7 +207,7 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 
 	renderCardFooter(img, l, state)
 	renderErrorBanner(img, l, state)
-	renderKeyHints(img, l)
+	renderKeyHints(img, l, state.CanInstall)
 }
 
 // drawLanguageBadge puts the active language in the top-right corner as a cap,
@@ -451,23 +451,44 @@ func renderErrorBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
 }
 
 // keyHints pairs each key with the action it performs, so the footer can set
-// the key as a cap and the action as plain text.
-func keyHints() [][2]string {
-	return [][2]string{
+// the key as a cap and the action as plain text. install adds F9, offered when
+// the kiosk runs from a USB stick or CD.
+func keyHints(install bool) [][2]string {
+	h := [][2]string{
 		{"↑↓", i18n.T(i18n.HintSelect)},
 		{"Enter", i18n.T(i18n.HintConnect)},
+		{"F7", i18n.T(i18n.HintAddress)},
+		{"F8", i18n.T(i18n.HintNetwork)},
 		{"F5", i18n.T(i18n.HintRefresh)},
 		{"F2", i18n.T(i18n.HintLanguage)},
 		{"F3", i18n.T(i18n.HintKeyboard)},
 		{"F4", i18n.T(i18n.HintSound)},
 	}
+	if install {
+		h = append(h, [2]string{"F9", i18n.T(i18n.HintInstall)})
+	}
+	return h
 }
 
-// keyHintsWidth measures the hint row so it can be centred.
-func keyHintsWidth() int {
+// fitKeyHints drops hints until the row fits in width, the ones before F9
+// first: on a narrow screen, installing is what the person at a fresh kiosk
+// is most likely to be looking for, and the keys still work unlabelled.
+func fitKeyHints(hints [][2]string, width int) [][2]string {
+	for len(hints) > 3 && keyHintsWidth(hints) > width {
+		drop := len(hints) - 1
+		if hints[drop][0] == "F9" {
+			drop--
+		}
+		hints = append(hints[:drop:drop], hints[drop+1:]...)
+	}
+	return hints
+}
+
+// keyHintsWidth measures a hint row so it can be centred.
+func keyHintsWidth(hints [][2]string) int {
 	const capGap, pairGap = 7, 22
 	w := 0
-	for i, h := range keyHints() {
+	for i, h := range hints {
 		if i > 0 {
 			w += pairGap
 		}
@@ -477,13 +498,14 @@ func keyHintsWidth() int {
 }
 
 // renderKeyHints draws the bottom key legend and the project URL.
-func renderKeyHints(img *image.RGBA, l discoveryLayout) {
+func renderKeyHints(img *image.RGBA, l discoveryLayout, install bool) {
 	const capGap, pairGap = 7, 22
 
+	hints := fitKeyHints(keyHints(install), l.Screen.Dx()-2*padding)
 	y := l.Screen.Max.Y - hintsBottom
-	x := l.Screen.Min.X + (l.Screen.Dx()-keyHintsWidth())/2
+	x := l.Screen.Min.X + (l.Screen.Dx()-keyHintsWidth(hints))/2
 
-	for _, h := range keyHints() {
+	for _, h := range hints {
 		x += DrawKeycap(img, x, y, h[0]) + capGap
 		DrawText(img, x, y+4, h[1], ColorDim)
 		x += TextWidth(h[1], false) + pairGap

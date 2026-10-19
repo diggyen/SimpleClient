@@ -1,0 +1,184 @@
+#!/bin/sh
+# sc-install DISK gpt|mbr [LANG] — install SimpleClient from the medium this
+# kiosk booted from onto DISK, wiping it.
+#
+# Layout, the same in both partition tables:
+#   ESP      FAT32, 128 MiB: shim, GRUB for UEFI and for BIOS, grub.cfg and
+#            grubenv (which slot boots)
+#   SC_A     ext4, 768 MiB: kernel + initramfs, the system the install boots
+#   SC_B     ext4, 768 MiB: the other system slot; updates are written to the
+#            slot not running, so a failed one never touches the working one
+#   SC_DATA  ext4, the rest: settings, logs, update downloads
+#
+# GPT carries a 1 MiB BIOS boot partition first, for GRUB's BIOS core image; on
+# MBR that image sits in the gap after the MBR and the ESP is marked active,
+# which some old BIOSes want before they boot a disk at all. Either disk boots
+# in BIOS and in UEFI mode, so changing the firmware setting later does not
+# strand it. The caller picks GPT on UEFI machines and MBR on BIOS ones.
+#
+# Progress goes to stdout for the kiosk UI as "STEP n total name"; a failure as
+# "ERROR text", with a non-zero exit.
+set -u
+
+DISK=${1:-}
+TABLE=${2:-}
+LANG_ARG=${3:-tr}
+TOTAL=6
+
+step() { echo "STEP $1 $TOTAL $2"; }
+fail() { echo "ERROR $*"; cleanup; exit 1; }
+cleanup() {
+    sync
+    for m in /mnt/sc-slot /mnt/sc-esp /mnt/sc-data /mnt/sc-media; do
+        umount "$m" 2>/dev/null
+    done
+}
+
+# part N names partition N of DISK: nvme0n1 → nvme0n1p1, sda → sda1.
+part() {
+    case $DISK in
+        *[0-9]) echo "${DISK}p$1" ;;
+        *) echo "${DISK}$1" ;;
+    esac
+}
+
+# GRUB reads ext4 but not every feature e2fsprogs turns on by default.
+mkext4() { mkfs.ext4 -q -F -O ^metadata_csum_seed,^orphan_file -L "$1" "$2"; }
+
+# find_medium prints the device holding the ISO this kiosk booted from: by its
+# volume label, or failing that by the label in each device's ISO 9660 primary
+# volume descriptor (sector 16: "CD001" at byte 1, the volume ID at byte 40).
+find_medium() {
+    findfs LABEL=SIMPLECLIENT 2>/dev/null && return 0
+    for d in /dev/sr[0-9]* /dev/sd[a-z] /dev/nvme[0-9]n[0-9] /dev/vd[a-z] /dev/mmcblk[0-9]; do
+        [ -b "$d" ] || continue
+        [ "$(dd if="$d" bs=1 skip=32769 count=5 2>/dev/null)" = CD001 ] || continue
+        if [ "$(dd if="$d" bs=1 skip=32808 count=12 2>/dev/null)" = SIMPLECLIENT ]; then
+            echo "$d"
+            return 0
+        fi
+    done
+    return 1
+}
+
+[ -b "$DISK" ] || fail "not a block device: $DISK"
+case $TABLE in gpt|mbr) ;; *) fail "partition table must be gpt or mbr" ;; esac
+
+# ── 1. The installation medium ───────────────────────────────────────────────
+step 1 medium
+mkdir -p /mnt/sc-media /mnt/sc-esp /mnt/sc-slot /mnt/sc-data
+MEDIA=$(find_medium) || fail "installation medium not found"
+mount -t iso9660 -o ro "$MEDIA" /mnt/sc-media 2>/dev/null || fail "cannot mount $MEDIA"
+for f in boot/vmlinuz-new boot/vmlinuz-lts boot/initramfs.cpio.gz \
+         boot/modules-new.cpio.gz boot/modules-lts.cpio.gz boot/efi/grubx64.efi \
+         EFI/boot/bootx64.efi EFI/boot/mmx64.efi boot/grub/fonts/unicode.pf2; do
+    [ -f "/mnt/sc-media/$f" ] || fail "missing on the medium: $f"
+done
+
+# ── 2. Partitions ────────────────────────────────────────────────────────────
+step 2 partition
+for p in $(awk -v d="$DISK" 'index($1, d) == 1 { print $2 }' /proc/mounts); do
+    umount "$p" 2>/dev/null || fail "$p is in use"
+done
+# The old partition table, both GPT copies included, goes first: a stale
+# backup GPT at the end of the disk makes some firmware see two layouts.
+sfdisk --delete "$DISK" >/dev/null 2>&1
+dd if=/dev/zero of="$DISK" bs=1M count=4 conv=fsync 2>/dev/null
+SECTORS=$(cat "/sys/class/block/${DISK#/dev/}/size")
+dd if=/dev/zero of="$DISK" bs=512 seek=$((SECTORS - 2048)) count=2048 conv=fsync 2>/dev/null
+
+if [ "$TABLE" = gpt ]; then
+    sfdisk -q --wipe always --wipe-partitions always "$DISK" <<EOF || fail "partitioning failed"
+label: gpt
+size=1MiB, type=21686148-6449-6E6F-744E-656564454649, name=SC_BIOS
+size=128MiB, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name=SC_ESP
+size=768MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=SC_A
+size=768MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=SC_B
+type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=SC_DATA
+EOF
+    ESP=2 A=3 B=4 DATA=5
+else
+    sfdisk -q --wipe always --wipe-partitions always "$DISK" <<EOF || fail "partitioning failed"
+label: dos
+size=128MiB, type=ef, bootable
+size=768MiB, type=83
+size=768MiB, type=83
+type=83
+EOF
+    ESP=1 A=2 B=3 DATA=4
+fi
+
+# The kernel announces the new partitions asynchronously.
+i=0
+while [ ! -b "$(part $DATA)" ] && [ $i -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+[ -b "$(part $DATA)" ] || fail "partitions did not appear"
+
+# ── 3. File systems ──────────────────────────────────────────────────────────
+step 3 format
+mkfs.fat -F 32 -n SC_ESP "$(part $ESP)" >/dev/null || fail "formatting the ESP failed"
+mkext4 SC_A "$(part $A)" || fail "formatting SC_A failed"
+mkext4 SC_B "$(part $B)" || fail "formatting SC_B failed"
+mkext4 SC_DATA "$(part $DATA)" || fail "formatting SC_DATA failed"
+
+# ── 4. The system, into slot A ───────────────────────────────────────────────
+step 4 copy
+mount -t ext4 "$(part $A)" /mnt/sc-slot || fail "cannot mount SC_A"
+for f in /mnt/sc-media/boot/vmlinuz-* /mnt/sc-media/boot/*.cpio.gz; do
+    cp "$f" /mnt/sc-slot/ || fail "copying $(basename "$f") failed (disk full?)"
+done
+[ -n "${SC_VERSION:-}" ] && echo "$SC_VERSION" > /mnt/sc-slot/version
+sync
+umount /mnt/sc-slot
+
+mount -t ext4 "$(part $DATA)" /mnt/sc-data || fail "cannot mount SC_DATA"
+mkdir -p /mnt/sc-data/log /mnt/sc-data/update
+sync
+umount /mnt/sc-data
+
+# ── 5. Boot loaders ──────────────────────────────────────────────────────────
+step 5 bootloader
+mount -t vfat "$(part $ESP)" /mnt/sc-esp || fail "cannot mount the ESP"
+mkdir -p /mnt/sc-esp/EFI/BOOT /mnt/sc-esp/boot/grub/fonts
+# UEFI: \EFI\BOOT\BOOTX64.EFI is the path firmware boots from any disk without
+# a boot entry. It is shim, which loads grubx64.efi from its own directory;
+# that GRUB reads grub.cfg from the same directory, a stub pointing at the main
+# configuration on this ESP by its unique volume ID.
+cp /mnt/sc-media/EFI/boot/bootx64.efi /mnt/sc-esp/EFI/BOOT/BOOTX64.EFI || fail "copying shim failed"
+cp /mnt/sc-media/EFI/boot/mmx64.efi /mnt/sc-esp/EFI/BOOT/mmx64.efi
+cp /mnt/sc-media/boot/efi/grubx64.efi /mnt/sc-esp/EFI/BOOT/grubx64.efi || fail "copying GRUB failed"
+UUID=$(blkid "$(part $ESP)" | sed -n 's/.* UUID="\([^"]*\)".*/\1/p')
+[ -n "$UUID" ] || fail "the ESP has no volume ID"
+cat > /mnt/sc-esp/EFI/BOOT/grub.cfg <<EOF
+search --no-floppy --fs-uuid --set=root $UUID
+set prefix=(\$root)/boot/grub
+configfile \$prefix/grub.cfg
+EOF
+cp /usr/share/simpleclient/grub-disk.cfg /mnt/sc-esp/boot/grub/grub.cfg || fail "copying grub.cfg failed"
+cp /mnt/sc-media/boot/grub/fonts/unicode.pf2 /mnt/sc-esp/boot/grub/fonts/
+grub-editenv /mnt/sc-esp/boot/grub/grubenv create || fail "creating grubenv failed"
+# The kernel this installer runs on has just proven itself on this machine.
+grub-editenv /mnt/sc-esp/boot/grub/grubenv set sc_boot=A sc_try= "sc_lang=$LANG_ARG" \
+    "sc_kernel=${SC_KERNEL:-new}" sc_kpending=0
+
+# BIOS: GRUB's core image goes into the BIOS boot partition (GPT) or the gap
+# after the MBR, the boot code into the MBR, the modules onto the ESP.
+grub-install --target=i386-pc --boot-directory=/mnt/sc-esp/boot --no-floppy \
+    --modules="part_gpt part_msdos fat ext2" "$DISK" >/tmp/grub-install.log 2>&1 \
+    || fail "grub-install: $(tail -1 /tmp/grub-install.log)"
+sync
+umount /mnt/sc-esp
+
+# ── 6. The UEFI boot entry ───────────────────────────────────────────────────
+# Best effort: without an entry the firmware still boots the removable path.
+step 6 firmware
+if [ -d /sys/firmware/efi ]; then
+    mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null
+    for n in $(efibootmgr 2>/dev/null | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} SimpleClient.*/\1/p'); do
+        efibootmgr -q -b "$n" -B 2>/dev/null
+    done
+    efibootmgr -q -c -d "$DISK" -p "$ESP" -L SimpleClient -l '\EFI\BOOT\BOOTX64.EFI' 2>/dev/null \
+        || echo "WARN no UEFI boot entry; the disk boots through the removable path"
+fi
+
+cleanup
+echo "DONE"

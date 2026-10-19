@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"time"
 
 	"github.com/diggyen/SimpleClient/internal/audio"
+	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/config"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
@@ -81,9 +83,26 @@ func main() {
 
 	scan := scanner.New(cfg.MaxWorkers, cfg.ScanTimeout)
 
+	// GRUB marks every boot pending. Once the kiosk has been up a while this
+	// boot has proven itself on this machine, and its kernel — and on a disk
+	// install its system slot — are the ones to keep booting.
+	boot := bootenv.Current()
+	warnf("boot: slot=%q kernel=%q", boot.Slot, boot.Kernel)
+	go func() {
+		time.Sleep(provenAfter)
+		if err := bootenv.MarkGood(boot); err != nil {
+			warnf("boot: recording a good boot failed: %v", err)
+		}
+	}()
+
 	// Run never returns.
 	ui.Run(fb, input, scan, cfg)
 }
+
+// provenAfter is how long the kiosk has to run before its boot counts as
+// good: long enough that a driver crashing the machine shortly after start-up
+// still sends the next boot to the other kernel.
+const provenAfter = 20 * time.Second
 
 func warnf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "simpleclient: warning: "+format+"\n", args...)

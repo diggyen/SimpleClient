@@ -67,12 +67,19 @@ fi
 #   alx ... 8139too  onboard NICs of mid-2010s desktops and thin clients (a Dell
 #                Wyse 7010 among them); without the right one there is no ethN
 #                at all and the scan has no subnet to look at.
+#   sd_mod ... uas   disks. A SATA or USB disk shows up only after its
+#                controller has probed its ports, too late for the coldplug
+#                rounds below, and nothing loads drivers on hotplug; with these
+#                loaded up front every disk binds whenever it appears — the one
+#                being installed to, the data partition of an installed kiosk,
+#                a USB stick plugged in later.
 for m in evdev af_packet simpledrm bochs virtio_pci virtio_net virtio_gpu \
          virtio_rng e1000 e1000e r8169 igb igc tg3 \
          alx atl1c atl1e atl1 atl2 b44 bnx2 jme sky2 skge forcedeth \
          8139cp 8139too \
          atkbd psmouse usbhid hid_generic \
-         xhci_pci ehci_pci uhci_hcd ohci_pci; do
+         xhci_pci ehci_pci uhci_hcd ohci_pci \
+         sd_mod sr_mod usb-storage uas; do
     modprobe "$m" 2>/dev/null
 done
 
@@ -91,7 +98,8 @@ coldplug() {
              /sys/bus/hid/devices/*/modalias /sys/bus/serio/devices/*/modalias \
              /sys/bus/acpi/devices/*/modalias /sys/bus/platform/devices/*/modalias \
              /sys/bus/i2c/devices/*/modalias /sys/bus/virtio/devices/*/modalias \
-             /sys/bus/hdaudio/devices/*/modalias /sys/bus/sdio/devices/*/modalias; do
+             /sys/bus/hdaudio/devices/*/modalias /sys/bus/sdio/devices/*/modalias \
+             /sys/bus/mmc/devices/*/modalias /sys/bus/scsi/devices/*/modalias; do
         [ -r "$f" ] || continue
         alias=$(cat "$f" 2>/dev/null)
         [ -n "$alias" ] || continue
@@ -183,6 +191,7 @@ KBD_ARG=""
 MOUSE_ARG=""
 BPP_ARG=""
 HOST_ARG=""
+SLOT=""
 for arg in $(cat /proc/cmdline 2>/dev/null); do
     case "$arg" in
         lang=*)   LANG_ARG="-lang=${arg#lang=}" ;;
@@ -191,8 +200,34 @@ for arg in $(cat /proc/cmdline 2>/dev/null); do
         kbddev=*) KBD_ARG="-kbd=${arg#kbddev=}" ;;
         mousedev=*) MOUSE_ARG="-mouse=${arg#mousedev=}" ;;
         bpp=*) BPP_ARG="-bpp=${arg#bpp=}" ;;
+        sc.slot=*) SLOT=${arg#sc.slot=} ;;
+        sc.ip=*) NET_IP=${arg#sc.ip=} ;;
+        sc.gw=*) NET_GW=${arg#sc.gw=} ;;
+        sc.dns=*) NET_DNS=${arg#sc.dns=} ;;
+        sc.iface=*) NET_IFACE=${arg#sc.iface=} ;;
     esac
 done
+log "kernel: $(uname -r)"
+
+# ── Disk install ──────────────────────────────────────────────────────────────
+# sc.slot= is set only by the GRUB of an installed disk. Its data partition
+# holds settings, logs and update downloads; the disk controller's driver has
+# just been loaded and may still be finding the disk, so wait a little for it.
+if [ -n "$SLOT" ]; then
+    mkdir -p /data
+    DATA_DEV=""
+    i=0
+    while [ "$i" -lt 40 ]; do
+        DATA_DEV=$(findfs LABEL=SC_DATA 2>/dev/null) && break
+        i=$((i + 1))
+        sleep 0.25
+    done
+    if [ -n "$DATA_DEV" ] && mount -t ext4 "$DATA_DEV" /data 2>/dev/null; then
+        log "disk install: slot $SLOT, data on $DATA_DEV"
+    else
+        log "disk install: slot $SLOT, data partition not found"
+    fi
+fi
 
 # ── Network ───────────────────────────────────────────────────────────────────
 ip link set lo up 2>/dev/null
@@ -217,20 +252,55 @@ for i in $IFACES; do
     ip link set "$i" up 2>/dev/null
 done
 
-# udhcpc stays running in the background on every interface (-b): a lease
-# that is not there at boot — cable plugged in later, DHCP server slow to
-# answer — is picked up whenever it arrives, and an existing one is renewed
+# The network settings: DHCP unless told otherwise. sc.ip= on the kernel
+# command line comes first (sc.ip=192.168.1.50/24 sc.gw=192.168.1.1
+# sc.dns=192.168.1.1,1.1.1.1, optionally sc.iface=eth1; sc.ip=dhcp forces
+# DHCP), as the way to set a CD-booted kiosk; then what the network dialog
+# (F8) saved — on the data partition of an installed kiosk, on the EFI
+# partition of the USB stick a live one runs from. sc-net applies them.
+#
+# With DHCP, udhcpc stays running in the background on every interface (-b): a
+# lease that is not there at boot — cable plugged in later, DHCP server slow
+# to answer — is picked up whenever it arrives, and an existing one is renewed
 # instead of silently expiring. The kiosk notices the new address on its own
 # and scans it. The first attempt is waited for, so the usual case boots with
 # its address already in place.
-for i in $IFACES; do
-    udhcpc -i "$i" -b -t 4 -T 2 -A 5 >/dev/null 2>&1
-done
+NETCONF=/run/sc-network
+if [ -n "$NET_IP" ]; then
+    if [ "$NET_IP" = dhcp ]; then
+        echo mode=dhcp > "$NETCONF"
+    else
+        {
+            echo mode=static
+            echo "address=$NET_IP"
+            echo "gateway=$NET_GW"
+            echo "dns=$(echo "$NET_DNS" | tr ',' ' ')"
+            echo "interface=$NET_IFACE"
+        } > "$NETCONF"
+    fi
+elif [ -f /data/simpleclient/network ]; then
+    cp /data/simpleclient/network "$NETCONF"
+elif EFI_DEV=$(findfs LABEL=SC_EFI 2>/dev/null); then
+    mkdir -p /run/sc-efi
+    if mount -t vfat -o ro "$EFI_DEV" /run/sc-efi 2>/dev/null; then
+        cp /run/sc-efi/simpleclient/network "$NETCONF" 2>/dev/null
+        umount /run/sc-efi
+    fi
+fi
+STATIC_IF=""
+if [ "$(sed -n 's/^mode=//p' "$NETCONF" 2>/dev/null)" = static ]; then
+    STATIC_IF=$(sed -n 's/^interface=//p' "$NETCONF")
+    [ -n "$STATIC_IF" ] || STATIC_IF=$(echo $IFACES | cut -d' ' -f1)
+fi
+sc-net apply 2>/dev/console
 
 GOT_IP=0
 for i in $IFACES; do
     a=$(ip -4 -o addr show dev "$i" 2>/dev/null | grep -o 'inet [0-9./]*')
-    if [ -n "$a" ]; then
+    if [ -n "$a" ] && [ "$i" = "$STATIC_IF" ]; then
+        GOT_IP=1
+        log "static on $i: $a"
+    elif [ -n "$a" ]; then
         GOT_IP=1
         log "DHCP on $i: $a"
     else

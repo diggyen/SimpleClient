@@ -17,6 +17,12 @@ func Render(fb framebuffer.Device, back *image.RGBA, state *UIState, mouseX, mou
 	case ScreenConnecting:
 		renderDiscovery(back, state)
 		renderConnecting(back, state)
+	case ScreenInstall:
+		renderDiscovery(back, state)
+		renderInstall(back, state)
+	case ScreenNetwork:
+		renderDiscovery(back, state)
+		renderNet(back, state)
 	case ScreenSession:
 		// Session screen: RDP frames are written directly to fb; nothing to render here.
 		return

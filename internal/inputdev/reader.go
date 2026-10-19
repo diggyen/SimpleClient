@@ -299,7 +299,6 @@ func (a absRange) span() int32 {
 	return 0
 }
 
-
 // tapMaxDuration and tapMaxTravel define a touchpad tap: a touch this short
 // that moved the pointer less than this far is a left click. Most touchpads in
 // the hardware this runs on have no physical buttons worth the name.
@@ -326,14 +325,14 @@ func (r *Reader) readDevice(path string, f *os.File, info deviceInfo) {
 		ev    linuxInputEvent
 		moved bool
 		// Touchpad state: the last finger position and the current tap.
-		touching            bool
-		lastAX, lastAY      int32
-		haveAX, haveAY      bool
-		curAX, curAY        int32
-		tapStart            time.Time
-		tapTravel           int
-		absDirty            bool
-		accumDX, accumDY    float64
+		touching         bool
+		lastAX, lastAY   int32
+		haveAX, haveAY   bool
+		curAX, curAY     int32
+		tapStart         time.Time
+		tapTravel        int
+		absDirty         bool
+		accumDX, accumDY float64
 	)
 
 	for {

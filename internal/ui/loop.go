@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/config"
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
@@ -32,6 +33,12 @@ type SessionState struct {
 // the RDP frame loop both run outside it — so holding it across a render is safe.
 func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg config.Config) {
 	state := &UIState{}
+	state.Boot = bootenv.Current()
+	state.CanInstall = !state.Boot.Installed()
+	if state.Boot.Installed() {
+		state.SavePath = savedPath
+		state.loadSaved(savedPath)
+	}
 	backBuf := image.NewRGBA(fb.Bounds())
 
 	// The reader starts the pointer at the centre of the screen; mirror that so
@@ -188,6 +195,10 @@ func handleInput(
 		handleDiscoveryKey(ev, state, scan, ctx, cancelScan, scanCh, maxRows)
 	case ScreenModal:
 		handleModalKey(ev, state, fb, session)
+	case ScreenInstall:
+		handleInstallKey(ev, state)
+	case ScreenNetwork:
+		handleNetKey(ev, state)
 	}
 }
 
@@ -210,9 +221,21 @@ func handleDiscoveryKey(
 	case inputdev.KeyPageDown:
 		state.MoveSelection(maxRows, maxRows)
 	case inputdev.KeyEnter:
+		// With nothing found, Enter still connects: to a server typed in.
 		if len(state.Hosts) > 0 {
 			state.OpenModalFor()
-			state.Transition(ScreenModal)
+		} else {
+			state.OpenModalManual()
+		}
+		state.Transition(ScreenModal)
+	case inputdev.KeyF7:
+		state.OpenModalManual()
+		state.Transition(ScreenModal)
+	case inputdev.KeyF8:
+		openNetwork(state)
+	case inputdev.KeyF9:
+		if state.CanInstall {
+			openInstall(state)
 		}
 	case inputdev.KeyF5:
 		(*cancelScan)()
@@ -241,10 +264,13 @@ func handleModalKey(
 		state.Transition(ScreenDiscovery)
 
 	case inputdev.KeyTab:
-		state.Modal.FocusIdx = (state.Modal.FocusIdx + 1) % 5
+		state.Modal.FocusIdx = (state.Modal.FocusIdx + 1) % (state.Modal.fieldCount() + 2)
+
+	case inputdev.KeyF6:
+		state.Modal.toggleDomain()
 
 	case inputdev.KeyEnter:
-		if state.Modal.FocusIdx == 4 {
+		if state.Modal.FocusIdx == state.Modal.focusCancel() {
 			state.Transition(ScreenDiscovery)
 		} else {
 			go connect(state, fb, session)
@@ -252,7 +278,7 @@ func handleModalKey(
 
 	case inputdev.KeyBackspace:
 		idx := state.Modal.FocusIdx
-		if idx < 3 {
+		if idx < state.Modal.fieldCount() {
 			r := []rune(state.Modal.Fields[idx])
 			if len(r) > 0 {
 				state.Modal.Fields[idx] = string(r[:len(r)-1])
@@ -260,7 +286,7 @@ func handleModalKey(
 		}
 
 	default:
-		if ev.Rune != 0 && state.Modal.FocusIdx < 3 {
+		if ev.Rune != 0 && state.Modal.FocusIdx < state.Modal.fieldCount() {
 			state.Modal.Fields[state.Modal.FocusIdx] += string(ev.Rune)
 		}
 	}
@@ -331,7 +357,7 @@ func handleMouseClick(
 		}
 
 	case ScreenModal:
-		l := layoutModal(fb.Bounds())
+		l := layoutModal(fb.Bounds(), state.Modal.fieldCount())
 		p := image.Pt(mx, my)
 
 		// Clicking a field focuses it, so the dialog is usable with the mouse
@@ -343,11 +369,38 @@ func handleMouseClick(
 			}
 		}
 		switch {
+		case p.In(l.Domain):
+			state.Modal.toggleDomain()
 		case p.In(l.Connect):
-			state.Modal.FocusIdx = 3
+			state.Modal.FocusIdx = state.Modal.focusConnect()
 			go connect(state, fb, session)
 		case p.In(l.Cancel):
 			state.Transition(ScreenDiscovery)
+		}
+
+	case ScreenNetwork:
+		n := &state.Net
+		if n.Busy {
+			return
+		}
+		l := layoutNet(fb.Bounds(), n.Static)
+		p := image.Pt(mx, my)
+		switch {
+		case p.In(l.DHCP):
+			n.Static, n.Focus = false, netFocusMode
+		case p.In(l.Static):
+			n.Static, n.Focus = true, netFocusMode
+		case p.In(l.Save):
+			n.Focus = netFocusSave
+			saveNetwork(state)
+		case p.In(l.Cancel):
+			state.Transition(ScreenDiscovery)
+		default:
+			for i, f := range l.Fields {
+				if p.In(f) && n.Static {
+					n.Focus = i + 1
+				}
+			}
 		}
 	}
 }
@@ -357,22 +410,31 @@ func handleMouseClick(
 // render loop keeps running while the connection is being set up.
 func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	state.Mu.Lock()
-	host := state.SelectedHost()
-	if host == nil {
+	server := state.Modal.Fields[fieldServer]
+	creds := rdp.Credentials{
+		Username: state.Modal.Fields[fieldUser],
+		Password: state.Modal.Fields[fieldPassword],
+		Domain:   state.Modal.domain(),
+	}
+	state.Transition(ScreenConnecting)
+	state.Modal.Error = ""
+	state.Mu.Unlock()
+
+	// A typed name is looked up here, outside the lock: DNS can take seconds.
+	host, err := domain.ParseAddress(server)
+	state.Mu.Lock()
+	if err != nil {
+		state.Modal.Error = i18n.T(i18n.ErrBadAddress)
+		state.Modal.FocusIdx = fieldServer
+		state.Transition(ScreenModal)
 		state.Mu.Unlock()
 		return
 	}
-
-	creds := rdp.Credentials{
-		Username: state.Modal.Fields[0],
-		Password: state.Modal.Fields[1],
-		Domain:   state.Modal.Fields[2],
-	}
-	addr := host.AddrRDP()
-	selected := *host
-
-	state.Transition(ScreenConnecting)
-	state.Modal.Error = ""
+	// The connecting screen names the selected host, and a server typed in by
+	// hand joins the list, to be picked from it next time.
+	state.SelectedIdx = state.AddHost(host)
+	selected := state.Hosts[state.SelectedIdx]
+	addr := selected.AddrRDP()
 	state.Mu.Unlock()
 
 	// The server maps scancodes to characters by the layout announced at
@@ -391,7 +453,7 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	state.Mu.Lock()
 	// Only now, with the session up: an account that was rejected is not one to
 	// offer back the next time.
-	state.RememberCredential(addr, creds.Username, creds.Domain)
+	state.saveConnection(selected, creds.Username, creds.Domain)
 	state.Mu.Unlock()
 
 	for {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"image"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -203,7 +205,7 @@ func TestModalKey_Tab(t *testing.T) {
 func TestModalKey_Backspace(t *testing.T) {
 	state := &UIState{
 		Screen: ScreenModal,
-		Modal:  ModalState{Fields: [3]string{"admin", "pass", ""}, FocusIdx: 0},
+		Modal:  ModalState{Fields: [4]string{"admin", "pass", "", ""}, FocusIdx: 0},
 	}
 	handleModalKey(inputdev.InputEvent{
 		Type:    inputdev.EvKey,
@@ -218,7 +220,7 @@ func TestModalKey_Backspace(t *testing.T) {
 func TestModalKey_Rune(t *testing.T) {
 	state := &UIState{
 		Screen: ScreenModal,
-		Modal:  ModalState{Fields: [3]string{"adm", "", ""}, FocusIdx: 0},
+		Modal:  ModalState{Fields: [4]string{"adm", "", "", ""}, FocusIdx: 0},
 	}
 	handleModalKey(inputdev.InputEvent{
 		Type:    inputdev.EvKey,
@@ -344,6 +346,36 @@ func TestLanguageToggle_F2_InModal(t *testing.T) {
 	}
 }
 
+// F9 opens the install dialog, but only on a kiosk started from a USB stick or
+// CD: on an installed one it would offer to wipe the disk it runs from. Esc
+// goes back to the host list.
+func TestInstall_F9(t *testing.T) {
+	ctx := context.Background()
+	cancel := context.CancelFunc(func() {})
+	var scanCh <-chan domain.ScanEvent
+	key := func(state *UIState, code int) {
+		handleInput(inputdev.InputEvent{Type: inputdev.EvKey, KeyCode: code, Pressed: true},
+			state, &mockScanner{}, config.Config{}, framebuffer.NewMock(1280, 720),
+			&ctx, &cancel, &scanCh, nil, 20)
+	}
+
+	state := &UIState{Screen: ScreenDiscovery}
+	key(state, inputdev.KeyF9)
+	if state.Screen != ScreenDiscovery {
+		t.Fatalf("F9 on an installed kiosk changed the screen to %v", state.Screen)
+	}
+
+	state = &UIState{Screen: ScreenDiscovery, CanInstall: true}
+	key(state, inputdev.KeyF9)
+	if state.Screen != ScreenInstall {
+		t.Fatalf("F9 should open the install dialog, screen is %v", state.Screen)
+	}
+	key(state, inputdev.KeyEsc)
+	if state.Screen != ScreenDiscovery {
+		t.Fatalf("Esc should leave the install dialog, screen is %v", state.Screen)
+	}
+}
+
 type errTest string
 
 func (e errTest) Error() string { return string(e) }
@@ -444,29 +476,81 @@ func TestOpenModalFor_PrefillsTheAccountThatWorked(t *testing.T) {
 	host := domain.Host{IP: net.ParseIP("10.0.0.5")}
 	state := &UIState{Hosts: []domain.Host{host}}
 
-	// Nothing remembered yet: an empty dialog, cursor in the username field.
+	// Nothing remembered yet: the host's address, cursor in the username field.
 	state.OpenModalFor()
-	if state.Modal.Fields[0] != "" || state.Modal.FocusIdx != 0 {
-		t.Fatalf("first visit gave %q at focus %d, want an empty username field",
-			state.Modal.Fields[0], state.Modal.FocusIdx)
+	m := &state.Modal
+	if m.Fields[fieldServer] != "10.0.0.5" || m.Fields[fieldUser] != "" || m.FocusIdx != fieldUser {
+		t.Fatalf("first visit gave server %q user %q at focus %d, want the address and an empty username field",
+			m.Fields[fieldServer], m.Fields[fieldUser], m.FocusIdx)
 	}
 
 	state.RememberCredential(host.AddrRDP(), "administrator", "CORP")
 	state.OpenModalFor()
 
-	if state.Modal.Fields[0] != "administrator" {
-		t.Errorf("username = %q, want it filled in", state.Modal.Fields[0])
+	if m.Fields[fieldUser] != "administrator" {
+		t.Errorf("username = %q, want it filled in", m.Fields[fieldUser])
 	}
-	if state.Modal.Fields[2] != "CORP" {
-		t.Errorf("domain = %q, want it filled in", state.Modal.Fields[2])
+	if !m.ShowDomain || m.Fields[fieldDomain] != "CORP" {
+		t.Errorf("domain = %q (shown %v), want CORP shown", m.Fields[fieldDomain], m.ShowDomain)
 	}
-	if state.Modal.Fields[1] != "" {
-		t.Fatalf("the password was carried over as %q — it must never be stored",
-			state.Modal.Fields[1])
+	if m.Fields[fieldPassword] != "" {
+		t.Fatalf("the password was carried over as %q — it must never be stored", m.Fields[fieldPassword])
 	}
-	if state.Modal.FocusIdx != 1 {
-		t.Errorf("focus is on field %d, want the password field so the user can just type",
-			state.Modal.FocusIdx)
+	if m.FocusIdx != fieldPassword {
+		t.Errorf("focus is on field %d, want the password field so the user can just type", m.FocusIdx)
+	}
+}
+
+// F7 opens the dialog for a server typed in by hand, and Enter does the same
+// when the scan found nothing to pick.
+func TestManualAddress(t *testing.T) {
+	ctx := context.Background()
+	cancel := context.CancelFunc(func() {})
+	var scanCh <-chan domain.ScanEvent
+	for _, code := range []int{inputdev.KeyF7, inputdev.KeyEnter} {
+		state := &UIState{Screen: ScreenDiscovery}
+		handleInput(inputdev.InputEvent{Type: inputdev.EvKey, KeyCode: code, Pressed: true},
+			state, &mockScanner{}, config.Config{}, framebuffer.NewMock(1280, 720),
+			&ctx, &cancel, &scanCh, nil, 20)
+		if state.Screen != ScreenModal || state.Modal.FocusIdx != fieldServer || state.Modal.Fields[fieldServer] != "" {
+			t.Fatalf("key %d: screen %v focus %d server %q, want an empty dialog with the cursor in the server field",
+				code, state.Screen, state.Modal.FocusIdx, state.Modal.Fields[fieldServer])
+		}
+	}
+}
+
+// The domain field is an option: hidden until F6, and what was typed into it
+// counts only while it is shown.
+func TestModalKey_F6TogglesDomain(t *testing.T) {
+	state := &UIState{Screen: ScreenModal}
+	m := &state.Modal
+	key := func(code int, r rune) {
+		handleModalKey(inputdev.InputEvent{Type: inputdev.EvKey, KeyCode: code, Rune: r, Pressed: true},
+			state, framebuffer.NewMock(1280, 720), nil)
+	}
+
+	if m.ShowDomain || m.fieldCount() != 3 {
+		t.Fatal("the domain field should start hidden")
+	}
+	key(inputdev.KeyF6, 0)
+	if !m.ShowDomain || m.FocusIdx != fieldDomain {
+		t.Fatalf("F6 should show the domain field and focus it (shown %v, focus %d)", m.ShowDomain, m.FocusIdx)
+	}
+	key(30, 'C')
+	if m.domain() != "C" {
+		t.Fatalf("typing into the domain field gave %q", m.domain())
+	}
+
+	key(inputdev.KeyTab, 0)
+	if m.FocusIdx != m.focusConnect() {
+		t.Fatalf("Tab from the domain field focused %d, want the connect button", m.FocusIdx)
+	}
+	key(inputdev.KeyF6, 0)
+	if m.ShowDomain || m.FocusIdx != m.focusConnect() {
+		t.Fatalf("hiding the field should keep the connect button focused (focus %d)", m.FocusIdx)
+	}
+	if m.domain() != "" {
+		t.Fatalf("a hidden domain field still gave %q", m.domain())
 	}
 }
 
@@ -481,13 +565,13 @@ func TestOpenModalFor_IsPerHost(t *testing.T) {
 
 	state.SelectedIdx = 1
 	state.OpenModalFor()
-	if state.Modal.Fields[0] != "" {
-		t.Fatalf("host b offered %q, which belongs to host a", state.Modal.Fields[0])
+	if state.Modal.Fields[fieldUser] != "" {
+		t.Fatalf("host b offered %q, which belongs to host a", state.Modal.Fields[fieldUser])
 	}
 
 	state.SelectedIdx = 0
 	state.OpenModalFor()
-	if state.Modal.Fields[0] != "administrator" {
+	if state.Modal.Fields[fieldUser] != "administrator" {
 		t.Errorf("host a lost its remembered account")
 	}
 }
@@ -501,8 +585,43 @@ func TestRememberCredential_IgnoresEmpty(t *testing.T) {
 	state.RememberCredential(host.AddrRDP(), "", "CORP")
 	state.OpenModalFor()
 
-	if state.Modal.FocusIdx != 0 {
+	if state.Modal.FocusIdx != fieldUser {
 		t.Errorf("focus is on field %d, want the username field", state.Modal.FocusIdx)
+	}
+}
+
+// An installed kiosk keeps the servers it connected to, most recent first, with
+// the account but never the password, and lists them on the next boot.
+func TestSavedConnections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "simpleclient", "hosts")
+	a, _ := domain.ParseIPAddress("10.0.0.5")
+	b, _ := domain.ParseIPAddress("10.9.9.9:3390")
+	b.Hostname = "vm-b"
+
+	s := &UIState{SavePath: path}
+	s.saveConnection(a, "ali", "")
+	s.saveConnection(b, "veli", "CORP")
+	s.saveConnection(a, "ali", "") // again: moves to the front, not duplicated
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "10.0.0.5\t\tali\t\n10.9.9.9:3390\tvm-b\tveli\tCORP\n"
+	if string(data) != want {
+		t.Fatalf("saved file:\n%q\nwant\n%q", data, want)
+	}
+
+	next := &UIState{}
+	next.loadSaved(path)
+	if len(next.Hosts) != 2 || !next.Hosts[1].Same(b) || next.Hosts[1].Hostname != "vm-b" {
+		t.Fatalf("loaded hosts %+v", next.Hosts)
+	}
+	next.SelectedIdx = 1
+	next.OpenModalFor()
+	if next.Modal.Fields[fieldServer] != "10.9.9.9:3390" || next.Modal.Fields[fieldUser] != "veli" ||
+		next.Modal.Fields[fieldDomain] != "CORP" {
+		t.Fatalf("dialog after reboot: %q", next.Modal.Fields)
 	}
 }
 

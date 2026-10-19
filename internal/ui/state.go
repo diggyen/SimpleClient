@@ -1,10 +1,9 @@
 package ui
 
 import (
-	"net"
 	"sync"
-	"time"
 
+	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/domain"
 )
 
@@ -16,13 +15,74 @@ const (
 	ScreenModal                    // Credential entry modal
 	ScreenConnecting               // "Connecting..." overlay
 	ScreenSession                  // Active RDP session
+	ScreenInstall                  // Install-to-disk dialog
+	ScreenNetwork                  // Network settings dialog
 )
 
-// ModalState holds the state of the credential entry modal.
+// ModalState holds the state of the connection dialog.
+//
+// The server field comes first and is editable. Picked from the list it holds
+// that host's address; opened with F7 it is empty, for a server the scan
+// cannot see — the kiosk scans its own subnet only, and the desktops it serves
+// may well sit on another one, a VLAN of virtual machines for instance.
+//
+// The domain field is an option and starts hidden. The desktops this kiosk
+// mostly reaches are Linux, where a domain means nothing and an empty box
+// labelled "Domain" only raises the question of what to put in it. F6, or a
+// click on its hint, shows it for a Windows domain account, and it comes up
+// shown for a host whose remembered account has one. DOMAIN\user typed into
+// the username field works either way.
 type ModalState struct {
-	Fields   [3]string // 0=Username, 1=Password, 2=Domain
-	FocusIdx int       // 0=user, 1=pass, 2=domain, 3=connect button, 4=cancel button
-	Error    string    // Error message to display
+	Fields     [4]string // indexed by fieldServer ... fieldDomain
+	ShowDomain bool
+	FocusIdx   int    // a field, then the connect button, then cancel
+	Error      string // Error message to display
+}
+
+// The dialog's text fields, in focus order.
+const (
+	fieldServer = iota
+	fieldUser
+	fieldPassword
+	fieldDomain
+)
+
+// fieldCount is how many text fields the dialog shows.
+func (m *ModalState) fieldCount() int {
+	if m.ShowDomain {
+		return 4
+	}
+	return 3
+}
+
+// focusConnect and focusCancel are the buttons' places in the focus order,
+// right after the fields.
+func (m *ModalState) focusConnect() int { return m.fieldCount() }
+func (m *ModalState) focusCancel() int  { return m.fieldCount() + 1 }
+
+// domain is the domain to log on to: none while the field is hidden, even if
+// something was typed into it before.
+func (m *ModalState) domain() string {
+	if m.ShowDomain {
+		return m.Fields[fieldDomain]
+	}
+	return ""
+}
+
+// toggleDomain shows or hides the domain field. Shown, it takes the focus,
+// since typing the domain is why it was asked for; hidden, a focused button
+// stays focused and focus on the field itself falls back to the password.
+func (m *ModalState) toggleDomain() {
+	button := m.FocusIdx - m.fieldCount() // >= 0 while a button has focus
+	m.ShowDomain = !m.ShowDomain
+	switch {
+	case m.ShowDomain:
+		m.FocusIdx = fieldDomain
+	case button >= 0:
+		m.FocusIdx = m.fieldCount() + button
+	case m.FocusIdx == fieldDomain:
+		m.FocusIdx = fieldPassword
+	}
 }
 
 // UIState is the complete mutable state of the UI layer.
@@ -35,7 +95,7 @@ type UIState struct {
 	// painted and would leave the kiosk showing "Connecting..." forever.
 	Dirty bool
 
-	Screen       Screen
+	Screen Screen
 	// Subnet is the network the last scan covered, shown when it found
 	// nothing: "no servers in ?" is what a machine whose NIC never came up
 	// looks like, and saying so saves chasing DHCP on a dead interface.
@@ -47,39 +107,61 @@ type UIState struct {
 	ScanDone     bool
 	Modal        ModalState
 	ErrorMsg     string // Transient info/error banner
-	MouseX       int
-	MouseY       int
+
+	// Boot is how this kiosk was started. Installing to disk is offered
+	// (CanInstall) only when it runs from a USB stick or CD: a kiosk booted
+	// from its installed disk has nothing to install, and F9 there would only
+	// wipe the disk it runs from.
+	Boot       bootenv.Boot
+	CanInstall bool
+	Install    InstallState
+
+	Net NetState
+
+	MouseX int
+	MouseY int
 
 	// lastUser remembers, per host address, the username and domain that last
 	// connected successfully. Reconnecting to the same machine is the normal
 	// case — a dropped session, a reboot at the far end — and retyping the
 	// account every time is the bulk of the work at a kiosk with no keyboard
-	// of its own worth speaking of.
+	// of its own worth speaking of. The password is deliberately never part of
+	// it.
 	//
-	// It lives only in RAM. The image boots from a read-only initramfs, so
-	// nothing here survives a power cycle, and the password is deliberately
-	// never part of it.
+	// An installed kiosk also keeps it, with the servers it has connected to,
+	// in SavePath on its data partition (see saved.go); one running from a USB
+	// stick or CD has nowhere to keep anything and starts empty every time.
 	lastUser    map[string]credentialHint
+	SavePath    string
 	SpinnerTick int // Used for connecting-screen spinner animation
 }
 
-// AddStaticHost puts a hand-configured address into the list ahead of any
-// scanning. The kiosk discovers its own subnet only, and this is the one door
-// past that boundary: rdphost=<ip> on the kernel command line. The scanner
-// deduplicates by IP, so if the address is also discoverable the scan simply
-// fills in its latency.
-func (s *UIState) AddStaticHost(raw string) bool {
-	ip := net.ParseIP(raw)
-	if ip == nil {
-		return false
-	}
-	for _, h := range s.Hosts {
-		if h.IP.Equal(ip) {
-			return true
+// AddHost puts h in the list unless the same endpoint is already there, and
+// returns its index. A known name is kept when the other record has none.
+func (s *UIState) AddHost(h domain.Host) int {
+	for i, o := range s.Hosts {
+		if o.Same(h) {
+			if s.Hosts[i].Hostname == "" {
+				s.Hosts[i].Hostname = h.Hostname
+			}
+			return i
 		}
 	}
-	s.Hosts = append(s.Hosts, domain.Host{IP: ip, DiscoveredAt: time.Now()})
+	s.Hosts = append(s.Hosts, h)
 	s.Dirty = true
+	return len(s.Hosts) - 1
+}
+
+// AddStaticHost puts a hand-configured address into the list ahead of any
+// scanning: rdphost=<ip>[:port] on the kernel command line, the boot-time
+// counterpart of typing an address with F7. If the address is also
+// discoverable, the scan simply fills in its latency.
+func (s *UIState) AddStaticHost(raw string) bool {
+	h, err := domain.ParseIPAddress(raw)
+	if err != nil {
+		return false
+	}
+	s.AddHost(h)
 	return true
 }
 
@@ -101,9 +183,9 @@ func (s *UIState) RememberCredential(addr, username, domain string) {
 	s.lastUser[addr] = credentialHint{Username: username, Domain: domain}
 }
 
-// OpenModalFor prepares the credential dialog for the selected host, filling in
-// the account that last worked on it and putting the cursor where there is
-// still something to type.
+// OpenModalFor prepares the connection dialog for the selected host, filling in
+// its address and the account that last worked on it, and putting the cursor
+// where there is still something to type.
 func (s *UIState) OpenModalFor() {
 	s.Modal = ModalState{}
 
@@ -111,16 +193,25 @@ func (s *UIState) OpenModalFor() {
 	if host == nil {
 		return
 	}
+	s.Modal.Fields[fieldServer] = host.Address()
+	s.Modal.FocusIdx = fieldUser
 	hint, ok := s.lastUser[host.AddrRDP()]
 	if !ok {
 		return
 	}
 
-	s.Modal.Fields[0] = hint.Username
-	s.Modal.Fields[2] = hint.Domain
+	s.Modal.Fields[fieldUser] = hint.Username
+	s.Modal.Fields[fieldDomain] = hint.Domain
+	s.Modal.ShowDomain = hint.Domain != ""
 	// Straight to the password: it is the only field left to fill, and the only
 	// one that cannot be remembered.
-	s.Modal.FocusIdx = 1
+	s.Modal.FocusIdx = fieldPassword
+}
+
+// OpenModalManual prepares an empty connection dialog for a server typed in by
+// hand, cursor in the server field.
+func (s *UIState) OpenModalManual() {
+	s.Modal = ModalState{FocusIdx: fieldServer}
 }
 
 // Transition moves the UI to a new screen.
@@ -129,7 +220,7 @@ func (s *UIState) Transition(to Screen) {
 	s.Dirty = true
 
 	allowed := map[Screen][]Screen{
-		ScreenDiscovery:  {ScreenModal},
+		ScreenDiscovery:  {ScreenModal, ScreenInstall, ScreenNetwork},
 		ScreenModal:      {ScreenDiscovery, ScreenConnecting},
 		ScreenConnecting: {ScreenSession, ScreenModal},
 		ScreenSession:    {ScreenDiscovery},
@@ -185,11 +276,17 @@ func (s *UIState) HandleScanEvent(ev domain.ScanEvent) {
 	switch ev.Type {
 	case domain.EventHostFound:
 		if ev.Host != nil {
-			// Append and deduplicate by IP.
+			// Append and deduplicate by endpoint. A host already listed — typed
+			// in, remembered from an earlier boot — takes the scan's latency and
+			// keeps the name it was given if the scan found none.
 			existing := false
 			for i, h := range s.Hosts {
-				if h.IP.Equal(ev.Host.IP) {
+				if h.Same(*ev.Host) {
+					name := h.Hostname
 					s.Hosts[i] = *ev.Host
+					if s.Hosts[i].Hostname == "" {
+						s.Hosts[i].Hostname = name
+					}
 					existing = true
 					break
 				}

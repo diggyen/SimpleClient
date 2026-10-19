@@ -45,44 +45,91 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # Boot off it boots the same way. Under Secure Boot the kernel loads only
 # signed modules, and Debian's are signed.
 #
-# Debian stable's kernel is an LTS series kept up to date for the release's
-# whole life. The userland stays Alpine's; a kernel does not care whose libc
-# runs above it.
+# Two kernels ship, and GRUB picks between them on its own (see grub.cfg):
+#   new  trixie-backports, the default. The kiosk has to run on mini PCs from
+#        2010 to the current year, and the newest GPUs, NICs and audio DSPs are
+#        only in the newest kernel, while the old drivers all remain.
+#   lts  stable's LTS series, which a machine falls back to, and stays on, when
+#        the new kernel does not come up on it.
+# Both are signed with the same key. The userland stays Alpine's; a kernel does
+# not care whose libc runs above it.
 #
 # Packages are unpacked with dpkg-deb rather than installed: their maintainer
 # scripts would run grub-install and build an initramfs inside the container.
+#
+# A kernel is no longer one package. Newer series split linux-image-<ver> into
+# an empty package depending on linux-binary-<ver> (the signed vmlinuz, in the
+# modules directory), linux-modules-<ver> and linux-base-<ver>, so each kernel
+# is fetched as every package its image pulls in that carries its version, and
+# unpacked on its own: new and lts never share a directory to be told apart in.
 FROM --platform=linux/amd64 debian:${DEBIAN_VERSION} AS boot-builder
+ARG DEBIAN_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-        grub-pc-bin grub-common xorriso mtools dosfstools kmod xz-utils zstd \
- && mkdir -p /deb /signed && cd /deb \
- && KPKG=$(apt-cache depends linux-image-amd64 | awk '$1 == "Depends:" && $2 ~ /^linux-image-[0-9]/ { print $2; exit }') \
- && echo "kernel package: $KPKG" \
- && apt-get download "$KPKG" shim-signed shim-helpers-amd64-signed grub-efi-amd64-signed \
- && for p in *.deb; do dpkg-deb -x "$p" /signed; done \
- && rm -rf /var/lib/apt/lists/*
-
-# Modules go from Debian's compression to gzip, the one busybox's modprobe
-# reads. A module's signature is part of the uncompressed file, so it survives.
 RUN set -e; \
-    M=$(ls -d /signed/usr/lib/modules/* /signed/lib/modules/* 2>/dev/null | head -1); \
-    KVER=$(basename "$M"); echo "kernel: $KVER"; \
-    mkdir -p /kernel/lib/modules; mv "$M" /kernel/lib/modules/; \
-    cp "/signed/boot/vmlinuz-$KVER" /kernel/vmlinuz; \
-    cd "/kernel/lib/modules/$KVER"; \
-    find . -name '*.ko.xz' -exec xz -d {} +; \
-    find . -name '*.ko.zst' -exec zstd -q -d --rm {} +; \
-    find . -name '*.ko' -exec gzip -9 {} +; \
-    depmod -b /kernel "$KVER"; \
+    echo "deb http://deb.debian.org/debian ${DEBIAN_VERSION}-backports main" \
+        > /etc/apt/sources.list.d/backports.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        grub-pc-bin grub-common xorriso mtools dosfstools kmod xz-utils zstd; \
+    kpkg() { apt-cache "$@" depends linux-image-amd64 \
+        | awk '$1 == "Depends:" && $2 ~ /^linux-image-[0-9]/ { print $2; exit }'; }; \
+    NEW=$(kpkg -o "APT::Default-Release=${DEBIAN_VERSION}-backports"); \
+    LTS=$(kpkg); \
+    echo "kernels: new=$NEW lts=$LTS"; \
+    test -n "$NEW"; test -n "$LTS"; test "$NEW" != "$LTS"; \
+    for F in new lts; do \
+        if [ $F = new ]; then P=$NEW; else P=$LTS; fi; \
+        mkdir -p /deb/$F /unpacked/$F; cd /deb/$F; \
+        apt-get download $(apt-cache depends --recurse --no-recommends --no-suggests \
+                --no-conflicts --no-breaks --no-replaces --no-enhances "$P" \
+            | awk -v k="-${P#linux-image-}" '!/^ / && substr($0, length($0) - length(k) + 1) == k'); \
+        for p in *.deb; do echo "kernel $F: $p"; dpkg-deb -x "$p" /unpacked/$F; done; \
+    done; \
+    mkdir -p /deb/boot /signed; cd /deb/boot; \
+    apt-get download shim-signed shim-helpers-amd64-signed grub-efi-amd64-signed; \
+    for p in *.deb; do dpkg-deb -x "$p" /signed; done; \
+    rm -rf /var/lib/apt/lists/*
+
+# Modules stay xz-compressed, as Debian ships them. Both kernels decompress
+# modules themselves (CONFIG_MODULE_DECOMPRESS), and busybox modprobe loads a
+# compressed module by handing the kernel the file. Recompressing them to gzip
+# once looked necessary and broke the module set without a sound: this depmod
+# is built without zlib, read none of the .ko.gz files, and wrote a modules.dep
+# with no dependencies in it, so select-modules never copied scsi_mod and no
+# SATA or USB disk ever appeared.
+# The vmlinuz is in the modules directory in the split packages and in /boot
+# in the older ones.
+RUN set -e; \
+    for F in new lts; do \
+        M=$(ls -d /unpacked/$F/usr/lib/modules/* /unpacked/$F/lib/modules/* 2>/dev/null | head -1); \
+        KVER=$(basename "$M"); \
+        echo "kernel $F: $KVER"; \
+        mkdir -p /kernel/$F/lib/modules; mv "$M" /kernel/$F/lib/modules/; \
+        M=/kernel/$F/lib/modules/$KVER; \
+        if [ -f "$M/vmlinuz" ]; then mv "$M/vmlinuz" /kernel/$F/vmlinuz; \
+        else cp "/unpacked/$F/boot/vmlinuz-$KVER" /kernel/$F/vmlinuz; fi; \
+        depmod -b /kernel/$F "$KVER"; \
+    done; \
+    test -f /kernel/new/vmlinuz; test -f /kernel/lts/vmlinuz; \
     ls -l /signed/usr/lib/shim /signed/usr/lib/grub/x86_64-efi-signed
 
 # ── Initramfs ─────────────────────────────────────────────────────────────────
+# One initramfs with everything but the kernel modules, and one modules archive
+# per kernel. GRUB loads the initramfs and the archive that matches the kernel
+# it boots; the kernel unpacks both into the same root.
 FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS rootfs-builder
 
 RUN apk add --no-cache busybox-static kmod cpio gzip
-COPY --from=boot-builder /kernel/lib/modules /lib/modules
+COPY --from=boot-builder /kernel/new/lib /kmods/new/lib
+COPY --from=boot-builder /kernel/lts/lib /kmods/lts/lib
+COPY build/select-modules.sh /usr/local/bin/select-modules
+RUN set -e; chmod +x /usr/local/bin/select-modules; mkdir -p /out; \
+    for F in new lts; do \
+        select-modules /kmods/$F /mods/$F; \
+        (cd /mods/$F && find . | cpio -oH newc --quiet | gzip -9) > /out/modules-$F.cpio.gz; \
+    done; \
+    ls -lh /out
 
 # NIC firmware. Most onboard NICs need none, but these do: bnx2/bnx2x (HP
 # ProLiant and many Dell servers' Broadcom NetXtreme II) do not come up at all
@@ -103,26 +150,35 @@ RUN apk add --no-cache linux-firmware-bnx2 linux-firmware-bnx2x \
 # Speakers, the headphone jack, a monitor's speakers over HDMI/DisplayPort, USB
 # headsets and microphones: the kernel side is the HD Audio, USB audio and
 # HDMI codec drivers under kernel/sound, copied below.
-RUN apk add --no-cache alsa-utils alsa-lib
-RUN set -e; mkdir -p /rootfs/usr/bin /rootfs/lib /rootfs/usr/lib /rootfs/usr/share; \
-    for b in aplay arecord amixer alsactl; do \
-        cp -a "$(command -v $b)" /rootfs/usr/bin/; \
-        for l in $(ldd "$(command -v $b)" | awk '/=>/ {print $3} /ld-musl/ {print $1}'); do \
-            [ -f "$l" ] || continue; \
-            mkdir -p "/rootfs$(dirname "$l")"; \
-            cp -L "$l" "/rootfs$l"; \
-        done; \
-    done; \
+#
+# Installing to disk (sc-install): sfdisk partitions, mkfs.fat and mkfs.ext4
+# format, grub-install puts GRUB's BIOS boot code on the disk, efibootmgr adds
+# the UEFI boot entry. The daily update fetches over HTTPS, which needs the CA
+# bundle.
+RUN apk add --no-cache alsa-utils alsa-lib \
+        sfdisk dosfstools e2fsprogs grub grub-bios efibootmgr ca-certificates-bundle
+COPY build/copy-bins.sh /usr/local/bin/copy-bins
+RUN set -e; chmod +x /usr/local/bin/copy-bins; \
+    copy-bins /rootfs aplay arecord amixer alsactl \
+        sfdisk mkfs.fat mkfs.ext4 grub-install grub-bios-setup grub-mkimage grub-probe grub-editenv \
+        efibootmgr; \
+    mkdir -p /rootfs/usr/share /rootfs/usr/lib /rootfs/etc/ssl/certs; \
     cp -a /usr/share/alsa /rootfs/usr/share/; \
-    ls -l /rootfs/usr/bin /rootfs/lib /rootfs/usr/lib
+    cp -a /usr/lib/grub /rootfs/usr/lib/; \
+    cp /etc/ssl/certs/ca-certificates.crt /rootfs/etc/ssl/certs/; \
+    du -sh /rootfs/usr /rootfs/lib
 
 COPY --from=go-builder /out/simpleclient /rootfs/sbin/simpleclient
 COPY build/init /rootfs/init
 COPY build/udhcpc-default.script /rootfs/usr/share/udhcpc/default.script
+COPY build/sc-install /rootfs/sbin/sc-install
+COPY build/sc-net /rootfs/sbin/sc-net
+COPY build/grub-disk.cfg /rootfs/usr/share/simpleclient/grub-disk.cfg
 
 RUN mkdir -p /out \
- && mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/tmp /rootfs/etc /rootfs/bin \
- && chmod +x /rootfs/init /rootfs/sbin/simpleclient /rootfs/usr/share/udhcpc/default.script
+ && mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/tmp /rootfs/run /rootfs/etc /rootfs/bin \
+ && chmod +x /rootfs/init /rootfs/sbin/simpleclient /rootfs/sbin/sc-install /rootfs/sbin/sc-net \
+        /rootfs/usr/share/udhcpc/default.script
 
 # Busybox provides every userspace tool /init needs (ip, udhcpc, modprobe, ...).
 #
@@ -138,67 +194,13 @@ RUN cp /bin/busybox.static /rootfs/bin/busybox \
  && test -L /rootfs/bin/sh \
  && test "$(readlink /rootfs/bin/sh)" = "/bin/busybox"
 
-# Debian's kernel builds most drivers as modules, so the initramfs has to carry
-# the ones /init loads. Copying the whole tree would add ~200 MB; these subtrees
-# cover NIC, framebuffer/DRM, input and HID/USB, which is everything a
-# framebuffer kiosk touches.
-#
-# kernel/net is not optional: af_packet lives there, and busybox udhcpc opens an
-# AF_PACKET socket to send its DHCP discover. Without it every boot silently
-# falls back to a link-local address and the network scan finds nothing.
-#
-# drivers/char carries hw_random, including virtio-rng. A diskless kiosk has
-# almost no entropy at boot, so getrandom() blocks and the RDP client's TLS
-# handshake stops dead. random.trust_cpu=on covers real hardware via RDRAND;
-# virtio-rng covers virtual machines, where RDRAND may not be available.
-#
-# A driver in these trees often needs a module that lives elsewhere: the HD
-# Audio codec driver needs drivers/leds (ledtrig-audio), igb drivers/dca, tg3
-# and every PTP-capable NIC drivers/ptp and drivers/pps, b44 drivers/ssb. With
-# one missing, modprobe fails on "Unknown symbol" and the hardware is dead —
-# no sound on any HD Audio board, no network on a Broadcom one. So after the
-# trees, every dependency modules.dep names for a copied module is copied too,
-# wherever it lives. modules.dep lists each module's dependencies transitively,
-# so a single pass is complete.
-RUN KVER=$(basename /lib/modules/*) \
- && echo "kernel: $KVER" \
- && mkdir -p "/rootfs/lib/modules/$KVER/kernel/drivers" \
- && for d in net gpu input hid usb virtio char i2c cpufreq; do \
-        if [ -d "/lib/modules/$KVER/kernel/drivers/$d" ]; then \
-            cp -a "/lib/modules/$KVER/kernel/drivers/$d" "/rootfs/lib/modules/$KVER/kernel/drivers/"; \
-        fi; \
-    done \
- && cp -a "/lib/modules/$KVER/kernel/net" "/rootfs/lib/modules/$KVER/kernel/" \
- && cp -a "/lib/modules/$KVER/kernel/sound" "/rootfs/lib/modules/$KVER/kernel/" \
- && for f in modules.builtin modules.builtin.modinfo modules.order; do \
-        if [ -f "/lib/modules/$KVER/$f" ]; then \
-            cp -a "/lib/modules/$KVER/$f" "/rootfs/lib/modules/$KVER/"; \
-        fi; \
-    done \
- && rm -rf "/rootfs/lib/modules/$KVER/kernel/drivers/net/wireless" \
-           "/rootfs/lib/modules/$KVER/kernel/net/wireless" \
-           "/rootfs/lib/modules/$KVER/kernel/net/mac80211" \
-           "/rootfs/lib/modules/$KVER/kernel/net/bluetooth" \
- && cd "/lib/modules/$KVER" \
- && (cd "/rootfs/lib/modules/$KVER" && find kernel -name '*.ko*') > /tmp/have \
- && awk -F': ?' 'NR == FNR { have[$1] = 1; next } \
-        ($1 in have) { n = split($2, d, " "); for (i = 1; i <= n; i++) if (!(d[i] in have)) print d[i] }' \
-        /tmp/have modules.dep | sort -u > /tmp/need \
- && while read -r m; do \
-        mkdir -p "/rootfs/lib/modules/$KVER/$(dirname "$m")"; \
-        cp -a "$m" "/rootfs/lib/modules/$KVER/$m"; \
-    done < /tmp/need \
- && echo "dependencies outside the copied trees: $(wc -l < /tmp/need)" && cat /tmp/need \
- && cd / \
- && mkdir -p /rootfs/lib/firmware \
+RUN mkdir -p /rootfs/lib/firmware \
  && for d in bnx2 bnx2x rtl_nic tigon e100; do \
         if [ -d "/lib/firmware/$d" ]; then cp -a "/lib/firmware/$d" /rootfs/lib/firmware/; fi; \
     done \
- && du -sh /rootfs/lib/firmware \
- && depmod -b /rootfs "$KVER" \
- && du -sh /rootfs/lib/modules
+ && du -sh /rootfs/lib/firmware
 
-RUN cd /rootfs && find . | cpio -oH newc | gzip -9 > /out/initramfs.cpio.gz \
+RUN cd /rootfs && find . | cpio -oH newc --quiet | gzip -9 > /out/initramfs.cpio.gz \
  && ls -lh /out/initramfs.cpio.gz
 
 # ── ISO ───────────────────────────────────────────────────────────────────────
@@ -213,14 +215,24 @@ RUN cd /rootfs && find . | cpio -oH newc | gzip -9 > /out/initramfs.cpio.gz \
 #            is both the El Torito EFI image and a GPT partition, for the CD and
 #            the USB case. That GRUB finds the medium by /.disk/info and reads
 #            /boot/grub/grub.cfg, the same file the BIOS GRUB reads.
+#
+# The FAT image is also where a USB stick keeps its one piece of state: a
+# grubenv recording which of the two kernels comes up on this machine. It is
+# labelled SC_EFI so GRUB and the kiosk can find it. A CD cannot be written, so
+# booted from one the kiosk always starts with the new kernel; the boot menu
+# offers the other.
+#
+# boot/efi/grubx64.efi is Debian's GRUB for disks, not CDs; sc-install copies
+# it onto the ESP of a disk install.
 FROM boot-builder AS iso-builder
 
-COPY --from=rootfs-builder /out/initramfs.cpio.gz /iso/boot/initramfs.cpio.gz
+COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz /iso/boot/
 COPY build/grub.cfg /iso/boot/grub/grub.cfg
 
 RUN set -e; \
-    cp /kernel/vmlinuz /iso/boot/vmlinuz; \
-    mkdir -p /iso/.disk /iso/boot/grub/i386-pc /iso/boot/grub/fonts /efi/EFI/boot /out; \
+    cp /kernel/new/vmlinuz /iso/boot/vmlinuz-new; \
+    cp /kernel/lts/vmlinuz /iso/boot/vmlinuz-lts; \
+    mkdir -p /iso/.disk /iso/boot/grub/i386-pc /iso/boot/grub/fonts /iso/boot/efi /efi/EFI/boot /out; \
     echo "SimpleClient" > /iso/.disk/info; \
     cp /usr/lib/grub/i386-pc/*.mod /usr/lib/grub/i386-pc/*.lst /iso/boot/grub/i386-pc/; \
     cp /usr/share/grub/unicode.pf2 /iso/boot/grub/fonts/; \
@@ -228,9 +240,12 @@ RUN set -e; \
     cp /signed/usr/lib/shim/shimx64.efi.signed /efi/EFI/boot/bootx64.efi; \
     cp /signed/usr/lib/shim/mmx64.efi.signed /efi/EFI/boot/mmx64.efi; \
     cp /signed/usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed /efi/EFI/boot/grubx64.efi; \
+    cp /signed/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed /iso/boot/efi/grubx64.efi; \
     cp -r /efi/EFI /iso/; \
-    mkfs.vfat -C /iso/boot/efi.img 8192 >/dev/null; \
-    mcopy -s -i /iso/boot/efi.img /efi/EFI ::/; \
+    grub-editenv /efi/grubenv create; \
+    grub-editenv /efi/grubenv set sc_kernel=new sc_kpending=0; \
+    mkfs.vfat -n SC_EFI -C /iso/boot/efi.img 8192 >/dev/null; \
+    mcopy -s -i /iso/boot/efi.img /efi/EFI /efi/grubenv ::/; \
     xorriso -as mkisofs -r -J -joliet-long -V SIMPLECLIENT -o /out/simpleclient.iso \
         -b boot/grub/i386-pc/eltorito.img -no-emul-boot -boot-load-size 4 -boot-info-table \
         --grub2-boot-info --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
@@ -243,6 +258,6 @@ RUN set -e; \
 # ── Export ────────────────────────────────────────────────────────────────────
 FROM scratch AS export
 COPY --from=go-builder /out/simpleclient /
-COPY --from=rootfs-builder /out/initramfs.cpio.gz /
-COPY --from=boot-builder /kernel/vmlinuz /
+COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz /
+COPY --from=iso-builder /iso/boot/vmlinuz-new /iso/boot/vmlinuz-lts /
 COPY --from=iso-builder /out/simpleclient.iso /

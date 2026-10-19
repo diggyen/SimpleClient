@@ -25,6 +25,10 @@ const (
 	KeyF3         = 61
 	KeyF4         = 62
 	KeyF5         = 63
+	KeyF6         = 64
+	KeyF7         = 65
+	KeyF8         = 66
+	KeyF9         = 67
 	KeyF10        = 68
 	KeyUp         = 103
 	KeyPageUp     = 104

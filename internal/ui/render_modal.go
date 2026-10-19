@@ -12,6 +12,7 @@ const (
 	modalFieldH = 26
 	modalFieldG = 12 // gap between fields
 	modalLabelW = 88 // label column; the widest label is Turkish "Etki alanı:"
+	modalHintH  = CharH + 8
 	modalBtnH   = 32
 	modalBtnW   = 132
 	modalBtnGap = 14
@@ -23,16 +24,20 @@ const (
 type modalLayout struct {
 	Box     image.Rectangle
 	Header  image.Rectangle
-	Fields  [3]image.Rectangle
+	Fields  []image.Rectangle // as many as the dialog shows
 	LabelX  int
+	Domain  image.Rectangle // the "F6 Domain" toggle under the fields
 	ErrorY  int
 	Connect image.Rectangle
 	Cancel  image.Rectangle
 }
 
-func layoutModal(screen image.Rectangle) modalLayout {
+// layoutModal lays the dialog out with the given number of text fields: two,
+// or three with the domain shown.
+func layoutModal(screen image.Rectangle, fields int) modalLayout {
 	h := cardHeader + modalPad +
-		3*modalFieldH + 2*modalFieldG +
+		fields*modalFieldH + (fields-1)*modalFieldG +
+		modalFieldG + modalHintH +
 		modalErrH + modalPad + modalBtnH + modalPad
 
 	box := image.Rect(0, 0, modalW, h).
@@ -42,6 +47,7 @@ func layoutModal(screen image.Rectangle) modalLayout {
 		Box:    box,
 		Header: image.Rect(box.Min.X, box.Min.Y, box.Max.X, box.Min.Y+cardHeader),
 		LabelX: box.Min.X + modalPad,
+		Fields: make([]image.Rectangle, fields),
 	}
 
 	inputX := box.Min.X + modalPad + modalLabelW
@@ -52,7 +58,10 @@ func layoutModal(screen image.Rectangle) modalLayout {
 		y += modalFieldH + modalFieldG
 	}
 
-	l.ErrorY = y - modalFieldG + 3
+	l.Domain = image.Rect(inputX, y, inputX+domainToggleWidth(), y+modalHintH)
+	y += modalHintH
+
+	l.ErrorY = y + 3
 
 	btnY := box.Max.Y - modalPad - modalBtnH
 	cx := box.Min.X + box.Dx()/2
@@ -61,9 +70,16 @@ func layoutModal(screen image.Rectangle) modalLayout {
 	return l
 }
 
+// domainToggleWidth is the width of the "F6 Domain" toggle: the keycap, the
+// gap DrawKeycap's callers leave, and the label.
+func domainToggleWidth() int {
+	return TextWidth("F6", false) + 10 + 7 + TextWidth(i18n.T(i18n.HintDomain), false)
+}
+
 // renderModal draws the credential entry modal over the current screen.
 func renderModal(img *image.RGBA, state *UIState) {
-	l := layoutModal(img.Bounds())
+	m := &state.Modal
+	l := layoutModal(img.Bounds(), m.fieldCount())
 
 	// Dim everything behind it so the dialog is unmistakably the focus.
 	FillRectBlend(img, img.Bounds(), ColorOverlay)
@@ -83,35 +99,43 @@ func renderModal(img *image.RGBA, state *UIState) {
 	), ColorAccent)
 	DrawText(img, l.Header.Min.X+modalPad+11, titleY, i18n.T(i18n.ModalTitle), ColorText)
 
-	if host := state.SelectedHost(); host != nil {
-		name := host.DisplayName()
+	// The name the scan found for the address in the server field, which the
+	// field itself cannot show.
+	if host := state.SelectedHost(); host != nil && host.Hostname != "" &&
+		m.Fields[fieldServer] == host.Address() {
+		name := host.Hostname
 		DrawText(img, l.Header.Max.X-modalPad-TextWidth(name, false), titleY, name, ColorAccent)
 	}
 
 	// ── Fields ───────────────────────────────────────────────────────────────
-	labels := [3]string{
-		i18n.T(i18n.LabelUsername),
-		i18n.T(i18n.LabelPassword),
-		i18n.T(i18n.LabelDomain),
+	labels := [...]string{
+		fieldServer:   i18n.T(i18n.LabelServer),
+		fieldUser:     i18n.T(i18n.LabelUsername),
+		fieldPassword: i18n.T(i18n.LabelPassword),
+		fieldDomain:   i18n.T(i18n.LabelDomain),
 	}
-	for i, label := range labels {
-		f := l.Fields[i]
-		DrawText(img, l.LabelX, f.Min.Y+(modalFieldH-CharH)/2, label, ColorDim)
+	for i, f := range l.Fields {
+		DrawText(img, l.LabelX, f.Min.Y+(modalFieldH-CharH)/2, labels[i], ColorDim)
 
-		text := state.Modal.Fields[i]
-		if i == 1 {
+		text := m.Fields[i]
+		if i == fieldPassword {
 			text = maskStr(text)
 		}
-		DrawInputField(img, f, text, state.Modal.FocusIdx == i)
+		DrawInputField(img, f, text, m.FocusIdx == i)
 	}
 
-	if state.Modal.Error != "" {
-		DrawText(img, l.LabelX, l.ErrorY, state.Modal.Error, ColorError)
+	// The domain toggle: a keycap reads as "press this", and it is the same
+	// control the mouse clicks.
+	x := l.Domain.Min.X + DrawKeycap(img, l.Domain.Min.X, l.Domain.Min.Y, "F6") + 7
+	DrawText(img, x, l.Domain.Min.Y+4, i18n.T(i18n.HintDomain), ColorDim)
+
+	if m.Error != "" {
+		DrawText(img, l.LabelX, l.ErrorY, m.Error, ColorError)
 	}
 
 	// ── Buttons ──────────────────────────────────────────────────────────────
-	drawButton(img, l.Connect, i18n.T(i18n.ButtonConnect), state.Modal.FocusIdx == 3, true)
-	drawButton(img, l.Cancel, i18n.T(i18n.ButtonCancel), state.Modal.FocusIdx == 4, false)
+	drawButton(img, l.Connect, i18n.T(i18n.ButtonConnect), m.FocusIdx == m.focusConnect(), true)
+	drawButton(img, l.Cancel, i18n.T(i18n.ButtonCancel), m.FocusIdx == m.focusCancel(), false)
 }
 
 // drawButton renders one dialog button. The primary button is filled; the

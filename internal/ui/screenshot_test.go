@@ -13,6 +13,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
+	"github.com/diggyen/SimpleClient/internal/netconf"
 )
 
 // TestScreenshots renders every UI state to PNG so the design can be reviewed
@@ -90,10 +91,46 @@ func TestScreenshots(t *testing.T) {
 		st := &UIState{
 			Screen: ScreenModal, Hosts: sampleHosts(5), SelectedIdx: 1,
 			ScanDone: true, ScanProgress: 1,
-			Modal: ModalState{Fields: [3]string{"administrator", "secret123", ""}, FocusIdx: 1},
+			Modal: ModalState{Fields: [4]string{"10.7.7.101", "administrator", "secret123", ""}, FocusIdx: fieldPassword},
 		}
 		renderDiscovery(b, st)
 		renderModal(b, st)
+	})
+	shot("06-credentials-domain", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenModal, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Modal: ModalState{Fields: [4]string{"10.7.7.101", "administrator", "secret123", "CORP"},
+				ShowDomain: true, FocusIdx: fieldDomain},
+		}
+		renderDiscovery(b, st)
+		renderModal(b, st)
+	})
+	shot("06-network", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenNetwork, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Net: NetState{
+				Static: true, Iface: "eth0", Focus: 1 + netGateway,
+				Fields: [netFields]string{"192.168.1.50", "255.255.255.0", "192.168.1.1", "192.168.1.1", "1.1.1.1"},
+				Status: netconf.Status{Interface: "eth0", Address: "192.168.1.50/24", Carrier: true},
+				Msg:    i18n.T(i18n.NetSaved),
+			},
+		}
+		renderDiscovery(b, st)
+		renderNet(b, st)
+	})
+	shot("06-network-dhcp", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenNetwork, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Net: NetState{
+				Iface: "eth0", Focus: netFocusMode,
+				Status: netconf.Status{Interface: "eth0", Address: "10.7.7.53/24", Carrier: true},
+			},
+		}
+		renderDiscovery(b, st)
+		renderNet(b, st)
 	})
 	shot("07-connecting", 1280, 800, func(b *image.RGBA) {
 		st := &UIState{

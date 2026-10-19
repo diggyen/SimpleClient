@@ -170,11 +170,12 @@ func TestRenderModal_NonEmpty(t *testing.T) {
 	renderDiscovery(back, state)
 	renderModal(back, state)
 
-	// Centre of modal should not be background.
-	cx, cy := 640, 360
-	px := back.RGBAAt(cx, cy)
-	if px == ColorBG {
-		t.Fatal("modal centre should not be plain background color")
+	// The dialog body, just above the first field, is panel rather than the
+	// background showing through. (Not the screen centre: that lands inside an
+	// input field, whose well is drawn in the background colour on purpose.)
+	l := layoutModal(back.Bounds(), 3)
+	if px := back.RGBAAt(l.Box.Min.X+modalPad, l.Fields[0].Min.Y-modalPad/2); px != ColorPanel {
+		t.Fatalf("modal body = %v, want ColorPanel", px)
 	}
 }
 
@@ -314,8 +315,19 @@ func TestRenderDiscovery_HeaderAndHintsFitEveryLanguage(t *testing.T) {
 			back := image.NewRGBA(fb.Bounds())
 			renderDiscovery(back, &UIState{Screen: ScreenDiscovery})
 
-			if hintsW := keyHintsWidth(); hintsW > w-2*padding {
-				t.Errorf("lang=%s w=%d: key hints (%dpx) do not fit on screen", lang, w, hintsW)
+			for _, install := range []bool{false, true} {
+				hints := fitKeyHints(keyHints(install), w-2*padding)
+				if hintsW := keyHintsWidth(hints); hintsW > w-2*padding {
+					t.Errorf("lang=%s w=%d install=%v: key hints (%dpx) do not fit on screen", lang, w, install, hintsW)
+				}
+				// Only a screen too narrow for the full row may lose hints,
+				// and never the install one.
+				if w >= 1024 && len(hints) != len(keyHints(install)) {
+					t.Errorf("lang=%s w=%d install=%v: %d of %d hints shown", lang, w, install, len(hints), len(keyHints(install)))
+				}
+				if install && hints[len(hints)-1][0] != "F9" {
+					t.Errorf("lang=%s w=%d: the install hint was dropped", lang, w)
+				}
 			}
 
 			logo := layoutLogo(w, logoTop)
@@ -357,7 +369,7 @@ func TestLayoutDiscovery_CardGrowsWithTheList(t *testing.T) {
 func TestLayoutModal_CentredAndHitTestable(t *testing.T) {
 	for _, s := range [][2]int{{800, 600}, {1024, 768}, {1280, 800}} {
 		screen := image.Rect(0, 0, s[0], s[1])
-		l := layoutModal(screen)
+		l := layoutModal(screen, 4)
 
 		if !l.Box.In(screen) {
 			t.Errorf("%dx%d: dialog %v is not inside the screen", s[0], s[1], l.Box)
@@ -382,12 +394,12 @@ func TestLayoutModal_CentredAndHitTestable(t *testing.T) {
 // Clicking a field focuses it; clicking Cancel closes the dialog.
 func TestModalClick_FocusesFieldAndCancels(t *testing.T) {
 	fb := framebuffer.NewMock(1280, 800)
-	l := layoutModal(fb.Bounds())
+	l := layoutModal(fb.Bounds(), 3)
 
 	state := &UIState{Screen: ScreenModal}
-	pwd := l.Fields[1]
+	pwd := l.Fields[fieldPassword]
 	handleMouseClick(pwd.Min.X+10, pwd.Min.Y+5, state, fb, nil)
-	if state.Modal.FocusIdx != 1 {
+	if state.Modal.FocusIdx != fieldPassword {
 		t.Fatalf("clicking the password field set focus to %d, want 1", state.Modal.FocusIdx)
 	}
 
@@ -397,19 +409,22 @@ func TestModalClick_FocusesFieldAndCancels(t *testing.T) {
 	}
 }
 
-// The dialog names the host it is about to connect to.
+// The server field shows the address; the header adds the name the scan found
+// for it, which the field cannot show.
 func TestRenderModal_ShowsSelectedHost(t *testing.T) {
 	fb := framebuffer.NewMock(1280, 800)
-	withHost := image.NewRGBA(fb.Bounds())
-	withoutHost := image.NewRGBA(fb.Bounds())
+	withName := image.NewRGBA(fb.Bounds())
+	withoutName := image.NewRGBA(fb.Bounds())
 
-	renderModal(withHost, &UIState{
-		Screen: ScreenModal,
-		Hosts:  []domain.Host{{IP: net.ParseIP("10.0.0.9"), Hostname: "veeam-2"}},
-	})
-	renderModal(withoutHost, &UIState{Screen: ScreenModal})
+	ip := net.ParseIP("10.0.0.9")
+	named := &UIState{Screen: ScreenModal, Hosts: []domain.Host{{IP: ip, Hostname: "veeam-2"}}}
+	unnamed := &UIState{Screen: ScreenModal, Hosts: []domain.Host{{IP: ip}}}
+	named.OpenModalFor()
+	unnamed.OpenModalFor()
+	renderModal(withName, named)
+	renderModal(withoutName, unnamed)
 
-	if bytes.Equal(withHost.Pix, withoutHost.Pix) {
+	if bytes.Equal(withName.Pix, withoutName.Pix) {
 		t.Fatal("the dialog should name the selected host in its header")
 	}
 }

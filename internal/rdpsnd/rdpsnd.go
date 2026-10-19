@@ -302,4 +302,3 @@ func (c *Channel) confirm(b block) {
 	body.WriteByte(0)
 	c.send(sndcWaveConfirm, body.Bytes())
 }
-
