@@ -69,7 +69,7 @@ step 1 medium
 mkdir -p /mnt/sc-media /mnt/sc-esp /mnt/sc-slot /mnt/sc-data
 MEDIA=$(find_medium) || fail "installation medium not found"
 mount -t iso9660 -o ro "$MEDIA" /mnt/sc-media 2>/dev/null || fail "cannot mount $MEDIA"
-for f in boot/vmlinuz-new boot/vmlinuz-lts boot/initramfs.cpio.gz \
+for f in boot/vmlinuz-new boot/vmlinuz-lts boot/initramfs.cpio.gz boot/firmware.cpio \
          boot/modules-new.cpio.gz boot/modules-lts.cpio.gz boot/efi/grubx64.efi \
          EFI/boot/bootx64.efi EFI/boot/mmx64.efi boot/grub/fonts/unicode.pf2; do
     [ -f "/mnt/sc-media/$f" ] || fail "missing on the medium: $f"
@@ -123,7 +123,7 @@ mkext4 SC_DATA "$(part $DATA)" || fail "formatting SC_DATA failed"
 # ── 4. The system, into slot A ───────────────────────────────────────────────
 step 4 copy
 mount -t ext4 "$(part $A)" /mnt/sc-slot || fail "cannot mount SC_A"
-for f in /mnt/sc-media/boot/vmlinuz-* /mnt/sc-media/boot/*.cpio.gz; do
+for f in /mnt/sc-media/boot/vmlinuz-* /mnt/sc-media/boot/*.cpio.gz /mnt/sc-media/boot/*.cpio; do
     cp "$f" /mnt/sc-slot/ || fail "copying $(basename "$f") failed (disk full?)"
 done
 [ -n "${SC_VERSION:-}" ] && echo "$SC_VERSION" > /mnt/sc-slot/version

@@ -20,8 +20,14 @@ struct kms;
 
 /* kms_open takes the first connected display of the first DRM device that has
  * one and picks its mode: the native (preferred) resolution, at the highest
- * refresh rate the display offers there. SC_MODE=WxH or WxH@Hz picks another.
- * The display keeps showing what it shows until kms_start. */
+ * refresh rate the display offers there — unless that is below 50 Hz (4K over
+ * HDMI 1.4), when the largest mode that runs at 60 is taken instead. SC_MODE=
+ * WxH or WxH@Hz picks another. The display keeps showing what it shows until
+ * kms_start.
+ *
+ * With no DRM device to drive — safe graphics, a GPU with no driver — it
+ * takes the firmware framebuffer, /dev/fb0, as it is: one buffer drawn in
+ * place, at the mode GRUB set, with no vertical blank and no cursor plane. */
 struct kms* kms_open(void);
 
 /* kms_close stops presenting and gives the display back. */

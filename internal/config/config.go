@@ -18,6 +18,9 @@ type Config struct {
 	RDPDebug    bool
 	StaticHost  string
 	ColorDepth  int
+	// BootGraphics is set only by /init, which runs the binary for one step
+	// of choosing the display driver before it starts the kiosk.
+	BootGraphics string
 }
 
 // Load parses command-line flags and returns a Config.
@@ -41,6 +44,11 @@ func Load() Config {
 	flag.BoolVar(&cfg.RDPDebug, "rdp-debug", false,
 		"Log the full RDP handshake to stderr. Diagnostic only: the RDP library "+
 			"prints the password in clear text at this level.")
+	flag.StringVar(&cfg.BootGraphics, "boot-graphics", "",
+		"Run by /init before the kiosk, then exit: \"mode\" prints native or safe "+
+			"(load the GPU's own driver, or keep the firmware framebuffer), \"try\" "+
+			"marks the display adapters in the boot environment before their driver "+
+			"loads, \"ok\" clears the mark once there is a screen.")
 	flag.Parse()
 	return cfg
 }

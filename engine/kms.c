@@ -3,17 +3,21 @@
  *
  * The legacy KMS calls (SetCrtc, PageFlip, SetCursor) and dumb buffers: every
  * KMS driver has them, from the oldest i915 to simpledrm on a firmware
- * framebuffer, and they are all a full-screen kiosk needs.
+ * framebuffer, and they are all a full-screen kiosk needs. Without a DRM
+ * device, the fbdev framebuffer instead: the same single buffer drawn in
+ * place that simpledrm gives.
  */
 #include "kms.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <linux/fb.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -122,6 +126,12 @@ struct kms {
 	bool shown;   /* the CRTC scans out one of ours */
 	bool flips;   /* page flips work; else one buffer, drawn in place */
 	bool pending; /* a flip has been queued and not completed */
+
+	/* fd is an fbdev framebuffer, not a DRM device: buf[0] is its memory,
+	 * mapped from fbmap, and there is nothing to set up or flip. */
+	bool fbdev;
+	uint8_t* fbmap;
+	size_t fblen;
 
 	pthread_mutex_t* src_lock;
 	const uint8_t* src;
@@ -252,6 +262,24 @@ static const drmModeModeInfo* pick_mode(const drmModeConnector* c)
 		unsetenv("SC_MODE");
 		return pick_mode(c);
 	}
+
+	/* A native resolution the link carries only at 30 Hz — 4K over HDMI 1.4
+	 * — would halve the frame rate. For a moving desktop the largest mode
+	 * that runs at 60 is the better trade. */
+	if (best && !env && refresh_mhz(best) < 50000) {
+		const drmModeModeInfo* fast = NULL;
+		for (int i = 0; i < c->count_modes; i++) {
+			const drmModeModeInfo* m = &c->modes[i];
+			if ((m->flags & DRM_MODE_FLAG_INTERLACE) || refresh_mhz(m) < 59000)
+				continue;
+			long a = (long)m->hdisplay * m->vdisplay;
+			long fa = fast ? (long)fast->hdisplay * fast->vdisplay : 0;
+			if (!fast || a > fa || (a == fa && refresh_mhz(m) > refresh_mhz(fast)))
+				fast = m;
+		}
+		if (fast)
+			best = fast;
+	}
 	return best;
 }
 
@@ -342,6 +370,58 @@ static bool take_display(struct kms* k, const char* path)
 	return found;
 }
 
+/* take_fbdev takes the fbdev framebuffer as it is, when there is no DRM
+ * device to drive: the firmware's (efifb, vesafb) under safe graphics or on a
+ * GPU no driver knows. Its pixels must be XRGB8888, which is what GRUB sets
+ * (gfxmode ...x32). */
+static bool take_fbdev(struct kms* k)
+{
+	const char* path = getenv("SC_FBDEV");
+	if (!path)
+		path = "/dev/fb0";
+	int fd = open(path, O_RDWR | O_CLOEXEC);
+	if (fd < 0)
+		return false;
+	struct fb_var_screeninfo v;
+	struct fb_fix_screeninfo f;
+	if (ioctl(fd, FBIOGET_VSCREENINFO, &v) < 0 || ioctl(fd, FBIOGET_FSCREENINFO, &f) < 0) {
+		close(fd);
+		return false;
+	}
+	if (v.bits_per_pixel != 32 || v.red.offset != 16 || v.green.offset != 8 ||
+	    v.blue.offset != 0 || v.red.length != 8 || v.green.length != 8 || v.blue.length != 8) {
+		fprintf(stderr, "kms: %s is %u bits a pixel, not XRGB8888\n", path, v.bits_per_pixel);
+		close(fd);
+		return false;
+	}
+	size_t off = (size_t)v.yoffset * f.line_length + (size_t)v.xoffset * 4;
+	if (!v.xres || !v.yres || off + (size_t)v.yres * f.line_length > f.smem_len) {
+		fprintf(stderr, "kms: %s: %ux%u does not fit its %u bytes\n", path, v.xres, v.yres,
+		        f.smem_len);
+		close(fd);
+		return false;
+	}
+	uint8_t* map = mmap(NULL, f.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (map == MAP_FAILED) {
+		fprintf(stderr, "kms: mmap %s: %s\n", path, strerror(errno));
+		close(fd);
+		return false;
+	}
+	k->fd = fd;
+	k->fbdev = true;
+	k->fbmap = map;
+	k->fblen = f.smem_len;
+	k->buf[0].map = map + off;
+	k->buf[0].pitch = f.line_length;
+	k->w = (int)v.xres;
+	k->h = (int)v.yres;
+	k->hz = 60;
+	const char* dev = strrchr(path, '/');
+	snprintf(k->name, sizeof(k->name), "%s", dev ? dev + 1 : path);
+	snprintf(k->driver, sizeof(k->driver), "fbdev %.16s", f.id);
+	return true;
+}
+
 struct kms* kms_open(void)
 {
 	struct kms* k = calloc(1, sizeof(*k));
@@ -356,8 +436,15 @@ struct kms* kms_open(void)
 		snprintf(path, sizeof(path), "/dev/dri/card%d", i);
 		take_display(k, path);
 	}
+	if (k->fd < 0 && take_fbdev(k)) {
+		k->px = k->w / 2;
+		k->py = k->h / 2;
+		fprintf(stderr, "kms: %s (%s) %dx%d, drawn in place, no cursor plane\n", k->name,
+		        k->driver, k->w, k->h);
+		return k;
+	}
 	if (k->fd < 0) {
-		fprintf(stderr, "kms: no connected display on any DRM device\n");
+		fprintf(stderr, "kms: no connected display on any DRM device, and no framebuffer\n");
 		free(k);
 		return NULL;
 	}
@@ -528,6 +615,11 @@ static bool fits_hw(const struct kms* k)
 static void show(struct kms* k, int i, const struct region* drawn)
 {
 	struct buffer* b = &k->buf[i];
+	if (k->fbdev) {
+		/* What was drawn is on the screen already. */
+		k->shown = true;
+		return;
+	}
 	if (!k->shown) {
 		uint32_t conn = k->conn;
 		if (drmModeSetCrtc(k->fd, k->crtc, b->fb, 0, 0, &conn, 1, &k->mode) < 0) {
@@ -779,7 +871,11 @@ void kms_close(struct kms* k)
 		pthread_mutex_unlock(&k->mu);
 		pthread_join(k->thread, NULL);
 	}
-	if (k->fd >= 0) {
+	if (k->fbdev) {
+		/* The kiosk repaints its own screen over what the session left. */
+		munmap(k->fbmap, k->fblen);
+		close(k->fd);
+	} else if (k->fd >= 0) {
 		if (k->on_hw)
 			drmModeSetCursor(k->fd, k->crtc, 0, 0, 0);
 		for (int i = 0; i < 2; i++) {

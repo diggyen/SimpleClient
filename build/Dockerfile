@@ -214,6 +214,36 @@ RUN set -e; chmod +x /usr/local/bin/select-modules; mkdir -p /out; \
 RUN apk add --no-cache linux-firmware-bnx2 linux-firmware-bnx2x \
         linux-firmware-rtl_nic linux-firmware-tigon linux-firmware-e100
 
+# GPU firmware, for the GPU's own driver that /init loads (see its display
+# step). radeon, amdgpu and xe do not bring a display up without theirs; i915
+# runs without but loses power management. It is its own archive, firmware.cpio,
+# which GRUB loads after the modules: one copy for both kernels, and its files
+# are compressed already (zstd, which the kernel reads), so it is not
+# compressed again.
+#
+# Left out, as no kiosk has use for them:
+#   NVIDIA's GSP firmware, 100 MB. nouveau needs it only on Ada and later,
+#                 which /init therefore leaves on the firmware framebuffer;
+#                 older GeForces run without it.
+#   i915's HuC and GSC firmware, for video decoding and content protection.
+#   AMD's data-centre accelerators (Instinct MI100-MI355), which have no
+#                 display.
+RUN set -e; \
+    apk add --no-cache linux-firmware-i915 linux-firmware-xe linux-firmware-amdgpu \
+        linux-firmware-radeon linux-firmware-nvidia; \
+    mkdir -p /gpufw/lib/firmware; \
+    for d in i915 xe amdgpu radeon nvidia; do cp -a "/lib/firmware/$d" /gpufw/lib/firmware/; done; \
+    cd /gpufw/lib/firmware; \
+    rm -rf nvidia/*/gsp i915/*huc* i915/*gsc*; \
+    for p in aldebaran arcturus gc_9_4_3 gc_9_4_4 gc_9_5_0 psp_13_0_6 psp_13_0_12 psp_13_0_14 \
+             sdma_4_4_2 sdma_4_4_4 sdma_4_4_5 smu_13_0_6 smu_13_0_12 smu_13_0_14 \
+             vcn_4_0_3 vcn_5_0_1; do \
+        rm -f amdgpu/${p}[._]*; \
+    done; \
+    find . -type l | while read -r l; do [ -e "$l" ] || rm "$l"; done; \
+    cd /gpufw && find . | cpio -oH newc --quiet > /out/firmware.cpio; \
+    du -sh /gpufw/lib/firmware/*; ls -lh /out/firmware.cpio
+
 # Sound. The kiosk plays and records through ALSA's own tools: their plughw
 # layer converts rate, channels and format to whatever a codec accepts, which
 # hand-rolled PCM ioctls would have to reimplement for every card. They are
@@ -304,7 +334,8 @@ RUN cd /rootfs && find . | cpio -oH newc --quiet | gzip -9 > /out/initramfs.cpio
 # it onto the ESP of a disk install.
 FROM boot-builder AS iso-builder
 
-COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz /iso/boot/
+COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz \
+     /out/firmware.cpio /iso/boot/
 COPY build/grub.cfg /iso/boot/grub/grub.cfg
 
 RUN set -e; \
@@ -337,6 +368,7 @@ RUN set -e; \
 # ── Export ────────────────────────────────────────────────────────────────────
 FROM scratch AS export
 COPY --from=go-builder /out/simpleclient /
-COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz /
+COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz \
+     /out/firmware.cpio /
 COPY --from=iso-builder /iso/boot/vmlinuz-new /iso/boot/vmlinuz-lts /
 COPY --from=iso-builder /out/simpleclient.iso /

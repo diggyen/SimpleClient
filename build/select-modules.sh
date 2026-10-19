@@ -9,9 +9,16 @@
 # framebuffer kiosk touches, plus the disk controllers (NVMe, SATA, eMMC, USB
 # storage) and file systems that installing to disk and booting from it need.
 #
-# kernel/net is not optional: af_packet lives there, and busybox udhcpc opens an
+# Of kernel/net only af_packet, which is not optional: busybox udhcpc opens an
 # AF_PACKET socket to send its DHCP discover. Without it every boot silently
-# falls back to a link-local address and the network scan finds nothing.
+# falls back to a link-local address and the network scan finds nothing. The
+# rest of kernel/net — netfilter, traffic shaping, bridging, NFS, a third of
+# the modules — serves no purpose on a kiosk, and every megabyte here is one
+# more for an old BIOS to read off a USB stick before the kernel starts. A
+# module a driver needs from there comes along with it, as below.
+#
+# The same goes for hardware no kiosk has: data-centre NICs (25-400G), CAN,
+# WWAN, amateur radio, the USB device side, joysticks.
 #
 # drivers/char carries hw_random, including virtio-rng. A diskless kiosk has
 # almost no entropy at boot, so getrandom() blocks and the RDP client's TLS
@@ -39,7 +46,9 @@ for d in net gpu input hid usb virtio char i2c cpufreq nvme ata mmc; do
         cp -a "$S/kernel/drivers/$d" "$D/kernel/drivers/"
     fi
 done
-cp -a "$S/kernel/net" "$S/kernel/sound" "$D/kernel/"
+cp -a "$S/kernel/sound" "$D/kernel/"
+mkdir -p "$D/kernel/net"
+cp -a "$S/kernel/net/packet" "$D/kernel/net/"
 for m in sd_mod sr_mod virtio_blk vmw_pvscsi loop fat vfat ext4 jbd2 mbcache isofs efivarfs \
          nls_ascii nls_cp437 nls_iso8859-1 nls_utf8 crc32c_generic crc32c-intel libcrc32c; do
     for f in $(find "$S/kernel" -name "$m.ko*"); do
@@ -53,8 +62,13 @@ for f in modules.builtin modules.builtin.modinfo modules.order; do
         cp -a "$S/$f" "$D/"
     fi
 done
-rm -rf "$D/kernel/drivers/net/wireless" "$D/kernel/net/wireless" \
-       "$D/kernel/net/mac80211" "$D/kernel/net/bluetooth"
+N=$D/kernel/drivers/net
+rm -rf "$N/wireless" "$N/can" "$N/wwan" "$N/wan" "$N/ieee802154" "$N/arcnet" "$N/fddi" \
+       "$N/hamradio" "$N/plip" \
+       "$N/ethernet/mellanox" "$N/ethernet/qlogic" "$N/ethernet/chelsio" "$N/ethernet/sfc" \
+       "$N/ethernet/netronome" "$N/ethernet/cavium" "$N/ethernet/pensando" "$N/ethernet/huawei" \
+       "$N/ethernet/brocade" "$N/ethernet/emulex" "$N/ethernet/fungible" \
+       "$D/kernel/drivers/usb/gadget" "$D/kernel/drivers/usb/atm" "$D/kernel/drivers/input/joystick"
 
 # A modules.dep without a single dependency means depmod could not read the
 # modules (a compression it was built without); following it would silently

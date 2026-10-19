@@ -51,7 +51,6 @@ fi
 #   evdev      creates /dev/input/event*; without it the keyboard is invisible
 #              to userspace and the kiosk cannot be operated at all
 #   af_packet  udhcpc opens an AF_PACKET socket to send its DHCP discover
-#   simpledrm  turns the framebuffer GRUB hands over into /dev/fb0
 #   virtio_rng   seeds the entropy pool in a VM. RDP's NLA handshake is the
 #                first thing here to want randomness, and on a machine with no
 #                disk, no entropy-gathering daemon and a CPU whose RDRAND the
@@ -73,7 +72,7 @@ fi
 #                loaded up front every disk binds whenever it appears — the one
 #                being installed to, the data partition of an installed kiosk,
 #                a USB stick plugged in later.
-for m in evdev af_packet simpledrm bochs virtio_pci virtio_net virtio_gpu \
+for m in evdev af_packet virtio_pci virtio_net \
          virtio_rng e1000 e1000e r8169 igb igc tg3 \
          alx atl1c atl1e atl1 atl2 b44 bnx2 jme sky2 skge forcedeth \
          8139cp 8139too \
@@ -89,10 +88,11 @@ done
 # the list above does not name — on old hardware and new alike, the same way a
 # full distribution's initramfs does it.
 #
-# Display adapters (PCI class 03) are skipped: a native GPU driver taking over
-# would tear down the simpledrm framebuffer the kiosk draws on. Three rounds,
-# because loading a driver makes new devices appear behind it: a USB host
-# controller brings up its hubs and devices, a HID transport its HID devices.
+# Display adapters (PCI class 03, and virtio-gpu behind virtio_pci) are left
+# to the display step below, which decides whether their driver is loaded at
+# all. Three rounds, because loading a driver makes new devices appear behind
+# it: a USB host controller brings up its hubs and devices, a HID transport its
+# HID devices.
 coldplug() {
     for f in /sys/bus/pci/devices/*/modalias /sys/bus/usb/devices/*/modalias \
              /sys/bus/hid/devices/*/modalias /sys/bus/serio/devices/*/modalias \
@@ -107,7 +107,7 @@ coldplug() {
         # registers as a sound card and would be picked to play the session's
         # audio — as clicks through a buzzer. The kiosk never beeps either.
         case "$alias" in
-            pci:*bc03sc*|platform:pcspkr) continue ;;
+            pci:*bc03sc*|virtio:d00000010v*|platform:pcspkr) continue ;;
         esac
         modprobe -q "$alias" 2>/dev/null
     done
@@ -132,6 +132,63 @@ log "loaded: $(cut -d' ' -f1 /proc/modules 2>/dev/null | tr '\n' ' ')"
 log "sound cards: $(sed -n 's/^ *\([0-9]*\) \[\([^] ]*\) *\]: \(.*\)/\1=\2 (\3)/p' /proc/asound/cards 2>/dev/null | tr '\n' ' ')"
 
 # ── Display ───────────────────────────────────────────────────────────────────
+# GRUB leaves the screen in a firmware framebuffer — efifb on UEFI, vesafb on
+# BIOS — which is /dev/fb0 from the first moment and works on anything. But it
+# has one fixed mode and neither a vertical blank nor a cursor plane. The GPU's
+# own (DRM) driver runs the display at its native mode, and the session engine
+# flips whole frames on its vertical blank: that driver is loaded here, last,
+# before anything draws. It takes the screen over from the firmware
+# framebuffer and gives /dev/fb0 back at the display's resolution.
+#
+# The risk is a driver that takes the screen away and gives none back —
+# firmware it needs and does not find, a GPU it hangs on. So the adapters are
+# written into the boot environment first and cleared once there is a screen:
+# a boot that dies in between, or is restarted from here for having no
+# screen, makes GRUB leave them on the firmware framebuffer from then on. The
+# boot menu's safe-graphics entry asks for that once. See bootenv.GraphicsTry.
+load_display_drivers() {
+    for d in /sys/bus/pci/devices/*; do
+        case "$(cat "$d/class" 2>/dev/null)" in 0x03*) ;; *) continue ;; esac
+        # nouveau drives NVIDIA's Ada (RTX 40) and later only with NVIDIA's
+        # GSP firmware, 76 MB that is not shipped. Loaded, it would take the
+        # screen and fail; left alone, the firmware framebuffer stays.
+        if [ "$(cat "$d/vendor")" = 0x10de ] && [ $(($(cat "$d/device"))) -ge $((0x2680)) ]; then
+            log "display: ${d##*/} NVIDIA $(cat "$d/device") stays on the firmware framebuffer"
+            continue
+        fi
+        modprobe -q "$(cat "$d/modalias")" 2>/dev/null
+    done
+    for f in /sys/bus/virtio/devices/*/modalias; do
+        case "$(cat "$f" 2>/dev/null)" in
+            virtio:d00000010v*) modprobe -q "$(cat "$f")" 2>/dev/null ;;
+        esac
+    done
+}
+GFX=$(/sbin/simpleclient -boot-graphics=mode 2>/dev/console)
+if [ "$GFX" = safe ] && [ -e /dev/fb0 ]; then
+    log "display: safe graphics, the firmware framebuffer"
+else
+    # Without a firmware framebuffer (a BIOS that would not set GRUB's mode)
+    # the driver is all there is, safe graphics or not.
+    MARKED=0
+    if [ "$GFX" != safe ] && /sbin/simpleclient -boot-graphics=try 2>/dev/console; then
+        MARKED=1
+    fi
+    load_display_drivers
+    i=0
+    while [ ! -e /dev/fb0 ] && [ "$i" -lt 40 ]; do
+        i=$((i + 1))
+        sleep 0.25
+    done
+    if [ -e /dev/fb0 ]; then
+        [ "$MARKED" = 1 ] && /sbin/simpleclient -boot-graphics=ok 2>/dev/console
+    elif [ "$MARKED" = 1 ]; then
+        log "ERROR: the GPU's driver left no screen ($(ls /sys/class/drm 2>/dev/null | tr '\n' ' ')); restarting with safe graphics"
+        sync
+        reboot -f
+    fi
+fi
+log "drm: $(for c in /sys/class/drm/card*-*; do [ -e "$c/status" ] && echo "${c##*/}=$(cat "$c/status")"; done | tr '\n' ' ')"
 if [ ! -e /dev/fb0 ]; then
     log "ERROR: /dev/fb0 missing after module load"
     log "drm: $(ls /sys/class/drm 2>/dev/null | tr '\n' ' ')"

@@ -91,19 +91,36 @@ identical to a bad image.
 
 ## It boots, but the screen is blank or garbled
 
-Check the `fb0:` line on the console.
+The kiosk starts on the firmware's framebuffer, at the 1024×768×32 mode GRUB
+sets, and then loads the GPU's own driver (Intel i915/xe, AMD amdgpu/radeon,
+NVIDIA nouveau, and the virtual GPUs), which takes the display over at its
+native mode. The console says which way it went:
 
-- **No `fb0:` line** — the kernel gave no framebuffer. The GPU has no driver in
-  the `linux-lts` kernel, or firmware handed over a mode the kernel rejected.
+```
+simpleclient: display adapters "8086:46a6", native graphics
+[simpleclient-init] drm: card0-HDMI-A-1=connected card0-DP-1=disconnected
+[simpleclient-init] fb0: 1920,1080 bpp=32 driver=i915drmfb
+```
+
+- **A driver that leaves no screen** — missing firmware, a GPU it hangs on —
+  is dealt with on its own: the boot restarts (or, after a hang, the next one
+  does) with that GPU left on the firmware framebuffer, `safe graphics`, and
+  the USB stick or disk remembers this for that GPU. A different GPU tries its
+  driver afresh.
+- **Dark screen, nothing to blame** — pick **Guvenli grafik / safe graphics**
+  in the boot menu, which skips the driver for that boot.
+  **ekran surucusunu yeniden dene / retry display driver** forgets what was
+  remembered.
+- **No `fb0:` line** — neither the firmware nor a driver gave a framebuffer.
 - **`fb0:` present, screen blank** — the UI is drawing somewhere you are not
   looking. Some machines with multiple outputs light the wrong one; try a
   different port, or the only display attached at boot.
 - **Wrong colours or a skewed image** — the framebuffer is not 32bpp. The
   renderer assumes it. The line reports the actual depth.
 
-The mode comes from `build/grub.cfg` (`gfxmode`), which asks for 1024×768×32 —
-the mode essentially every implementation supports — and `gfxpayload=keep` hands
-it to the kernel.
+NVIDIA's RTX 40 series and later always stay on the firmware framebuffer:
+nouveau drives them only with NVIDIA's GSP firmware, 100 MB that is not
+shipped.
 
 ---
 

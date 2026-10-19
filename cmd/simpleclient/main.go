@@ -27,6 +27,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if cfg.BootGraphics != "" {
+		os.Exit(bootGraphics(cfg.BootGraphics))
+	}
 	// Language and keyboard layout are set together. Picking Türkçe from the
 	// GRUB menu and then finding the keyboard still on a US keymap is the same
 	// surprise as picking it with F2 and finding that, and the boot path used
@@ -47,11 +50,17 @@ func main() {
 
 	// The framebuffer is the only hard requirement: without it there is nothing
 	// to draw on and no way to tell the user anything.
-	fb, err := framebuffer.Open(cfg.FBDevice)
+	dev, err := framebuffer.Open(cfg.FBDevice)
 	if err != nil {
 		fatalf("framebuffer: %v", err)
 	}
+	// With the GPU's driver the screen is the display's native mode; on 4K
+	// the kiosk's screens are drawn at twice the size, pixel for pixel.
+	scale := framebuffer.Scale(dev.Width(), dev.Height())
+	fb := framebuffer.NewScaled(dev, scale)
 	defer fb.Close()
+	fmt.Fprintf(os.Stderr, "simpleclient: screen %dx%d, drawn at %dx%d\n",
+		dev.Width(), dev.Height(), fb.Width(), fb.Height())
 
 	// Explicit -kbd/-mouse (kbddev=/mousedev= on the GRUB line) pin the nodes,
 	// for the one machine where autodetection picks the wrong device. Otherwise
@@ -97,6 +106,35 @@ func main() {
 
 	// Run never returns.
 	ui.Run(fb, input, scan, cfg)
+}
+
+// bootGraphics is /init's half of choosing the display driver; see
+// build/init and bootenv.GraphicsTry. It runs before the kiosk and exits.
+func bootGraphics(step string) int {
+	boot := bootenv.Current()
+	gpus := bootenv.GPUs()
+	switch step {
+	case "mode":
+		mode := "native"
+		if boot.SafeGraphics(gpus) {
+			mode = "safe"
+		}
+		fmt.Println(mode)
+		fmt.Fprintf(os.Stderr, "simpleclient: display adapters %q, %s graphics\n", gpus, mode)
+		return 0
+	case "try":
+		if gpus == "" || !bootenv.GraphicsTry(boot, gpus) {
+			return 1
+		}
+		return 0
+	case "ok":
+		if err := bootenv.GraphicsOK(boot); err != nil {
+			warnf("boot: clearing the display mark failed: %v", err)
+			return 1
+		}
+		return 0
+	}
+	return 2
 }
 
 // provenAfter is how long the kiosk has to run before its boot counts as
