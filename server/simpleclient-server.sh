@@ -267,12 +267,50 @@ pick_session() {
     done
 }
 
+# Plasma 6 has its X11 session in packages of their own, which a fresh install
+# leaves out (Kubuntu 25.10 and later, Fedora): the machine has Plasma, but
+# nothing xrdp can start. It is the same desktop, so they are added. Plasma 6.8
+# and later have none: they run on Wayland only.
+add_plasma_x11() {
+    [ -r /usr/share/wayland-sessions/plasma.desktop ] || return 0
+    if [ -r /usr/share/xsessions/plasmax11.desktop ] && installed kwin_x11; then
+        return 0
+    fi
+    say "Plasma'nın X11 oturumu kuruluyor: xrdp Wayland oturumu açamaz"
+    case $FAMILY in
+    apt)
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update || true
+        # Ubuntu 25.10 and later: a package of its own. Debian: in
+        # plasma-workspace, with only the window manager apart.
+        local pkgs=(kwin-x11)
+        if apt-cache show plasma-session-x11 >/dev/null 2>&1; then
+            pkgs+=(plasma-session-x11)
+        fi
+        apt-get install -y --no-install-recommends "${pkgs[@]}" || true
+        ;;
+    dnf) dnf install -y plasma-workspace-x11 || true ;;
+    zypper) zypper -n in plasma6-session-x11 || true ;;
+    pacman) pacman -S --noconfirm --needed plasma-x11-session kwin-x11 || true ;;
+    esac
+    if [ ! -r /usr/share/xsessions/plasmax11.desktop ] || ! installed kwin_x11; then
+        warn "Bu Plasma sürümünün X11 oturumu yok (Plasma 6.8 ve sonrası yalnız Wayland'de çalışır): xrdp onu açamaz"
+    fi
+}
+
 # check_session stops before the long build when there is no desktop to
 # start remotely.
 check_session() {
+    local first=$WANT_SESSION
+    if [ -z "$first" ]; then
+        first=$(pick_session)
+    fi
+    case $first in
+        ""|plasmax11) add_plasma_x11 ;;
+    esac
     SESSION=$(pick_session)
     if [ -z "$SESSION" ]; then
-        die "X11 masaüstü bulunamadı (/usr/share/xsessions boş). Wayland'e özel bir masaüstüyle (yeni GNOME) xrdp oturum açamaz; Xfce, MATE ya da Cinnamon kurup yeniden çalıştırın."
+        die "X11 masaüstü bulunamadı (/usr/share/xsessions boş). Yalnız Wayland'de çalışan bir masaüstünü (yeni GNOME, Plasma 6.8 ve sonrası) xrdp açamaz; Xfce, MATE ya da Cinnamon kurup yeniden çalıştırın."
     fi
 }
 

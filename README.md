@@ -118,14 +118,19 @@ curl -fsSLO https://raw.githubusercontent.com/diggyen/SimpleClient/iyilestirme/s
 sudo bash simpleclient-server.sh
 ```
 
-Tested on Ubuntu 24.04 and 22.04 (the bases of Linux Mint 22 and 21) and
-Fedora 42; Debian, openSUSE and Arch are attempted. Fedora's own repositories
-have no x264, so there it builds with Cisco's OpenH264, which encodes about a
-quarter fewer frames (55 fps against 75 on the same machine); with RPM Fusion
-enabled it takes x264. Run it again after a distribution upgrade.
+Tested on Ubuntu 26.04, 24.04 and 22.04 (Linux Mint 22 and 21 are built on
+the last two, its next release on the first) and Fedora 42, with Xfce and KDE
+Plasma 5.27 and 6.6; Debian, openSUSE and Arch are attempted. Fedora's own
+repositories have no x264, so there it builds with Cisco's OpenH264, which
+encodes about a quarter fewer frames (55 fps against 75 on the same machine);
+with RPM Fusion enabled it takes x264. Run it again after a distribution
+upgrade.
 `--session NAME` picks the desktop when there are several (`cinnamon`, `mate`,
 `xfce`, `plasmax11`, ...). A desktop that runs only on Wayland cannot be served
-by xrdp.
+by xrdp. KDE Plasma 6 keeps its X11 session in a package of its own, which
+Kubuntu (25.10 and later) and Fedora leave out of a fresh install; the script
+adds it. Plasma 6.8 and later have none (Arch, openSUSE Tumbleweed), nor does
+the newest GNOME: remote sessions there need a second desktop, such as Xfce.
 
 ## Build it
 
