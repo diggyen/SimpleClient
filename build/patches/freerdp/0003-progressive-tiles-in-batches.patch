@@ -1,0 +1,74 @@
+--- a/libfreerdp/codec/progressive.h
++++ b/libfreerdp/codec/progressive.h
+@@ -149,6 +149,7 @@
+ 	PROGRESSIVE_BLOCK_REGION* region;
+ 	const PROGRESSIVE_BLOCK_CONTEXT* context;
+ 	RFX_PROGRESSIVE_TILE* tile;
++	UINT32 count; /* the tiles its work item decodes: this one and those after it */
+ } PROGRESSIVE_TILE_PROCESS_WORK_PARAM;
+ 
+ struct S_PROGRESSIVE_BLOCK_REGION
+--- a/libfreerdp/codec/progressive.c
++++ b/libfreerdp/codec/progressive.c
+@@ -1701,6 +1701,20 @@
+ 	}
+ }
+ 
++/* A work item decodes a batch of tiles rather than one: a tile is a few tens
++ * of microseconds of work, and the thread pool's allocation, locks and wakeups
++ * for each took a fifth of what decoding a full-screen video cost. */
++#define PROGRESSIVE_TILES_PER_WORK 8u
++
++static void CALLBACK progressive_process_tiles_batch_work_callback(PTP_CALLBACK_INSTANCE instance,
++                                                                   void* context, PTP_WORK work)
++{
++	PROGRESSIVE_TILE_PROCESS_WORK_PARAM* param = (PROGRESSIVE_TILE_PROCESS_WORK_PARAM*)context;
++
++	for (UINT32 i = 0; i < param->count; i++)
++		progressive_process_tiles_tile_work_callback(instance, &param[i], work);
++}
++
+ static inline SSIZE_T
+ progressive_process_tiles(PROGRESSIVE_CONTEXT* WINPR_RESTRICT progressive,
+                           wStream* WINPR_RESTRICT s,
+@@ -1804,12 +1818,20 @@
+ 		param->region = region;
+ 		param->context = context;
+ 		param->tile = tile;
++	}
++
++	for (UINT32 idx = 0; idx < region->numTiles; idx += PROGRESSIVE_TILES_PER_WORK)
++	{
++		RFX_PROGRESSIVE_TILE* tile = region->tiles[idx];
++		PROGRESSIVE_TILE_PROCESS_WORK_PARAM* param = &progressive->params[idx];
++		const UINT32 item = idx / PROGRESSIVE_TILES_PER_WORK;
++		param->count = MIN(PROGRESSIVE_TILES_PER_WORK, region->numTiles - idx);
+ 
+ 		if (progressive->rfx_context->priv->UseThreads)
+ 		{
+-			progressive->work_objects[idx] = CreateThreadpoolWork(
+-			    progressive_process_tiles_tile_work_callback, (void*)param, nullptr);
+-			if (!progressive->work_objects[idx])
++			progressive->work_objects[item] = CreateThreadpoolWork(
++			    progressive_process_tiles_batch_work_callback, (void*)param, nullptr);
++			if (!progressive->work_objects[item])
+ 			{
+ 				WLog_Print(progressive->log, WLOG_ERROR,
+ 				           "Failed to create ThreadpoolWork for tile %" PRIu32, idx);
+@@ -1817,13 +1839,13 @@
+ 				break;
+ 			}
+ 
+-			SubmitThreadpoolWork(progressive->work_objects[idx]);
++			SubmitThreadpoolWork(progressive->work_objects[item]);
+ 
+-			close_cnt = WINPR_ASSERTING_INT_CAST(UINT16, idx + 1);
++			close_cnt = WINPR_ASSERTING_INT_CAST(UINT16, item + 1);
+ 		}
+ 		else
+ 		{
+-			progressive_process_tiles_tile_work_callback(nullptr, param, nullptr);
++			progressive_process_tiles_batch_work_callback(nullptr, param, nullptr);
+ 		}
+ 
+ 		if (status < 0)

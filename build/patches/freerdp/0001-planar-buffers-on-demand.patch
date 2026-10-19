@@ -1,0 +1,48 @@
+--- a/libfreerdp/core/codecs.c
++++ b/libfreerdp/core/codecs.c
+@@ -186,7 +186,12 @@
+ 	{
+ 		if (codecs->planar)
+ 		{
+-			rc &= freerdp_bitmap_planar_context_reset(codecs->planar, width, height);
++			/* The planar buffers take 18 bytes a pixel. Sized for the whole
++			 * desktop, in this context and again in the graphics pipeline's,
++			 * that was over half of what a session used: 180 MB at 3440x1440,
++			 * for bitmaps that are mostly 64x64. planar_decompress grows them
++			 * to the largest bitmap that comes instead. */
++			rc &= freerdp_bitmap_planar_context_reset(codecs->planar, 64, 64);
+ 		}
+ 	}
+ 
+--- a/libfreerdp/codec/planar.c
++++ b/libfreerdp/codec/planar.c
+@@ -741,17 +741,19 @@
+ 	WINPR_ASSERT(planar);
+ 	WINPR_ASSERT(prims);
+ 
+-	if (planar->maxWidth < nSrcWidth)
++	/* The buffers are sized on demand (see freerdp_client_codecs_reset): grown
++	 * to fit this bitmap, keeping the colour order the caller set. */
++	if ((planar->maxWidth < nSrcWidth) || (planar->maxHeight < nSrcHeight))
+ 	{
+-		WLog_ERR(TAG, "planar->maxWidth %" PRIu32 " < nSrcWidth %" PRIu32, planar->maxWidth,
+-		         nSrcWidth);
+-		return FALSE;
+-	}
+-	if (planar->maxHeight < nSrcHeight)
+-	{
+-		WLog_ERR(TAG, "planar->maxHeight %" PRIu32 " < nSrcHeight %" PRIu32, planar->maxHeight,
+-		         nSrcHeight);
+-		return FALSE;
++		const BOOL bgr = planar->bgr;
++		if (!freerdp_bitmap_planar_context_reset(planar, MAX(planar->maxWidth, nSrcWidth),
++		                                         MAX(planar->maxHeight, nSrcHeight)))
++		{
++			WLog_ERR(TAG, "planar buffers could not grow to %" PRIu32 "x%" PRIu32, nSrcWidth,
++			         nSrcHeight);
++			return FALSE;
++		}
++		planar->bgr = bgr;
+ 	}
+ 
+ 	const UINT32 bpp = FreeRDPGetBytesPerPixel(DstFormat);

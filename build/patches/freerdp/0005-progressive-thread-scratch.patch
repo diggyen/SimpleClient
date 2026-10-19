@@ -1,0 +1,69 @@
+--- a/libfreerdp/codec/progressive.c
++++ b/libfreerdp/codec/progressive.c
+@@ -43,6 +43,12 @@
+ 
+ #define TAG FREERDP_TAG("codec.progressive")
+ 
++/* Scratch for decoding a tile, each thread its own. It came from a buffer pool
++ * that every decoding thread locked, for each tile and each of its components:
++ * waiting on that lock took a decoding thread longer than the DWT. */
++static WINPR_TLS _Alignas(16) BYTE progressive_tile_scratch[(8192 + 32) * 3];
++static WINPR_TLS _Alignas(16) INT16 progressive_dwt_scratch[4096];
++
+ typedef struct
+ {
+ 	BOOL nonLL;
+@@ -829,10 +835,7 @@
+ 			return -1;
+ 	}
+ 
+-	INT16* temp = (INT16*)BufferPool_Take(progressive->bufferPool, -1); /* DWT buffer */
+-
+-	if (!temp)
+-		return -2;
++	INT16* temp = progressive_dwt_scratch; /* DWT buffer */
+ 
+ 	if (!extrapolate)
+ 	{
+@@ -843,7 +846,6 @@
+ 		WINPR_ASSERT(progressive->rfx_context->dwt_2d_extrapolate_decode);
+ 		progressive->rfx_context->dwt_2d_extrapolate_decode(buffer, temp);
+ 	}
+-	BufferPool_Return(progressive->bufferPool, temp);
+ 	return 1;
+ }
+ 
+@@ -1050,7 +1052,7 @@
+ 	pCurrent[2] =
+ 	    WINPR_PACKED_ALIGN_CAST(INT16*, (&tile->current[((8192 + 32) * 2) + 16])); /* Cr/B buffer */
+ 
+-	pBuffer = (BYTE*)BufferPool_Take(progressive->bufferPool, -1);
++	pBuffer = progressive_tile_scratch;
+ 	pSrcDst[0] =
+ 	    WINPR_PACKED_ALIGN_CAST(INT16*, (&pBuffer[((8192 + 32) * 0) + 16])); /* Y/R buffer */
+ 	pSrcDst[1] =
+@@ -1079,7 +1081,6 @@
+ 		                                    progressive->format, &roi_64x64);
+ 	}
+ fail:
+-	BufferPool_Return(progressive->bufferPool, pBuffer);
+ 	return rc;
+ }
+ 
+@@ -1490,7 +1491,7 @@
+ 	pCurrent[2] =
+ 	    WINPR_PACKED_ALIGN_CAST(INT16*, (&tile->current[((8192 + 32) * 2) + 16])); /* Cr/B buffer */
+ 
+-	pBuffer = (BYTE*)BufferPool_Take(progressive->bufferPool, -1);
++	pBuffer = progressive_tile_scratch;
+ 	pSrcDst[0] =
+ 	    WINPR_PACKED_ALIGN_CAST(INT16*, (&pBuffer[((8192 + 32) * 0) + 16])); /* Y/R buffer */
+ 	pSrcDst[1] =
+@@ -1528,7 +1529,6 @@
+ 		                                        progressive->format, &roi_64x64);
+ 	}
+ fail:
+-	BufferPool_Return(progressive->bufferPool, pBuffer);
+ 	return status;
+ }
+ 

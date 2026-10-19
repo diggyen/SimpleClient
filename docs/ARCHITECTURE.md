@@ -197,6 +197,17 @@ FreeRDP's own channels. The kiosk starts one per session and talks to it over
 two pipes, described at the top of `sc-rdp.c`; the password never goes on its
 command line. With no DRM device it draws into the fbdev framebuffer instead.
 
+FreeRDP is built from its release with the patches in `build/patches/freerdp/`,
+measured on a 1080p session (the Dockerfile has the numbers):
+
+| Patch | Why |
+| --- | --- |
+| `0001` | the planar codec's buffers were sized for the whole desktop, twice: 345 MB at 3440x1440 |
+| `0002` | the progressive (RemoteFX) codec's inverse DWT had no SSE2 version, and was a third of decoding video |
+| `0003` | progressive tiles went to the thread pool one at a time |
+| `0004` | H.264 was decoded on one thread; a frame's slices now go side by side |
+| `0005` | progressive tiles took their scratch buffers from one pool, locked from every thread |
+
 Where the engine cannot run — it is missing, or finds no display at all —
 `internal/rdp` falls back to a built-in client, `github.com/tomatome/grdp`,
 which is vendored and patched. It decodes legacy bitmap updates only, into the

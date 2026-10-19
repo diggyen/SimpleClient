@@ -169,6 +169,16 @@ adds it, and turns KDE's compositor off in remote sessions, which have no GPU
 for it. Plasma 6.8 and later have none (Arch, openSUSE Tumbleweed), nor does
 the newest GNOME: remote sessions there need a second desktop, such as Xfce.
 
+Video in a browser is decoded and drawn on the server, in software, and goes to
+the kiosk as the screen it changes. A 1080p film at 30 fps, in Firefox or in
+Chrome, played on a 4-vCPU VM without a dropped frame and reached the kiosk at
+all 30 frames a second; it took the server about 1.8 cores, for each viewer.
+Over RemoteFX the kiosk spent 1.0 core on it (of a 2 GHz Xeon) and the network
+21 Mbit/s; over H.264, 0.6 core and 5.5 Mbit/s. So `--h264` suits kiosks with
+old CPUs and slow links, while RemoteFX stays the smoother for dragging windows
+about. A 60 fps film reaches the kiosk at 30 to 35, and Chrome drops a sixth of
+its frames on the way.
+
 ## Build it
 
 Needs Docker. The kernel, initramfs and ISO are produced inside the build
@@ -235,7 +245,7 @@ go missing. See [ARCHITECTURE.md](docs/ARCHITECTURE.md#rdp).
 ## Requirements
 
 - x86-64 machine, UEFI or BIOS, Secure Boot on or off
-- 512 MB RAM
+- 512 MB RAM for a 1920x1080 display, 768 MB for 3440x1440, 1 GB for 4K
 - A wired NIC, or a wireless card or USB stick (Intel, Realtek, MediaTek,
   Qualcomm Atheros, Broadcom, Marvell, Ralink), with a driver in Debian's kernel
 - An RDP server: one on the kiosk's subnet is found by itself, one anywhere

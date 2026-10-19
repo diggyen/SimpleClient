@@ -148,11 +148,25 @@ RUN set -e; mkdir -p /src; cd /src; \
         --enable-swscale --enable-pthreads --disable-debug; \
     make -j"$(nproc)"; make install
 
+# build/patches/freerdp/: what a session costs.
+#   0001  FreeRDP sized its planar buffers for the whole desktop, twice: 67
+#         bytes a pixel in all, 345 MB at 3440x1440, which a 768 MB kiosk did
+#         not have.
+#   0002-0005  Decoding video. A 1080p film at 30 fps in a browser took a
+#         kiosk 2.2 cores over RemoteFX and 0.8 over H.264; it takes 1.0 and
+#         0.6. The progressive codec's inverse DWT in SSE2 (ARM had NEON): 5.9
+#         times as fast, and the same to the bit. Its tiles go to the thread
+#         pool eight at a time, with each thread's own scratch buffers: the
+#         pool's lock and wakeups for every tile had cost more than the DWT.
+#         And H.264 decodes a frame's slices side by side, as many as the
+#         server cuts it into, where FreeRDP left libavcodec on one thread.
+COPY build/patches/freerdp/ /src/freerdp-patches/
 RUN set -e; cd /src; \
     curl -fsSLo freerdp.tar.gz \
         "https://github.com/FreeRDP/FreeRDP/releases/download/${FREERDP_VERSION}/freerdp-${FREERDP_VERSION}.tar.gz"; \
     echo "${FREERDP_SHA256}  freerdp.tar.gz" | sha256sum -c -; \
     tar -xzf freerdp.tar.gz; \
+    for p in /src/freerdp-patches/*.patch; do patch -d "freerdp-${FREERDP_VERSION}" -p1 < "$p"; done; \
     cmake -S "freerdp-${FREERDP_VERSION}" -B freerdp-build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib \
         -DBUILD_TESTING=OFF -DWITH_MANPAGES=OFF -DWITH_SAMPLE=OFF \

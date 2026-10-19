@@ -1,0 +1,16 @@
+--- a/libfreerdp/codec/h264_ffmpeg.c
++++ b/libfreerdp/codec/h264_ffmpeg.c
+@@ -1369,6 +1369,13 @@
+ 			goto EXCEPTION;
+ 		}
+ 
++		/* A frame's slices side by side, a thread for each core: libavcodec
++		 * decodes on one thread unless told, and a server's encoder (xrdp's
++		 * x264) cuts a frame into a slice for each of its threads. Not frame
++		 * threads: they would hold frames back, a delay a session cannot have. */
++		sys->codecDecoderContext->thread_type = FF_THREAD_SLICE;
++		sys->codecDecoderContext->thread_count = 0;
++
+ #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(59, 18, 100)
+ 		if (sys->codecDecoder->capabilities & AV_CODEC_CAP_TRUNCATED)
+ 		{

@@ -1,0 +1,207 @@
+--- a/libfreerdp/codec/sse/rfx_sse2.c
++++ b/libfreerdp/codec/sse/rfx_sse2.c
+@@ -469,6 +469,196 @@
+ 	rfx_dwt_2d_encode_block_sse2(buffer + 3072, dwt_buffer, 16);
+ 	rfx_dwt_2d_encode_block_sse2(buffer + 3840, dwt_buffer, 8);
+ }
++
++/* The progressive codec's inverse DWT with reduce-extrapolate, the same to the
++ * bit as progressive_rfx_dwt_2d_decode_block: its clamps are saturating adds
++ * and subtracts here, and (a + b) / 2 rounds toward zero as C does in int. */
++
++/* (a + b) / 2 in int: rounded toward zero, without the 16-bit sum overflowing. */
++static inline __m128i __attribute__((ATTRIBUTES)) mm_half_sum_epi16(__m128i a, __m128i b)
++{
++	const __m128i one = _mm_set1_epi16(1);
++	/* rounded down: a / 2 + b / 2, and one more when both are odd */
++	const __m128i down = _mm_add_epi16(_mm_add_epi16(_mm_srai_epi16(a, 1), _mm_srai_epi16(b, 1)),
++	                                   _mm_and_si128(_mm_and_si128(a, b), one));
++	/* an odd sum below zero rounds up instead */
++	const __m128i odd = _mm_and_si128(_mm_xor_si128(a, b), one);
++	return _mm_add_epi16(down, _mm_and_si128(odd, _mm_srai_epi16(down, 15)));
++}
++
++/* clampi16((x0 + x2) / 2 + 2 * h): the first add saturates only where the
++ * second would too, both adding h. */
++static inline __m128i __attribute__((ATTRIBUTES)) mm_idwt_odd_epi16(__m128i x0, __m128i x2,
++                                                                   __m128i h)
++{
++	const __m128i half = mm_half_sum_epi16(x0, x2);
++	return _mm_adds_epi16(_mm_adds_epi16(half, h), h);
++}
++
++static inline INT16 rfx_clamp16(INT32 val)
++{
++	if (val < INT16_MIN)
++		return INT16_MIN;
++	if (val > INT16_MAX)
++		return INT16_MAX;
++	return (INT16)val;
++}
++
++/* progressive_rfx_idwt_x along each row, 8 coefficients at a time. A row has
++ * one low coefficient more than high ones (levels 2 and 3) or two more (level
++ * 1, where the high band goes on with zeros); either way the odd outputs come
++ * to a multiple of 8. */
++static inline void __attribute__((ATTRIBUTES))
++rfx_idwt_extrapolate_horiz_sse2(const INT16* WINPR_RESTRICT pLowBand, size_t nLowStep,
++                                const INT16* WINPR_RESTRICT pHighBand, size_t nHighStep,
++                                INT16* WINPR_RESTRICT pDstBand, size_t nDstStep, size_t nLowCount,
++                                size_t nHighCount, size_t nDstCount)
++{
++	const BOOL extrapolate = nLowCount > nHighCount + 1;
++	const size_t nOdd = nLowCount - 1;
++	const size_t nBatches = nOdd / 8;
++
++	WINPR_ASSERT(nOdd % 8 == 0);
++	WINPR_ASSERT(nBatches <= 4);
++	WINPR_ASSERT(nHighCount == (extrapolate ? nOdd - 1 : nOdd));
++
++	for (size_t y = 0; y < nDstCount; y++)
++	{
++		const INT16* pL = &pLowBand[y * nLowStep];
++		const INT16* pH = &pHighBand[y * nHighStep];
++		INT16* pX = &pDstBand[y * nDstStep];
++		__m128i even[4];
++		__m128i high[4];
++
++		for (size_t i = 0; i < nBatches; i++)
++		{
++			const size_t n = 8 * i;
++			/* H[n] ... H[n + 7], a zero past the band's end at level 1 */
++			const __m128i h = (n + 8 <= nHighCount) ? LOAD_SI128(&pH[n])
++			                                        : _mm_srli_si128(LOAD_SI128(&pH[n - 1]), 2);
++			/* H[n - 1] ... H[n + 6], H[0] again before the band */
++			const __m128i h_m = (n == 0) ? _mm_insert_epi16(_mm_slli_si128(h, 2), pH[0], 0)
++			                             : LOAD_SI128(&pH[n - 1]);
++
++			/* X[2n] = L[n] - (H[n - 1] + H[n]) / 2 */
++			even[i] = _mm_subs_epi16(LOAD_SI128(&pL[n]), mm_half_sum_epi16(h_m, h));
++			high[i] = h;
++		}
++
++		/* The even coefficient after the batches: L[nOdd] less the last high
++		 * one, which stands in for the one after it, or at level 1 L[nOdd]
++		 * itself, the high band having run out into zeros. */
++		const INT16 last =
++		    extrapolate ? pL[nOdd] : rfx_clamp16((INT32)pL[nOdd] - pH[nHighCount - 1]);
++
++		for (size_t i = 0; i < nBatches; i++)
++		{
++			/* X[2n + 2] ... */
++			__m128i even_p = _mm_srli_si128(even[i], 2);
++			if (i + 1 < nBatches)
++				even_p = _mm_or_si128(even_p, _mm_slli_si128(even[i + 1], 14));
++			else
++				even_p = _mm_insert_epi16(even_p, last, 7);
++
++			/* X[2n + 1] = (X[2n] + X[2n + 2]) / 2 + 2 * H[n] */
++			const __m128i odd = mm_idwt_odd_epi16(even[i], even_p, high[i]);
++			STORE_SI128(&pX[16 * i], _mm_unpacklo_epi16(even[i], odd));
++			STORE_SI128(&pX[16 * i + 8], _mm_unpackhi_epi16(even[i], odd));
++		}
++
++		if (!extrapolate)
++			pX[2 * nOdd] = last;
++	}
++}
++
++/* progressive_rfx_idwt_y down 8 columns at a time. When the width is no
++ * multiple of 8, the last 8 overlap the ones before and come out the same. */
++static inline void __attribute__((ATTRIBUTES))
++rfx_idwt_extrapolate_vert_sse2(const INT16* WINPR_RESTRICT pLowBand, size_t nLowStep,
++                               const INT16* WINPR_RESTRICT pHighBand, size_t nHighStep,
++                               INT16* WINPR_RESTRICT pDstBand, size_t nDstStep, size_t nLowCount,
++                               size_t nHighCount, size_t nDstCount)
++{
++	WINPR_ASSERT(nDstCount >= 8);
++	WINPR_ASSERT((nLowCount == nHighCount + 1) || (nLowCount == nHighCount + 2));
++
++	for (size_t i = 0; i < nDstCount; i += 8)
++	{
++		const size_t x = (i + 8 <= nDstCount) ? i : nDstCount - 8;
++		const INT16* pL = &pLowBand[x];
++		const INT16* pH = &pHighBand[x];
++		INT16* pX = &pDstBand[x];
++		__m128i h0 = LOAD_SI128(pH);
++		__m128i x0 = _mm_subs_epi16(LOAD_SI128(pL), h0);
++
++		for (size_t n = 1; n < nHighCount; n++)
++		{
++			const __m128i h1 = LOAD_SI128(&pH[n * nHighStep]);
++			const __m128i x2 =
++			    _mm_subs_epi16(LOAD_SI128(&pL[n * nLowStep]), mm_half_sum_epi16(h0, h1));
++			STORE_SI128(pX, x0);
++			STORE_SI128(&pX[nDstStep], mm_idwt_odd_epi16(x0, x2, h0));
++			pX += 2 * nDstStep;
++			x0 = x2;
++			h0 = h1;
++		}
++
++		const __m128i l0 = LOAD_SI128(&pL[nHighCount * nLowStep]);
++		if (nLowCount == nHighCount + 1)
++		{
++			const __m128i x2 = _mm_subs_epi16(l0, h0);
++			STORE_SI128(pX, x0);
++			STORE_SI128(&pX[nDstStep], mm_idwt_odd_epi16(x0, x2, h0));
++			STORE_SI128(&pX[2 * nDstStep], x2);
++		}
++		else
++		{
++			/* the high band runs out into zeros */
++			const __m128i x2 = _mm_subs_epi16(l0, mm_half_sum_epi16(h0, _mm_setzero_si128()));
++			const __m128i l1 = LOAD_SI128(&pL[(nHighCount + 1) * nLowStep]);
++			STORE_SI128(pX, x0);
++			STORE_SI128(&pX[nDstStep], mm_idwt_odd_epi16(x0, x2, h0));
++			STORE_SI128(&pX[2 * nDstStep], x2);
++			STORE_SI128(&pX[3 * nDstStep], mm_half_sum_epi16(x2, l1));
++		}
++	}
++}
++
++static inline void __attribute__((ATTRIBUTES))
++rfx_dwt_2d_extrapolate_decode_block_sse2(INT16* WINPR_RESTRICT buffer, INT16* WINPR_RESTRICT temp,
++                                         size_t level)
++{
++	const size_t nBandL = (64 >> level) + 1;
++	const size_t nBandH = (level == 1) ? 31 : ((64 + (1u << (level - 1))) >> level);
++	const size_t nDstStep = nBandL + nBandH;
++	const INT16* HL = &buffer[0];
++	const INT16* LH = &HL[nBandH * nBandL];
++	const INT16* HH = &LH[nBandL * nBandH];
++	const INT16* LL = &HH[nBandH * nBandH];
++	INT16* L = &temp[0];
++	INT16* H = &temp[nBandL * nDstStep];
++
++	/* horizontal (LL + HL -> L) */
++	rfx_idwt_extrapolate_horiz_sse2(LL, nBandL, HL, nBandH, L, nDstStep, nBandL, nBandH, nBandL);
++
++	/* horizontal (LH + HH -> H) */
++	rfx_idwt_extrapolate_horiz_sse2(LH, nBandL, HH, nBandH, H, nDstStep, nBandL, nBandH, nBandH);
++
++	/* vertical (L + H -> LL) */
++	rfx_idwt_extrapolate_vert_sse2(L, nDstStep, H, nDstStep, buffer, nDstStep, nBandL, nBandH,
++	                               nDstStep);
++}
++
++static void rfx_dwt_2d_extrapolate_decode_sse2(INT16* WINPR_RESTRICT buffer,
++                                               INT16* WINPR_RESTRICT dwt_buffer)
++{
++	WINPR_ASSERT(buffer);
++	WINPR_ASSERT(dwt_buffer);
++
++	rfx_dwt_2d_extrapolate_decode_block_sse2(&buffer[3807], dwt_buffer, 3);
++	rfx_dwt_2d_extrapolate_decode_block_sse2(&buffer[3007], dwt_buffer, 2);
++	rfx_dwt_2d_extrapolate_decode_block_sse2(&buffer[0], dwt_buffer, 1);
++}
+ #endif
+ 
+ void rfx_init_sse2_int(RFX_CONTEXT* WINPR_RESTRICT context)
+@@ -483,6 +673,7 @@
+ 	context->quantization_encode = rfx_quantization_encode_sse2;
+ 	context->dwt_2d_decode = rfx_dwt_2d_decode_sse2;
+ 	context->dwt_2d_encode = rfx_dwt_2d_encode_sse2;
++	context->dwt_2d_extrapolate_decode = rfx_dwt_2d_extrapolate_decode_sse2;
+ #else
+ 	WINPR_UNUSED(context);
+ 	WLog_VRB(PRIM_TAG, "undefined WITH_SIMD or SSE2 intrinsics not available");
