@@ -79,6 +79,30 @@ The kiosk reaches **its own subnet only**. A server on another subnet is not
 discovered, but it can be added by hand: `rdphost=<ip>` on the GRUB command line
 puts it in the list ready to connect.
 
+## Linux servers
+
+Windows serves the kiosk as it is. A Linux desktop needs xrdp, and the one
+distributions package (0.9 on Ubuntu 24.04 and Linux Mint 22) sends the screen
+as bitmaps: no H.264, a fraction of the frame rate. One script, run once on the
+server, builds xrdp 0.10 with H.264 and sets it up for the kiosks — up to 120
+fps, sound both ways through PipeWire or PulseAudio, the Turkish keyboards
+(which xrdp does not map), the machine's own desktop for every user, no polkit
+prompts, port 3389 open:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/diggyen/SimpleClient/iyilestirme/server/simpleclient-server.sh
+sudo bash simpleclient-server.sh
+```
+
+Tested on Ubuntu 24.04 and 22.04 (the bases of Linux Mint 22 and 21) and
+Fedora 42; Debian, openSUSE and Arch are attempted. Fedora's own repositories
+have no x264, so there it builds with Cisco's OpenH264, which encodes about a
+quarter fewer frames (55 fps against 75 on the same machine); with RPM Fusion
+enabled it takes x264. Run it again after a distribution upgrade.
+`--session NAME` picks the desktop when there are several (`cinnamon`, `mate`,
+`xfce`, `plasmax11`, ...). A desktop that runs only on Wayland cannot be served
+by xrdp.
+
 ## Build it
 
 Needs Docker. The kernel, initramfs and ISO are produced inside the build
