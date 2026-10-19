@@ -114,6 +114,80 @@ RUN set -e; \
     test -f /kernel/new/vmlinuz; test -f /kernel/lts/vmlinuz; \
     ls -l /signed/usr/lib/shim /signed/usr/lib/grub/x86_64-efi-signed
 
+# ── Session engine ────────────────────────────────────────────────────────────
+# sc-rdp (engine/): FreeRDP drawing straight to the display through KMS, with
+# the graphics pipeline's H.264 for frame rates the bitmap protocol cannot
+# reach, and FreeRDP's own channels for sound, microphone, USB devices and
+# smart cards. The kiosk falls back to its built-in client where it cannot run.
+#
+# FFmpeg is built with the H.264 decoder and swscale and nothing else: Alpine's
+# ffmpeg-libs would bring every codec there is, tens of megabytes the initramfs
+# would carry for nothing. FreeRDP is built without its X11, Wayland and SDL
+# clients, its server side and everything that would want a desktop.
+#
+# The sources are checked against their published SHA-256 (FreeRDP's release
+# .sha256; FFmpeg's tarball, whose signature by the FFmpeg release key was
+# checked when the sum was taken).
+FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS rdp-builder
+ARG FFMPEG_VERSION=8.1.3
+ARG FFMPEG_SHA256=7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3
+ARG FREERDP_VERSION=3.32.2
+ARG FREERDP_SHA256=e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c
+
+RUN apk add --no-cache build-base cmake samurai nasm pkgconf curl linux-headers \
+        openssl-dev zlib-dev alsa-lib-dev libusb-dev pcsc-lite-dev libdrm-dev
+
+RUN set -e; mkdir -p /src; cd /src; \
+    curl -fsSLo ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | sha256sum -c -; \
+    tar -xJf ffmpeg.tar.xz; cd "ffmpeg-${FFMPEG_VERSION}"; \
+    ./configure --prefix=/usr --libdir=/usr/lib --enable-shared --disable-static \
+        --disable-programs --disable-doc --disable-network --disable-autodetect \
+        --disable-everything --enable-decoder=h264 --enable-parser=h264 \
+        --disable-avformat --disable-avdevice --disable-avfilter --disable-swresample \
+        --enable-swscale --enable-pthreads --disable-debug; \
+    make -j"$(nproc)"; make install
+
+RUN set -e; cd /src; \
+    curl -fsSLo freerdp.tar.gz \
+        "https://github.com/FreeRDP/FreeRDP/releases/download/${FREERDP_VERSION}/freerdp-${FREERDP_VERSION}.tar.gz"; \
+    echo "${FREERDP_SHA256}  freerdp.tar.gz" | sha256sum -c -; \
+    tar -xzf freerdp.tar.gz; \
+    cmake -S "freerdp-${FREERDP_VERSION}" -B freerdp-build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib \
+        -DBUILD_TESTING=OFF -DWITH_MANPAGES=OFF -DWITH_SAMPLE=OFF \
+        -DWITH_CLIENT=ON -DWITH_CLIENT_COMMON=ON -DWITH_CLIENT_CHANNELS=ON \
+        -DWITH_CLIENT_SDL=OFF -DWITH_X11=OFF -DWITH_WAYLAND=OFF \
+        -DWITH_SERVER=OFF -DWITH_SERVER_CHANNELS=OFF -DWITH_SHADOW=OFF -DWITH_PROXY=OFF \
+        -DWITH_PLATFORM_SERVER=OFF -DWITH_RDTK=OFF -DWITH_WINPR_TOOLS=OFF \
+        -DWITH_FFMPEG=ON -DWITH_VIDEO_FFMPEG=ON -DWITH_DSP_FFMPEG=OFF -DWITH_SWSCALE=ON \
+        -DWITH_OPENH264=OFF -DWITH_GFX_AV1=OFF \
+        -DWITH_ALSA=ON -DWITH_PULSE=OFF -DWITH_OSS=OFF -DWITH_SNDIO=OFF \
+        -DWITH_OPUS=OFF -DWITH_FDK_AAC=OFF -DWITH_SOXR=OFF \
+        -DWITH_PCSC=ON -DWITH_PKCS11=OFF -DWITH_KRB5=OFF \
+        -DWITH_CUPS=OFF -DWITH_FUSE=OFF -DWITH_CAIRO=OFF \
+        -DWITH_JPEG=OFF -DWITH_PNG=OFF -DWITH_WEBP=OFF -DWITH_LODEPNG=OFF \
+        -DWINPR_UTILS_IMAGE_PNG=OFF -DWINPR_UTILS_IMAGE_JPEG=OFF -DWINPR_UTILS_IMAGE_WEBP=OFF \
+        -DWITH_JSON_DISABLED=ON -DWITH_AAD=OFF -DWITH_URIPARSER=OFF -DWITH_SSO_MIB=OFF \
+        -DWITH_SYSTEMD=OFF -DWITH_UNICODE_BUILTIN=ON -DWITH_TIMEZONE_ICU=OFF \
+        -DWITH_INTERNAL_MD4=ON -DWITH_INTERNAL_MD5=ON -DWITH_INTERNAL_RC4=ON \
+        -DWITH_SIMD=ON -DWITH_VERBOSE_WINPR_ASSERT=OFF -DWITH_FREERDP_DEPRECATED_COMMANDLINE=OFF; \
+    cmake --build freerdp-build; \
+    cmake --install freerdp-build
+
+COPY engine/ /src/engine/
+COPY build/copy-bins.sh /usr/local/bin/copy-bins
+# yuv_test checks the engine's own YUV conversion against FreeRDP's, byte for
+# byte; a difference stops the build.
+RUN set -e; chmod +x /usr/local/bin/copy-bins; \
+    FLAGS="$(pkg-config --cflags --libs freerdp-client3 freerdp3 winpr3 libdrm) -lpthread"; \
+    cc -O2 -Wall -o /tmp/yuv_test /src/engine/yuv_test.c /src/engine/yuv.c $FLAGS; \
+    /tmp/yuv_test; \
+    cc -O2 -Wall -o /usr/bin/sc-rdp /src/engine/sc-rdp.c /src/engine/kms.c /src/engine/yuv.c $FLAGS; \
+    copy-bins /out sc-rdp; \
+    if [ -d /usr/lib/freerdp3 ]; then mkdir -p /out/usr/lib; cp -a /usr/lib/freerdp3 /out/usr/lib/; fi; \
+    find /out -type f | sort; du -sh /out
+
 # ── Initramfs ─────────────────────────────────────────────────────────────────
 # One initramfs with everything but the kernel modules, and one modules archive
 # per kernel. GRUB loads the initramfs and the archive that matches the kernel
@@ -169,6 +243,7 @@ RUN set -e; chmod +x /usr/local/bin/copy-bins; \
     du -sh /rootfs/usr /rootfs/lib
 
 COPY --from=go-builder /out/simpleclient /rootfs/sbin/simpleclient
+COPY --from=rdp-builder /out/ /rootfs/
 COPY build/init /rootfs/init
 COPY build/udhcpc-default.script /rootfs/usr/share/udhcpc/default.script
 COPY build/sc-install /rootfs/sbin/sc-install

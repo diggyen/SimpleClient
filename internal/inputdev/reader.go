@@ -33,7 +33,7 @@ type InputEvent struct {
 	DX, DY  int  // Relative mouse movement
 	MouseX  int  // Absolute mouse X (clamped)
 	MouseY  int  // Absolute mouse Y (clamped)
-	Button  int  // 1=left, 2=right, 3=middle (EvMouseButton)
+	Button  int  // 1=left, 2=right, 3=middle, 8=back, 9=forward (EvMouseButton)
 	Pressed bool // true on press, false on release
 	Wheel   int  // notches (EvMouseWheel), positive = away from the user
 }
@@ -92,8 +92,8 @@ const (
 // dropped again when they are unplugged.
 type Reader struct {
 	events  chan InputEvent
-	screenW int
-	screenH int
+	screenW int64 // atomic: the pointer's range, which a session may change
+	screenH int64 // atomic
 	mouseX  int64 // atomic
 	mouseY  int64 // atomic
 	shiftOn int32 // atomic bool (1=shifted)
@@ -144,8 +144,8 @@ func NewAuto(screenW, screenH int) *Reader {
 func newReader(screenW, screenH int) *Reader {
 	r := &Reader{
 		events:  make(chan InputEvent, 256),
-		screenW: screenW,
-		screenH: screenH,
+		screenW: int64(screenW),
+		screenH: int64(screenH),
 		quit:    make(chan struct{}),
 		open:    map[string]*os.File{},
 	}
@@ -153,6 +153,33 @@ func newReader(screenW, screenH int) *Reader {
 	atomic.StoreInt64(&r.mouseX, int64(screenW/2))
 	atomic.StoreInt64(&r.mouseY, int64(screenH/2))
 	return r
+}
+
+func (r *Reader) screen() (int, int) {
+	return int(atomic.LoadInt64(&r.screenW)), int(atomic.LoadInt64(&r.screenH))
+}
+
+// SetScreen changes the pointer's range, keeping it at the same place relative
+// to the screen: a session engine can drive the display at another resolution
+// than the console's, and the pointer has to reach all of it.
+func (r *Reader) SetScreen(w, h int) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	ow, oh := r.screen()
+	x, y := r.MousePos()
+	atomic.StoreInt64(&r.screenW, int64(w))
+	atomic.StoreInt64(&r.screenH, int64(h))
+	if ow > 0 && oh > 0 {
+		r.Warp(x*w/ow, y*h/oh)
+	}
+}
+
+// Warp puts the pointer at (x, y), as when the remote desktop moves it.
+func (r *Reader) Warp(x, y int) {
+	w, h := r.screen()
+	atomic.StoreInt64(&r.mouseX, int64(clampMouse(x, w)))
+	atomic.StoreInt64(&r.mouseY, int64(clampMouse(y, h)))
 }
 
 // Devices lists the evdev nodes currently being read, for the boot log.
@@ -446,7 +473,8 @@ func (r *Reader) padDelta(info deviceInfo, dx, dy int32, ax, ay *float64) (int, 
 	if sx == 0 || sy == 0 {
 		return int(dx), int(dy)
 	}
-	f := 1.5 * float64(r.screenW) / float64(sx)
+	w, _ := r.screen()
+	f := 1.5 * float64(w) / float64(sx)
 	*ax += float64(dx) * f
 	*ay += float64(dy) * f
 	ix, iy := int(*ax), int(*ay)
@@ -456,12 +484,13 @@ func (r *Reader) padDelta(info deviceInfo, dx, dy int32, ax, ay *float64) (int, 
 }
 
 func (r *Reader) moveBy(dx, dy int) {
+	w, h := r.screen()
 	if dx != 0 {
-		x := clampMouse(int(atomic.LoadInt64(&r.mouseX))+dx, r.screenW)
+		x := clampMouse(int(atomic.LoadInt64(&r.mouseX))+dx, w)
 		atomic.StoreInt64(&r.mouseX, int64(x))
 	}
 	if dy != 0 {
-		y := clampMouse(int(atomic.LoadInt64(&r.mouseY))+dy, r.screenH)
+		y := clampMouse(int(atomic.LoadInt64(&r.mouseY))+dy, h)
 		atomic.StoreInt64(&r.mouseY, int64(y))
 	}
 }
@@ -471,10 +500,11 @@ func (r *Reader) moveTo(info deviceInfo, ax, ay int32) {
 	if sx == 0 || sy == 0 {
 		return
 	}
-	x := int(int64(ax-info.absX.min) * int64(r.screenW-1) / int64(sx))
-	y := int(int64(ay-info.absY.min) * int64(r.screenH-1) / int64(sy))
-	atomic.StoreInt64(&r.mouseX, int64(clampMouse(x, r.screenW)))
-	atomic.StoreInt64(&r.mouseY, int64(clampMouse(y, r.screenH)))
+	w, h := r.screen()
+	x := int(int64(ax-info.absX.min) * int64(w-1) / int64(sx))
+	y := int(int64(ay-info.absY.min) * int64(h-1) / int64(sy))
+	atomic.StoreInt64(&r.mouseX, int64(clampMouse(x, w)))
+	atomic.StoreInt64(&r.mouseY, int64(clampMouse(y, h)))
 }
 
 func abs(v int) int {
@@ -494,6 +524,10 @@ func (r *Reader) handleButton(code int, value int32) bool {
 		btn = 2
 	case BtnMiddle:
 		btn = 3
+	case BtnSide:
+		btn = 8 // back
+	case BtnExtra:
+		btn = 9 // forward
 	}
 	if btn == 0 || value == keyRepeat {
 		return true

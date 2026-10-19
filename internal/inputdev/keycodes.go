@@ -43,6 +43,8 @@ const (
 	BtnLeft   = 0x110
 	BtnRight  = 0x111
 	BtnMiddle = 0x112
+	BtnSide   = 0x113 // back, on mice that have it
+	BtnExtra  = 0x114 // forward
 )
 
 // Layout identifies a keyboard layout. Only the credential dialog is affected:

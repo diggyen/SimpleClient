@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"image"
 	"strings"
 	"time"
@@ -18,11 +19,22 @@ import (
 
 // SessionState holds the state of an active RDP session.
 type SessionState struct {
-	Host      domain.Host
-	Client    *rdp.Client
+	Host   domain.Host
+	Client rdp.Session
+	// Writer paints the built-in client's frames; nil when the engine runs
+	// the session, since it draws the desktop itself.
 	Writer    *rdp.FrameWriter
 	Connected bool
 	Error     string
+}
+
+// pointer is the part of the input reader a session needs: the engine can
+// drive the display at another resolution than the console's, and the remote
+// desktop can move the pointer.
+type pointer interface {
+	SetScreen(w, h int)
+	Warp(x, y int)
+	MousePos() (int, int)
 }
 
 // Run is the main kiosk loop. It never returns.
@@ -33,6 +45,9 @@ type SessionState struct {
 // the RDP frame loop both run outside it — so holding it across a render is safe.
 func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg config.Config) {
 	state := &UIState{}
+	if input != nil {
+		state.pointer = input
+	}
 	state.Boot = bootenv.Current()
 	state.CanInstall = !state.Boot.Installed()
 	if state.Boot.Installed() {
@@ -441,7 +456,7 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	// connect time, so it follows the one selected on the kiosk (F3).
 	rdp.KeyboardLayout = rdp.LayoutID(string(inputdev.CurrentLayout()))
 
-	client, err := rdp.New(addr, creds, fb.Width(), fb.Height())
+	client, err := dial(state, addr, creds, fb)
 	if err != nil {
 		state.Mu.Lock()
 		state.Modal.Error = rdpErrToMessage(err)
@@ -487,7 +502,7 @@ var reconnectDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Sec
 
 // reconnect retries a failed session, showing the connecting screen meanwhile.
 // It returns nil once every attempt has failed.
-func reconnect(state *UIState, addr string, creds rdp.Credentials, fb framebuffer.Device) *rdp.Client {
+func reconnect(state *UIState, addr string, creds rdp.Credentials, fb framebuffer.Device) rdp.Session {
 	state.Mu.Lock()
 	state.Transition(ScreenConnecting)
 	state.Dirty = true
@@ -495,16 +510,42 @@ func reconnect(state *UIState, addr string, creds rdp.Credentials, fb framebuffe
 
 	for _, d := range reconnectDelays {
 		time.Sleep(d)
-		if c, err := rdp.New(addr, creds, fb.Width(), fb.Height()); err == nil {
+		if c, err := dial(state, addr, creds, fb); err == nil {
 			return c
 		}
 	}
 	return nil
 }
 
+// dial connects through the session engine, and through the built-in client
+// where the engine cannot run: no engine in the image, no display KMS can
+// drive (a firmware framebuffer on a machine whose GPU has no driver).
+func dial(state *UIState, addr string, creds rdp.Credentials, fb framebuffer.Device) (rdp.Session, error) {
+	var onPointer func(x, y int)
+	if state.pointer != nil {
+		onPointer = state.pointer.Warp
+	}
+	e, err := rdp.StartEngine(addr, creds, onPointer)
+	if err == nil {
+		return e, nil
+	}
+	if !errors.Is(err, rdp.ErrNoEngine) {
+		return nil, err
+	}
+	c, err := rdp.New(addr, creds, fb.Width(), fb.Height())
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 // runSession shows one live connection until it ends.
-func runSession(state *UIState, fb framebuffer.Device, session **SessionState, host domain.Host, client *rdp.Client) {
-	writer := &rdp.FrameWriter{FB: fb}
+func runSession(state *UIState, fb framebuffer.Device, session **SessionState, host domain.Host, client rdp.Session) {
+	builtin, isBuiltin := client.(*rdp.Client)
+	var writer *rdp.FrameWriter
+	if isBuiltin {
+		writer = &rdp.FrameWriter{FB: fb}
+	}
 	state.Mu.Lock()
 	*session = &SessionState{
 		Host:      host,
@@ -516,12 +557,26 @@ func runSession(state *UIState, fb framebuffer.Device, session **SessionState, h
 	mx, my := state.MouseX, state.MouseY
 	state.Mu.Unlock()
 
+	if !isBuiltin {
+		// The engine draws the desktop and the pointer itself, at the
+		// display's own mode, which the pointer's range follows for the
+		// session.
+		if e, ok := client.(*rdp.Engine); ok && state.pointer != nil && e.Width > 0 && e.Height > 0 {
+			state.pointer.SetScreen(e.Width, e.Height)
+			defer state.pointer.SetScreen(fb.Width(), fb.Height())
+			x, y := state.pointer.MousePos()
+			_ = client.SendMouse(x, y, 0)
+		}
+		<-client.Done()
+		return
+	}
+
 	// Show the pointer straight away rather than waiting for the first mouse
 	// movement.
 	writer.MoveCursor(mx, my)
 
 	// RDP frame rendering loop (blocks until connection closes).
-	for update := range client.Frames() {
+	for update := range builtin.Frames() {
 		writer.WriteUpdate(update)
 	}
 }
@@ -540,6 +595,18 @@ func disconnect(state *UIState, session *SessionState) {
 func rdpErrToMessage(err error) string {
 	if err == nil {
 		return ""
+	}
+	// The engine has already sorted its failures.
+	var ee *rdp.EngineError
+	if errors.As(err, &ee) {
+		switch ee.Class {
+		case "auth":
+			return i18n.T(i18n.ErrAuthFailed)
+		case "unreachable":
+			return i18n.T(i18n.ErrTimeout)
+		case "refused":
+			return i18n.T(i18n.ErrRefused)
+		}
 	}
 	msg := err.Error()
 	lower := strings.ToLower(msg)

@@ -159,6 +159,10 @@ var (
 	mixerDone = map[string]bool{}
 )
 
+// PrepareMixer sets a card's mixer up as playing or recording through the
+// kiosk does, for a player that opens the card itself: the session engine.
+func PrepareMixer(card int) { ensureMixer(card) }
+
 // ensureMixer initialises one card's mixer, once per card id — a USB headset
 // plugged in after boot gets the same treatment the first time it is used.
 func ensureMixer(card int) {

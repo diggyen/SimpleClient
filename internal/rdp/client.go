@@ -343,8 +343,12 @@ func (c *Client) mouseSender() {
 	}
 }
 
-// SendMouseDown sends a mouse button press. button: 1=left, 2=right, 3=middle.
+// SendMouseDown sends a mouse button press. button: 1=left, 2=right, 3=middle;
+// grdp has no way to send the others.
 func (c *Client) SendMouseDown(button, x, y int) {
+	if button > 3 {
+		return
+	}
 	c.send.Lock()
 	defer c.send.Unlock()
 	c.g.MouseDown(grdpButton(button), x, y)
@@ -352,6 +356,9 @@ func (c *Client) SendMouseDown(button, x, y int) {
 
 // SendMouseUp sends a mouse button release.
 func (c *Client) SendMouseUp(button, x, y int) {
+	if button > 3 {
+		return
+	}
 	c.send.Lock()
 	defer c.send.Unlock()
 	c.g.MouseUp(grdpButton(button), x, y)

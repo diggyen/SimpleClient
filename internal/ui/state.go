@@ -134,6 +134,10 @@ type UIState struct {
 	lastUser    map[string]credentialHint
 	SavePath    string
 	SpinnerTick int // Used for connecting-screen spinner animation
+
+	// pointer is the input reader, set once by Run before anything else
+	// runs; nil in tests.
+	pointer pointer
 }
 
 // AddHost puts h in the list unless the same endpoint is already there, and
