@@ -195,6 +195,27 @@ Press **F5** to rescan.
 
 ---
 
+## The kiosk does not join the wireless network
+
+1. **No *Wireless* row under F8.** The kiosk found no wireless interface: the
+   `interfaces:` line has no `wlan0`. The card has no driver in Debian's kernel
+   or no firmware in the image — the families covered are in the
+   [README](../README.md#requirements). A USB stick from one of them gets round
+   it.
+2. **The network is not listed.** F5 scans again. A network on 5 GHz only needs
+   a card that does 5 GHz; a hidden one is joined by name from the last row.
+3. **"The network did not accept the password".** The password, or on an
+   enterprise network the user name, is wrong. The kiosk stays on the network
+   it had.
+4. **Connected, but "waiting for an address".** The network let the kiosk on
+   and no DHCP server answered. A guest network that wants a sign-in page in a
+   browser cannot be used; on one without DHCP, set a fixed address under F8.
+5. **`wireless: no address after 15 s` at boot.** The kept network was not
+   there: out of range, or switched off. The kiosk starts without it and keeps
+   trying; when the network appears it gets its address and scans it.
+
+---
+
 ## A host is listed but connecting fails
 
 The on-screen message narrows it:

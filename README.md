@@ -58,7 +58,7 @@ walks through the causes in order of likelihood.
 | `F4` | Move sound to the next output: speakers or headphones, the monitor, a USB headset |
 | `F6` | In the credential dialog: show or hide the domain field |
 | `F7` | Connect to a server by address (`10.0.0.5`, `rdp.example.com:53389`) |
-| `F8` | Network settings: DHCP or a fixed address |
+| `F8` | Network settings: DHCP or a fixed address, and the wireless network |
 | `F9` | Install to the machine's disk (when started from a USB stick or CD) |
 | `F10` | In the credential dialog: what the kiosk does at startup — the server list, this server's dialog, or logging on to it |
 | `Ctrl`+`Alt`+`End` | Disconnect from an active session |
@@ -93,6 +93,17 @@ it for an account set up for a kiosk.
 
 The scan covers **the kiosk's own subnet only**. A server anywhere else is
 reached with `F7`, by address or name; once connected to, it stays in the list.
+
+On a machine with a wireless card — built in or a USB stick — the network
+settings have a *Wireless* row, which lists the networks in range, strongest
+first. Choosing one asks for what it takes: its password; a user name and
+password on an enterprise network (WPA2/WPA3-Enterprise with PEAP, as Windows
+domains run it); nothing on an open one. A hidden network is joined by name
+from the last row. The network is kept once the kiosk is on it, where the
+network settings are, and joined at every boot; a password the network refuses
+leaves the kiosk on the network it had. `Del` forgets it. What is kept is the
+key the password makes — the NT hash on an enterprise network — and not the
+password itself, except on a WPA3-only network, whose handshake needs it.
 
 ## USB devices
 
@@ -216,5 +227,6 @@ go missing. See [ARCHITECTURE.md](docs/ARCHITECTURE.md#rdp).
 
 - x86-64 machine, UEFI or BIOS, Secure Boot on or off
 - 512 MB RAM
-- A wired or wireless NIC with a driver in Alpine's `linux-lts` kernel
+- A wired NIC, or a wireless card or USB stick (Intel, Realtek, MediaTek,
+  Qualcomm Atheros, Broadcom, Marvell, Ralink), with a driver in Debian's kernel
 - Somewhere on the same subnet actually listening on 3389

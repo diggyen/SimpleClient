@@ -34,6 +34,18 @@
 # trees, every dependency modules.dep names for a copied module is copied too,
 # wherever it lives. modules.dep lists each module's dependencies transitively,
 # so a single pass is complete.
+#
+# Wireless: the cards and USB sticks PCs have — Intel, Realtek, MediaTek,
+# Qualcomm Atheros, Broadcom, Marvell, Ralink — and the SDIO Realtek of the
+# Atom sticks and mini PCs, which is in staging. Not the vendors of embedded
+# boards and access points, nor Intel's and Broadcom's cards from before 2009
+# (ipw2x00, iwlegacy, b43, whose firmware is not in linux-firmware anyway).
+# mac80211_hwsim, the simulated radio, stays: it is how the wireless dialog
+# is tested. The radios' firmware comes from select-firmware.sh.
+#
+# mac80211 asks for the ciphers WPA2 and WPA3 encrypt with by name, as it
+# installs a key — "ccm(aes)", "gcm(aes)", "cmac(aes)" — and the kernel loads
+# the module that has one; no driver depends on them, so they are named here.
 set -e
 src=$1
 dest=$2
@@ -48,10 +60,14 @@ for d in net gpu input hid usb virtio char i2c cpufreq nvme ata mmc; do
     fi
 done
 cp -a "$S/kernel/sound" "$D/kernel/"
-mkdir -p "$D/kernel/net"
+mkdir -p "$D/kernel/net" "$D/kernel/drivers/staging"
 cp -a "$S/kernel/net/packet" "$D/kernel/net/"
+if [ -d "$S/kernel/drivers/staging/rtl8723bs" ]; then
+    cp -a "$S/kernel/drivers/staging/rtl8723bs" "$D/kernel/drivers/staging/"
+fi
 for m in sd_mod sr_mod virtio_blk vmw_pvscsi loop fat vfat exfat ntfs3 ext4 jbd2 mbcache isofs efivarfs \
-         nls_ascii nls_cp437 nls_iso8859-1 nls_utf8 crc32c_generic crc32c-intel libcrc32c; do
+         nls_ascii nls_cp437 nls_iso8859-1 nls_utf8 crc32c_generic crc32c-intel libcrc32c \
+         ccm gcm ctr cmac ghash-generic aes_generic aesni-intel; do
     for f in $(find "$S/kernel" -name "$m.ko*"); do
         r=${f#"$S"/}
         mkdir -p "$D/$(dirname "$r")"
@@ -64,7 +80,17 @@ for f in modules.builtin modules.builtin.modinfo modules.order; do
     fi
 done
 N=$D/kernel/drivers/net
-rm -rf "$N/wireless" "$N/can" "$N/wwan" "$N/wan" "$N/ieee802154" "$N/arcnet" "$N/fddi" \
+W=$N/wireless
+rm -rf "$W/admtek" "$W/atmel" "$W/intersil" "$W/microchip" "$W/purelifi" "$W/quantenna" \
+       "$W/rsi" "$W/silabs" "$W/st" "$W/ti" "$W/zydas" \
+       "$W/intel/ipw2x00" "$W/intel/iwlegacy" "$W/broadcom/b43" "$W/broadcom/b43legacy" \
+       "$W/marvell/libertas" "$W/marvell/libertas_tf" "$W/marvell/mwl8k.ko"* \
+       "$W/mediatek/mt76/mt7603" "$W/mediatek/mt76/mt7915" "$W/mediatek/mt76/mt7996" \
+       "$W/mediatek/mt76/mt7615/mt7615e.ko"*
+if [ -d "$W" ]; then
+    find "$W" -name '*_ahb.ko*' -delete # Qualcomm's router SoCs
+fi
+rm -rf "$N/can" "$N/wwan" "$N/wan" "$N/ieee802154" "$N/arcnet" "$N/fddi" \
        "$N/hamradio" "$N/plip" \
        "$N/ethernet/mellanox" "$N/ethernet/qlogic" "$N/ethernet/chelsio" "$N/ethernet/sfc" \
        "$N/ethernet/netronome" "$N/ethernet/cavium" "$N/ethernet/pensando" "$N/ethernet/huawei" \

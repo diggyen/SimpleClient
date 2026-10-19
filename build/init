@@ -355,7 +355,35 @@ if [ "$(sed -n 's/^mode=//p' "$NETCONF" 2>/dev/null)" = static ]; then
     STATIC_IF=$(sed -n 's/^interface=//p' "$NETCONF")
     [ -n "$STATIC_IF" ] || STATIC_IF=$(echo $IFACES | cut -d' ' -f1)
 fi
+
+# The wireless network the kiosk keeps (F8, then its wireless row), kept where
+# the network settings are; sc-net has wpa_supplicant join it.
+WIFICONF=/run/sc-wifi.conf
+if [ -f /data/simpleclient/wifi.conf ]; then
+    cp /data/simpleclient/wifi.conf "$WIFICONF"
+elif [ -z "$SLOT" ] && EFI_DEV=$(findfs LABEL=SC_EFI 2>/dev/null); then
+    mkdir -p /run/sc-efi
+    if mount -t vfat -o ro "$EFI_DEV" /run/sc-efi 2>/dev/null; then
+        cp /run/sc-efi/simpleclient/wifi.conf "$WIFICONF" 2>/dev/null
+        umount /run/sc-efi
+    fi
+fi
+chmod 600 "$WIFICONF" 2>/dev/null
+
 sc-net apply 2>/dev/console
+
+# Joining a wireless network takes a few seconds — a scan, the handshake, then
+# DHCP — which sc-net does not wait for. With one kept and no address from a
+# cable, wait for it as for a lease, up to fifteen seconds: the kiosk would
+# otherwise start on the link-local fallback below.
+if grep -q '^network=' "$WIFICONF" 2>/dev/null; then
+    i=0
+    while [ "$i" -lt 60 ] && ! ip -4 -o addr show | grep -v ' lo ' | grep -q 'inet '; do
+        i=$((i + 1))
+        sleep 0.25
+    done
+    [ "$i" -lt 60 ] || log "wireless: no address after 15 s"
+fi
 
 GOT_IP=0
 for i in $IFACES; do

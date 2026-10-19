@@ -1,0 +1,32 @@
+#!/bin/sh
+# sc-wifi-event IFACE EVENT — what wpa_cli runs (sc-net starts it, with -a) as
+# wpa_supplicant joins a network on IFACE (CONNECTED) or leaves it.
+#
+# Joined, the interface needs a lease on that network now. The udhcpc sc-net
+# started is no use for it: one started before the kiosk was on any network
+# is sitting out the pause between its attempts, and one that holds a lease
+# from another network goes on renewing that. So DHCP starts over — unless the
+# interface has an address on this same network already, which is
+# wpa_supplicant moving between its access points, or has a fixed address.
+iface=$1
+[ "$2" = CONNECTED ] || exit 0
+
+CONF=${SC_NETCONF:-/run/sc-network}
+if [ "$(sed -n 's/^mode=//p' "$CONF" 2>/dev/null)" = static ] &&
+   [ "$(sed -n 's/^interface=//p' "$CONF")" = "$iface" ]; then
+    exit 0
+fi
+
+ssid=$(wpa_cli -p /run/wpa_supplicant -i "$iface" status 2>/dev/null | sed -n 's/^ssid=//p')
+seen=/run/sc-wifi-$iface.ssid
+if [ "$ssid" = "$(cat "$seen" 2>/dev/null)" ] && ip -4 -o addr show dev "$iface" | grep -q 'inet '; then
+    exit 0
+fi
+echo "$ssid" > "$seen"
+
+for p in /proc/[0-9]*; do
+    if tr '\0' ' ' < "$p/cmdline" 2>/dev/null | grep -q "^udhcpc .*-i $iface "; then
+        kill "${p#/proc/}" 2>/dev/null
+    fi
+done
+udhcpc -i "$iface" -f -t 4 -T 2 -A 5 >/dev/null 2>&1 &

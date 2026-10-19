@@ -14,7 +14,14 @@
 #
 # Interfaces other than the one configured keep DHCP: on a machine with two
 # NICs the second goes on working as before.
+#
+# sc-net wifi — have wpa_supplicant on every wireless interface read the
+# wireless network the kiosk keeps, in /run/sc-wifi.conf (internal/wifi writes
+# it, /init restores it at boot), starting it where it is not running. The
+# wireless dialog runs this after changing the network; apply runs it first.
 CONF=${SC_NETCONF:-/run/sc-network}
+WIFI=${SC_WIFICONF:-/run/sc-wifi.conf}
+CTRL=/run/wpa_supplicant
 
 mode=dhcp interface="" address="" gateway="" dns=""
 if [ -r "$CONF" ]; then
@@ -30,8 +37,43 @@ if [ -r "$CONF" ]; then
 fi
 
 ifaces() { ls /sys/class/net 2>/dev/null | grep -v '^lo$'; }
-[ -n "$interface" ] || interface=$(ifaces | head -1)
-[ -n "$interface" ] || { echo "sc-net: no network interface" >&2; exit 1; }
+wireless() {
+    for i in $(ifaces); do
+        if [ -d "/sys/class/net/$i/wireless" ]; then echo "$i"; fi
+    done
+}
+
+# alive PIDFILE succeeds if the process PIDFILE names is running.
+alive() { [ -r "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
+
+# wifi runs wpa_supplicant on each wireless interface with $WIFI — with no
+# network in it when none is kept, so the dialog has something to scan with —
+# or has the one running read it again. Next to each, wpa_cli runs
+# sc-wifi-event as the interface joins a network, which gets it a DHCP lease
+# for that network straight away.
+wifi() {
+    [ -n "$(wireless)" ] || return 0
+    command -v wpa_supplicant >/dev/null || { echo "sc-net: no wpa_supplicant" >&2; return 1; }
+    [ -s "$WIFI" ] || printf 'ctrl_interface=%s\nupdate_config=0\n' "$CTRL" > "$WIFI"
+    chmod 600 "$WIFI"
+    # The radio may be switched off: by a key or switch on a laptop-style
+    # machine, or by the BIOS. On a kiosk it is the network dialog that
+    # decides whether there is a wireless network.
+    for r in /sys/class/rfkill/rfkill*; do
+        if [ "$(cat "$r/type" 2>/dev/null)" = wlan ]; then echo 0 > "$r/soft" 2>/dev/null; fi
+    done
+    for i in $(wireless); do
+        ip link set "$i" up 2>/dev/null
+        if [ "$(wpa_cli -p "$CTRL" -i "$i" ping 2>/dev/null)" = PONG ]; then
+            wpa_cli -p "$CTRL" -i "$i" reconfigure >/dev/null || return 1
+        elif ! wpa_supplicant -B -D nl80211,wext -i "$i" -c "$WIFI" -P "/run/wpa_supplicant-$i.pid" >/dev/null 2>&1; then
+            echo "sc-net: wpa_supplicant did not start on $i" >&2
+            continue
+        fi
+        alive "/run/wpa_cli-$i.pid" ||
+            wpa_cli -p "$CTRL" -i "$i" -B -P "/run/wpa_cli-$i.pid" -a /sbin/sc-wifi-event >/dev/null 2>&1
+    done
+}
 
 # udhcpc_pid IFACE prints the pid of the udhcpc running on IFACE, if any.
 udhcpc_pid() {
@@ -40,17 +82,31 @@ udhcpc_pid() {
     done
 }
 
+# dhcp IFACE starts DHCP on IFACE and waits for the first attempt, so the
+# usual case boots with its address in place. Not on a wireless interface:
+# that has no network to ask until it has joined one, and sc-wifi-event starts
+# DHCP over as it does.
 dhcp() {
     ip link set "$1" up 2>/dev/null
     [ -n "$(udhcpc_pid "$1")" ] && return 0
     ip addr flush dev "$1" 2>/dev/null
-    udhcpc -i "$1" -b -t 4 -T 2 -A 5 >/dev/null 2>&1
+    if [ -d "/sys/class/net/$1/wireless" ]; then
+        udhcpc -i "$1" -f -t 4 -T 2 -A 5 >/dev/null 2>&1 &
+    else
+        udhcpc -i "$1" -b -t 4 -T 2 -A 5 >/dev/null 2>&1
+    fi
 }
 
 case "$1" in
     apply) ;;
-    *) echo "usage: sc-net apply" >&2; exit 2 ;;
+    wifi) wifi; exit ;;
+    *) echo "usage: sc-net apply | sc-net wifi" >&2; exit 2 ;;
 esac
+
+[ -n "$interface" ] || interface=$(ifaces | head -1)
+[ -n "$interface" ] || { echo "sc-net: no network interface" >&2; exit 1; }
+
+wifi
 
 if [ "$mode" != static ]; then
     for i in $(ifaces); do dhcp "$i"; done

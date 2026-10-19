@@ -15,6 +15,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 	"github.com/diggyen/SimpleClient/internal/netconf"
+	"github.com/diggyen/SimpleClient/internal/wifi"
 )
 
 // TestScreenshots renders every UI state to PNG so the design can be reviewed
@@ -136,6 +137,59 @@ func TestScreenshots(t *testing.T) {
 		renderDiscovery(b, st)
 		renderNet(b, st)
 	})
+	isw := wifiIsWireless
+	wifiIsWireless = func(i string) bool { return i == "wlan0" }
+	t.Cleanup(func() { wifiIsWireless = isw })
+	wifiShot := func(w WifiState) *UIState {
+		w.Iface = "wlan0"
+		w.Networks = []wifi.Network{
+			{SSID: "Office", Signal: -48, Security: wifi.PSK},
+			{SSID: "Office-5G", Signal: -53, Security: wifi.SAE},
+			{SSID: "CORP-WLAN", Signal: -61, Security: wifi.EAP},
+			{SSID: "Guest", Signal: -70, Security: wifi.Open},
+			{SSID: "DIRECT-7F-HP LaserJet", Signal: -78, Security: wifi.PSK},
+			{SSID: "Old router", Signal: -86, Security: wifi.WEP},
+		}
+		w.Kept = wifi.Config{SSID: "Office", Security: wifi.PSK}
+		w.Status = wifi.Status{State: "COMPLETED", SSID: "Office"}
+		w.Address = "192.168.20.31/24"
+		return &UIState{
+			Screen: ScreenWifi, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1, Wifi: w,
+		}
+	}
+	shot("06-network-wifi", 1280, 800, func(b *image.RGBA) {
+		st := wifiShot(WifiState{})
+		st.Screen = ScreenNetwork
+		st.Net = NetState{
+			Iface: "wlan0", Focus: netFocusWifi, Wireless: "wlan0",
+			Status: netconf.Status{Interface: "wlan0", Address: "192.168.20.31/24", Carrier: true},
+		}
+		renderDiscovery(b, st)
+		renderNet(b, st)
+	})
+	shot("12-wifi", 1280, 800, func(b *image.RGBA) {
+		st := wifiShot(WifiState{Sel: 2})
+		renderDiscovery(b, st)
+		renderWifi(b, st)
+	})
+	shot("12-wifi-password", 1280, 800, func(b *image.RGBA) {
+		st := wifiShot(WifiState{})
+		st.Wifi.ask(st.Wifi.Networks[2], false)
+		st.Wifi.Fields[itemUser] = `CORP\ayse`
+		st.Wifi.Fields[itemPassword] = "secret123"
+		st.Wifi.Focus = itemPassword
+		renderDiscovery(b, st)
+		renderWifi(b, st)
+	})
+	shot("12-wifi-hidden", 1280, 800, func(b *image.RGBA) {
+		st := wifiShot(WifiState{})
+		st.Wifi.ask(wifi.Network{Security: wifi.PSK}, true)
+		st.Wifi.Fields[itemName] = "Warehouse"
+		st.Wifi.Focus = itemSecurity
+		renderDiscovery(b, st)
+		renderWifi(b, st)
+	})
 	shot("07-connecting", 1280, 800, func(b *image.RGBA) {
 		st := &UIState{
 			Screen: ScreenConnecting, Hosts: sampleHosts(5), SelectedIdx: 1,
@@ -207,6 +261,11 @@ func TestScreenshots(t *testing.T) {
 		}
 		renderDiscovery(b, st)
 		renderModal(b, st)
+	})
+	shot("08-turkish-wifi", 1280, 800, func(b *image.RGBA) {
+		st := wifiShot(WifiState{Sel: 1, Msg: i18n.T(i18n.NetSaved)})
+		renderDiscovery(b, st)
+		renderWifi(b, st)
 	})
 
 	t.Logf("wrote screenshots to %s", dir)

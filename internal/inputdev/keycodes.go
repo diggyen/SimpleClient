@@ -38,6 +38,7 @@ const (
 	KeyPageDown   = 109
 	KeyEnd        = 107
 	KeyHome       = 102
+	KeyDelete     = 111
 
 	// Mouse button keycodes (EV_KEY events from mouse device)
 	BtnLeft   = 0x110

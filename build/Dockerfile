@@ -254,9 +254,9 @@ RUN apk add --no-cache linux-firmware-bnx2 linux-firmware-bnx2x \
 RUN set -e; \
     apk add --no-cache linux-firmware-i915 linux-firmware-xe linux-firmware-amdgpu \
         linux-firmware-radeon linux-firmware-nvidia; \
-    mkdir -p /gpufw/lib/firmware; \
-    for d in i915 xe amdgpu radeon nvidia; do cp -a "/lib/firmware/$d" /gpufw/lib/firmware/; done; \
-    cd /gpufw/lib/firmware; \
+    mkdir -p /fw/lib/firmware; \
+    for d in i915 xe amdgpu radeon nvidia; do cp -a "/lib/firmware/$d" /fw/lib/firmware/; done; \
+    cd /fw/lib/firmware; \
     rm -rf nvidia/*/gsp i915/*huc* i915/*gsc*; \
     for p in aldebaran arcturus gc_9_4_3 gc_9_4_4 gc_9_5_0 psp_13_0_6 psp_13_0_12 psp_13_0_14 \
              sdma_4_4_2 sdma_4_4_4 sdma_4_4_5 smu_13_0_6 smu_13_0_12 smu_13_0_14 \
@@ -264,8 +264,25 @@ RUN set -e; \
         rm -f amdgpu/${p}[._]*; \
     done; \
     find . -type l | while read -r l; do [ -e "$l" ] || rm "$l"; done; \
-    cd /gpufw && find . | cpio -oH newc --quiet > /out/firmware.cpio; \
-    du -sh /gpufw/lib/firmware/*; ls -lh /out/firmware.cpio
+    du -sh /fw/lib/firmware/*
+
+# Wireless firmware, into the same archive: what the wireless drivers in the
+# modules archives say they load (see select-firmware.sh), for both kernels.
+# And the regulatory database: cfg80211 reads from it which channels, at what
+# power, the country the access points announce allows. Without it a kiosk
+# keeps to the few channels allowed everywhere, and only listens on most of
+# those.
+COPY build/select-firmware.sh /usr/local/bin/select-firmware
+RUN set -e; chmod +x /usr/local/bin/select-firmware; \
+    apk add --no-cache linux-firmware-intel linux-firmware-other linux-firmware-ath10k \
+        linux-firmware-ath11k linux-firmware-ath12k linux-firmware-ath6k linux-firmware-ath9k_htc \
+        linux-firmware-mediatek linux-firmware-rtw88 linux-firmware-rtw89 linux-firmware-rtlwifi \
+        linux-firmware-brcm linux-firmware-cypress linux-firmware-mrvl wireless-regdb; \
+    select-firmware /fw $(find /mods/new /mods/lts \( -path '*/net/wireless/*' -o -path '*/staging/*' \) \
+        -name '*.ko*'); \
+    cp /lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s /fw/lib/firmware/; \
+    cd /fw && find . | cpio -oH newc --quiet > /out/firmware.cpio; \
+    ls -lh /out/firmware.cpio
 
 # Sound. The kiosk plays and records through ALSA's own tools: their plughw
 # layer converts rate, channels and format to whatever a codec accepts, which
@@ -282,13 +299,17 @@ RUN set -e; \
 # format, grub-install puts GRUB's BIOS boot code on the disk, efibootmgr adds
 # the UEFI boot entry. The daily update fetches over HTTPS, which needs the CA
 # bundle.
+#
+# Wireless networks: wpa_supplicant joins them (WPA2/WPA3, personal and
+# enterprise), wpa_cli is how sc-net and the network dialog talk to it.
 RUN apk add --no-cache alsa-utils alsa-lib \
-        sfdisk dosfstools e2fsprogs grub grub-bios efibootmgr ca-certificates-bundle
+        sfdisk dosfstools e2fsprogs grub grub-bios efibootmgr ca-certificates-bundle \
+        wpa_supplicant
 COPY build/copy-bins.sh /usr/local/bin/copy-bins
 RUN set -e; chmod +x /usr/local/bin/copy-bins; \
     copy-bins /rootfs aplay arecord amixer alsactl \
         sfdisk mkfs.fat mkfs.ext4 grub-install grub-bios-setup grub-mkimage grub-probe grub-editenv \
-        efibootmgr; \
+        efibootmgr wpa_supplicant wpa_cli; \
     mkdir -p /rootfs/usr/share /rootfs/usr/lib /rootfs/etc/ssl/certs; \
     cp -a /usr/share/alsa /rootfs/usr/share/; \
     cp -a /usr/lib/grub /rootfs/usr/lib/; \
@@ -301,6 +322,7 @@ COPY build/init /rootfs/init
 COPY build/udhcpc-default.script /rootfs/usr/share/udhcpc/default.script
 COPY build/sc-install /rootfs/sbin/sc-install
 COPY build/sc-net /rootfs/sbin/sc-net
+COPY build/sc-wifi-event /rootfs/sbin/sc-wifi-event
 COPY build/grub-disk.cfg /rootfs/usr/share/simpleclient/grub-disk.cfg
 
 # /media is where USB drives are mounted for sessions to offer the server.
@@ -312,7 +334,7 @@ RUN mkdir -p /out \
  && echo 'root:x:0:0:root:/tmp:/bin/sh' > /rootfs/etc/passwd \
  && echo 'root:x:0:' > /rootfs/etc/group \
  && chmod +x /rootfs/init /rootfs/sbin/simpleclient /rootfs/sbin/sc-install /rootfs/sbin/sc-net \
-        /rootfs/usr/share/udhcpc/default.script
+        /rootfs/sbin/sc-wifi-event /rootfs/usr/share/udhcpc/default.script
 
 # Busybox provides every userspace tool /init needs (ip, udhcpc, modprobe, ...).
 #

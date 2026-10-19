@@ -15,6 +15,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
+	"github.com/diggyen/SimpleClient/internal/netconf"
 	"github.com/diggyen/SimpleClient/internal/network"
 	"github.com/diggyen/SimpleClient/internal/rdp"
 	"github.com/diggyen/SimpleClient/internal/usb"
@@ -85,6 +86,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 
 	ticker := time.NewTicker(16 * time.Millisecond) // ~60 FPS
 	netTicker := time.NewTicker(3 * time.Second)
+	wifiTicker := time.NewTicker(time.Second)
 	state.Dirty = true
 	spinTick := 0
 
@@ -124,13 +126,16 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 			}
 
 		// ── Late network ─────────────────────────────────────────────────────
-		// A NIC whose link or DHCP lease came up after boot leaves the first
-		// scan with no subnet. Rather than waiting for someone to think of F5,
-		// scan as soon as an address appears.
+		// A NIC whose link or DHCP lease came up after boot — a wireless
+		// network takes seconds to join — leaves the first scan with no
+		// subnet, or with the link-local one /init falls back to. Rather than
+		// waiting for someone to think of F5, scan as soon as an address
+		// appears.
 		case <-netTicker.C:
 			state.Mu.Lock()
-			if state.Subnet == "" && state.Screen == ScreenDiscovery {
-				if cidr, _ := network.DetectCIDR(); cidr != "" {
+			late := state.Subnet == "" || strings.HasPrefix(state.Subnet, "169.254.")
+			if late && state.Screen == ScreenDiscovery {
+				if cidr, _ := network.DetectCIDR(); cidr != "" && cidr != state.Subnet {
 					cancelScan()
 					ctx, cancelScan = context.WithCancel(context.Background())
 					state.Subnet = cidr
@@ -139,6 +144,27 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 					scanCh = scan.Start(ctx, []string{cidr})
 					state.Dirty = true
 				}
+			}
+			state.Mu.Unlock()
+
+		// ── Wireless ─────────────────────────────────────────────────────────
+		// The wireless networks and how the kiosk stands with them, read
+		// while the network settings or the wireless dialog are up — and
+		// while a network is being joined, which is followed to the end with
+		// them closed too.
+		case <-wifiTicker.C:
+			state.Mu.Lock()
+			w := &state.Wifi
+			if state.Screen == ScreenWifi || state.Screen == ScreenNetwork || w.Joining.SSID != "" {
+				refreshWifi(state)
+			}
+			if state.Screen == ScreenWifi && time.Since(w.ScanAt) > wifiRescan {
+				scanWifi(state)
+			}
+			// The address a lease brings, or a cable plugged in, shows in the
+			// network settings as it happens.
+			if state.Screen == ScreenNetwork && !state.Net.Busy {
+				state.Net.Status = netconf.Current(state.Net.Iface)
 			}
 			state.Mu.Unlock()
 
@@ -234,6 +260,8 @@ func handleInput(
 		handleInstallKey(ev, state)
 	case ScreenNetwork:
 		handleNetKey(ev, state)
+	case ScreenWifi:
+		handleWifiKey(ev, state)
 	case ScreenAuto:
 		handleAutoKey(ev, state)
 	}
@@ -429,13 +457,16 @@ func handleMouseClick(
 		if n.Busy {
 			return
 		}
-		l := layoutNet(fb.Bounds(), n.Static)
+		l := layoutNet(fb.Bounds(), n.Static, n.Wireless != "")
 		p := image.Pt(mx, my)
 		switch {
 		case p.In(l.DHCP):
 			n.Static, n.Focus = false, netFocusMode
 		case p.In(l.Static):
 			n.Static, n.Focus = true, netFocusMode
+		case p.In(l.Wifi):
+			n.Focus = netFocusWifi
+			openWifi(state)
 		case p.In(l.Save):
 			n.Focus = netFocusSave
 			saveNetwork(state)
@@ -448,6 +479,9 @@ func handleMouseClick(
 				}
 			}
 		}
+
+	case ScreenWifi:
+		handleWifiClick(state, fb.Bounds(), image.Pt(mx, my))
 	}
 }
 

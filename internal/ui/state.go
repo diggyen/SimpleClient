@@ -20,6 +20,7 @@ const (
 	ScreenInstall                  // Install-to-disk dialog
 	ScreenNetwork                  // Network settings dialog
 	ScreenAuto                     // Counting down to logging on to the startup server
+	ScreenWifi                     // Wireless networks, from the network settings
 )
 
 // ModalState holds the state of the connection dialog.
@@ -122,7 +123,8 @@ type UIState struct {
 	CanInstall bool
 	Install    InstallState
 
-	Net NetState
+	Net  NetState
+	Wifi WifiState
 
 	MouseX int
 	MouseY int
@@ -254,6 +256,8 @@ func (s *UIState) Transition(to Screen) {
 		ScreenConnecting: {ScreenSession, ScreenModal, ScreenAuto},
 		ScreenSession:    {ScreenDiscovery, ScreenConnecting, ScreenModal, ScreenAuto},
 		ScreenAuto:       {ScreenConnecting, ScreenModal},
+		ScreenNetwork:    {ScreenWifi},
+		ScreenWifi:       {ScreenNetwork},
 	}
 	for _, valid := range allowed[s.Screen] {
 		if valid == to {

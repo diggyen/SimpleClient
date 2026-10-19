@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"log"
+	"strings"
 
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
@@ -12,16 +13,19 @@ import (
 // NetState is the network settings dialog (F8): DHCP, or a fixed address for
 // a network without a DHCP server — without one the kiosk has no address, and
 // nothing to scan or connect from. The address fields are there only while
-// "manual" is chosen; with DHCP there is nothing to fill in.
+// "manual" is chosen; with DHCP there is nothing to fill in. On a kiosk with a
+// wireless interface a row under them opens the wireless networks (wifi.go).
 type NetState struct {
 	Static bool
 	Fields [netFields]string // indexed by netAddress ... netDNS2
-	Focus  int               // netFocusMode, 1+field, then save and cancel
+	Focus  int               // netFocusMode, 1+field, wireless, then save and cancel
 	Iface  string
 	Status netconf.Status
 	Msg    string // the outcome of the last save
 	Err    bool   // whether Msg is an error
 	Busy   bool   // applying; keys are ignored meanwhile
+	// Wireless is the wireless interface, if there is one.
+	Wireless string
 }
 
 const (
@@ -34,12 +38,13 @@ const (
 )
 
 // The focus order: the DHCP/manual switch, the fields (manual only), the
-// buttons.
+// wireless row (with a wireless interface only), the buttons.
 const (
 	netFocusMode   = 0
-	netFocusSave   = 1 + netFields
-	netFocusCancel = 2 + netFields
-	netFocusCount  = 3 + netFields
+	netFocusWifi   = 1 + netFields
+	netFocusSave   = 2 + netFields
+	netFocusCancel = 3 + netFields
+	netFocusCount  = 4 + netFields
 )
 
 // field returns the field index the focus is on, or -1.
@@ -51,11 +56,14 @@ func (n *NetState) field() int {
 }
 
 // move steps the focus, past the fields while DHCP is chosen and they are not
-// shown.
+// shown, and past the wireless row on a kiosk without it.
 func (n *NetState) move(d int) {
 	for {
 		n.Focus = (n.Focus + d + netFocusCount) % netFocusCount
-		if n.Static || n.field() < 0 {
+		switch {
+		case n.field() >= 0 && !n.Static:
+		case n.Focus == netFocusWifi && n.Wireless == "":
+		default:
 			return
 		}
 	}
@@ -77,14 +85,24 @@ func openNetwork(state *UIState) {
 	ip, mask, gw, dns1, dns2 := c.Form()
 	n.Fields = [netFields]string{ip, mask, gw, dns1, dns2}
 	n.Status = netconf.Current(n.Iface)
+	n.Wireless = initWifi(state)
 	state.Net = n
 	state.Transition(ScreenNetwork)
+	refreshWifi(state)
 }
 
-// pickInterface is the interface a fixed address goes on when none is set:
-// the first with a cable in, or the first there is.
+// pickInterface is the interface a fixed address goes on when none is set: the
+// one the kiosk has its network on — an address other than the link-local
+// fallback — then the first with a cable in or a wireless network joined, or
+// the first there is. A cable in a port that leads nowhere does not take it
+// from the wireless network the kiosk is using.
 func pickInterface() string {
 	all := netconf.Interfaces()
+	for _, i := range all {
+		if a := netconf.Current(i).Address; a != "" && !strings.HasPrefix(a, "169.254.") {
+			return i
+		}
+	}
 	for _, i := range all {
 		if netconf.Current(i).Carrier {
 			return i
@@ -123,6 +141,8 @@ func handleNetKey(ev inputdev.InputEvent, state *UIState) {
 			state.Transition(ScreenDiscovery)
 		case netFocusMode:
 			n.Static = !n.Static
+		case netFocusWifi:
+			openWifi(state)
 		default:
 			saveNetwork(state)
 		}

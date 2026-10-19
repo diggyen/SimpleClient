@@ -130,6 +130,43 @@ const (
 	AutoRetry // "%d" is seconds
 	AutoKeys
 
+	// Wireless networks, a dialog of the network settings'.
+	NetWireless    // the network settings' row for it
+	NetWifiChoose  // the row, with no network kept
+	NetWifiOn      // "%s" is the network
+	NetWifiJoining // "%s" is the network
+	NetWifiOff     // "%s" is the network
+	NetIfWireless  // "%s" is the interface
+	WifiTitle
+	WifiHidden // the row for a network that does not show its name
+	WifiOpen
+	WifiEnterprise
+	WifiMarkOn
+	WifiMarkJoining
+	WifiMarkKept
+	WifiScanning
+	WifiNone
+	WifiDown
+	WifiStatusOn // "%s" is the network
+	WifiStatusOff
+	WifiStatusKept // "%s" is the network
+	WifiNoAddress
+	WifiJoining // "%s" is the network
+	WifiFailed  // "%s" is the network
+	WifiRejected
+	WifiRejectedUser
+	WifiForgotten // "%s" is the network
+	WifiNetwork
+	WifiName
+	WifiSecurity
+	WifiErrName
+	WifiErrUser
+	WifiErrNoPassword
+	WifiErrPassword
+	WifiErrWEP
+	HintForget
+	HintBack
+
 	numKeys // must stay last
 )
 
@@ -222,6 +259,42 @@ var catalogues = map[Lang]*catalogue{
 		AutoWaitNet:    "Waiting for the network",
 		AutoRetry:      "Trying again in %d s",
 		AutoKeys:       "Enter: now    Esc: server list",
+
+		NetWireless:       "Wireless:",
+		NetWifiChoose:     "Choose a network",
+		NetWifiOn:         "%s  ·  connected",
+		NetWifiJoining:    "%s  ·  connecting",
+		NetWifiOff:        "%s  ·  not connected",
+		NetIfWireless:     "%s: wireless",
+		WifiTitle:         "Wireless networks",
+		WifiHidden:        "Hidden network...",
+		WifiOpen:          "Open",
+		WifiEnterprise:    "Enterprise",
+		WifiMarkOn:        "Connected",
+		WifiMarkJoining:   "Connecting",
+		WifiMarkKept:      "Saved",
+		WifiScanning:      "Looking for networks...",
+		WifiNone:          "No networks found",
+		WifiDown:          "The wireless service is not answering",
+		WifiStatusOn:      "Connected to %s",
+		WifiStatusOff:     "Not connected",
+		WifiStatusKept:    "saved: %s",
+		WifiNoAddress:     "waiting for an address",
+		WifiJoining:       "Connecting to %s...",
+		WifiFailed:        "Could not connect to %s",
+		WifiRejected:      "The network did not accept the password",
+		WifiRejectedUser:  "The network did not accept the user name or password",
+		WifiForgotten:     "%s forgotten",
+		WifiNetwork:       "Network:",
+		WifiName:          "Name:",
+		WifiSecurity:      "Security:",
+		WifiErrName:       "Type the network's name",
+		WifiErrUser:       "Type the user name",
+		WifiErrNoPassword: "Type the password",
+		WifiErrPassword:   "A WPA password is 8 to 63 characters",
+		WifiErrWEP:        "WEP networks are not supported",
+		HintForget:        "Forget",
+		HintBack:          "Back",
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
@@ -308,6 +381,42 @@ var catalogues = map[Lang]*catalogue{
 		AutoWaitNet:    "Ağ bekleniyor",
 		AutoRetry:      "%d sn sonra yeniden denenecek",
 		AutoKeys:       "Enter: hemen    Esc: sunucu listesi",
+
+		NetWireless:       "Kablosuz:",
+		NetWifiChoose:     "Ağ seçin",
+		NetWifiOn:         "%s  ·  bağlı",
+		NetWifiJoining:    "%s  ·  bağlanıyor",
+		NetWifiOff:        "%s  ·  bağlı değil",
+		NetIfWireless:     "%s: kablosuz",
+		WifiTitle:         "Kablosuz ağlar",
+		WifiHidden:        "Gizli ağ...",
+		WifiOpen:          "Açık",
+		WifiEnterprise:    "Kurumsal",
+		WifiMarkOn:        "Bağlı",
+		WifiMarkJoining:   "Bağlanıyor",
+		WifiMarkKept:      "Kayıtlı",
+		WifiScanning:      "Ağlar aranıyor...",
+		WifiNone:          "Ağ bulunamadı",
+		WifiDown:          "Kablosuz hizmeti yanıt vermiyor",
+		WifiStatusOn:      "Bağlı: %s",
+		WifiStatusOff:     "Bağlı değil",
+		WifiStatusKept:    "kayıtlı: %s",
+		WifiNoAddress:     "adres bekleniyor",
+		WifiJoining:       "Bağlanılıyor: %s...",
+		WifiFailed:        "Bağlanılamadı: %s",
+		WifiRejected:      "Ağ parolayı kabul etmedi",
+		WifiRejectedUser:  "Ağ kullanıcı adını veya parolayı kabul etmedi",
+		WifiForgotten:     "Unutuldu: %s",
+		WifiNetwork:       "Ağ:",
+		WifiName:          "Ağ adı:",
+		WifiSecurity:      "Güvenlik:",
+		WifiErrName:       "Ağın adını yazın",
+		WifiErrUser:       "Kullanıcı adını yazın",
+		WifiErrNoPassword: "Parolayı yazın",
+		WifiErrPassword:   "WPA parolası 8-63 karakterdir",
+		WifiErrWEP:        "WEP ağları desteklenmiyor",
+		HintForget:        "Unut",
+		HintBack:          "Geri",
 	},
 }
 

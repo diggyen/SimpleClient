@@ -20,6 +20,7 @@ type netLayout struct {
 	DHCP    image.Rectangle // the two choices of the mode row
 	Static  image.Rectangle
 	Fields  []image.Rectangle // none while DHCP is chosen
+	Wifi    image.Rectangle   // the wireless row; empty without it
 	StatusY int
 	MsgY    int
 	Save    image.Rectangle
@@ -27,15 +28,19 @@ type netLayout struct {
 }
 
 // layoutNet lays the dialog out with the address fields when static is set,
-// and without them for DHCP.
-func layoutNet(screen image.Rectangle, static bool) netLayout {
-	fields := 0
+// and without them for DHCP; with the wireless row when wireless is set.
+func layoutNet(screen image.Rectangle, static, wireless bool) netLayout {
+	fields, rows := 0, 0
 	if static {
 		fields = netFields
+	}
+	if wireless {
+		rows = 1
 	}
 	h := cardHeader + modalPad +
 		netChipH + modalFieldG +
 		fields*(modalFieldH+modalFieldG) +
+		rows*(netChipH+modalFieldG) +
 		2*(CharH+10) +
 		modalPad + modalBtnH + modalPad
 
@@ -61,6 +66,10 @@ func layoutNet(screen image.Rectangle, static bool) netLayout {
 		l.Fields[i] = image.Rect(inputX, y, inputX+inputW, y+modalFieldH)
 		y += modalFieldH + modalFieldG
 	}
+	if wireless {
+		l.Wifi = image.Rect(inputX, y, inputX+inputW, y+netChipH)
+		y += netChipH + modalFieldG
+	}
 	l.StatusY = y + 2
 	l.MsgY = l.StatusY + CharH + 10
 
@@ -74,21 +83,11 @@ func layoutNet(screen image.Rectangle, static bool) netLayout {
 // renderNet draws the network settings dialog over the current screen.
 func renderNet(img *image.RGBA, state *UIState) {
 	n := &state.Net
-	l := layoutNet(img.Bounds(), n.Static)
+	l := layoutNet(img.Bounds(), n.Static, n.Wireless != "")
 
 	FillRectBlend(img, img.Bounds(), ColorOverlay)
 	DrawPanel(img, l.Box, ColorPanel, ColorAccent)
-
-	strip := image.Rect(l.Header.Min.X+1, l.Header.Min.Y+1, l.Header.Max.X-1, l.Header.Max.Y)
-	FillNotchedTop(img, strip, ColorCardHeader)
-	DrawHLine(img, strip.Min.X+2, strip.Max.X-2, strip.Min.Y, ColorPanelEdge)
-	DrawHLine(img, strip.Min.X, strip.Max.X, strip.Max.Y-1, ColorBorder)
-	titleY := l.Header.Min.Y + (cardHeader-CharH)/2
-	FillRect(img, image.Rect(l.Header.Min.X+modalPad, titleY+1, l.Header.Min.X+modalPad+3, titleY+CharH-1), ColorAccent)
-	DrawText(img, l.Header.Min.X+modalPad+11, titleY, i18n.T(i18n.NetTitle), ColorText)
-	if n.Iface != "" {
-		DrawText(img, l.Header.Max.X-modalPad-TextWidth(n.Iface, false), titleY, n.Iface, ColorAccent)
-	}
+	drawDialogHeader(img, l.Header, i18n.T(i18n.NetTitle), n.Iface)
 
 	// The DHCP/manual switch: two chips, the chosen one filled.
 	DrawText(img, l.LabelX, l.DHCP.Min.Y+(netChipH-CharH)/2, i18n.T(i18n.NetMode), ColorDim)
@@ -107,10 +106,20 @@ func renderNet(img *image.RGBA, state *UIState) {
 		DrawInputField(img, f, n.Fields[i], n.Focus == i+1)
 	}
 
+	// The wireless network: which, and whether the kiosk is on it. The row
+	// opens the wireless dialog.
+	if n.Wireless != "" {
+		DrawText(img, l.LabelX, l.Wifi.Min.Y+(netChipH-CharH)/2, i18n.T(i18n.NetWireless), ColorDim)
+		drawButton(img, l.Wifi, state.Wifi.summary(), n.Focus == netFocusWifi, false)
+	}
+
 	// What the interface has right now.
 	st := n.Status
 	line := i18n.Tf(i18n.NetNoCable, st.Interface)
-	if st.Carrier {
+	switch {
+	case wifiIsWireless(st.Interface):
+		line = i18n.Tf(i18n.NetIfWireless, st.Interface)
+	case st.Carrier:
 		line = i18n.Tf(i18n.NetCable, st.Interface)
 	}
 	addr := st.Address
