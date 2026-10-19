@@ -19,7 +19,10 @@
  *             q                          end the session
  *
  *   fd 4  what happens, one a line:
- *             MODE <w> <h> <hz> <display>   the screen, before connecting
+ *             MODE <w> <h> <hz> <display>   the screen, before connecting: with
+ *                                           several displays, the desktop they
+ *                                           make side by side, "+" between
+ *                                           their names
  *             CONNECTED <w> <h>             the session's desktop is showing
  *             POINTER <x> <y>               the server moved the pointer
  *             ERROR <class> <name> <text>   could not connect; class is one
@@ -539,6 +542,11 @@ static void* input(void* arg)
 		if (c == 'm' && n == 2) {
 			mx = p[0];
 			my = p[1];
+			/* Beside a display shorter than its neighbour the pointer
+			 * would be out of sight: it stays on the display, and the
+			 * kiosk is told where. */
+			if (kms_clamp(sc->kms, &mx, &my))
+				say("POINTER %d %d", mx, my);
 			kms_cursor_move(sc->kms, mx, my);
 			moved = true;
 			if (line_ready(a->lines))
@@ -635,6 +643,31 @@ static void* stats(void* arg)
 	return NULL;
 }
 
+/* set_monitors tells the server the displays: it then puts its taskbar, its
+ * windows and its full-screen video on one of them, not across the gap. The
+ * first is the primary. */
+static bool set_monitors(rdpSettings* s, const struct kms* kms)
+{
+	int n = kms_outputs(kms);
+	if (n < 2)
+		return true;
+	rdpMonitor m[8] = { 0 };
+	for (int i = 0; i < n && i < 8; i++) {
+		int x, y, w, h;
+		kms_output(kms, i, &x, &y, &w, &h);
+		m[i].x = x;
+		m[i].y = y;
+		m[i].width = w;
+		m[i].height = h;
+		m[i].is_primary = i == 0;
+		m[i].orig_screen = (UINT32)i;
+		fprintf(stderr, "sc-rdp: monitor %d at %d,%d %dx%d%s\n", i, x, y, w, h,
+		        i == 0 ? ", primary" : "");
+	}
+	return freerdp_settings_set_bool(s, FreeRDP_UseMultimon, TRUE) &&
+	       freerdp_settings_set_monitor_def_array_sorted(s, m, (size_t)(n < 8 ? n : 8));
+}
+
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -728,6 +761,12 @@ int main(void)
 		freerdp_settings_set_string(context->settings, FreeRDP_Password, password);
 		memset(password, 0, strlen(password));
 		free(password);
+	}
+	if (!set_monitors(context->settings, kms)) {
+		say("ERROR other - the monitor layout was refused");
+		freerdp_client_context_free(context);
+		kms_close(kms);
+		return 2;
 	}
 
 	sc_yuv_install();

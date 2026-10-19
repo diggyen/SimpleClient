@@ -104,10 +104,13 @@ that one, and only while the session lasts:
 ## Linux servers
 
 Windows serves the kiosk as it is. A Linux desktop needs xrdp, and the one
-distributions package (0.9 on Ubuntu 24.04 and Linux Mint 22) sends the screen
-as bitmaps: no H.264, a fraction of the frame rate. One script, run once on the
-server, builds xrdp 0.10 with H.264 and sets it up for the kiosks — up to 120
-fps, sound both ways through PipeWire or PulseAudio, the Turkish keyboards
+distributions package (0.9 on Ubuntu 24.04 and Linux Mint 22) has no graphics
+pipeline: the screen goes as bitmaps, tile by tile. One script, run once on the
+server, builds xrdp 0.10 and sets it up for the kiosks — RemoteFX at up to 120
+fps, which encodes only what changed (a window dragged across a 1920x1080
+kiosk moves at over 100 fps, with xrdp at a fifth of a core), H.264 for links
+slower than a LAN (`--h264`), sound both ways through PipeWire or PulseAudio,
+the Turkish keyboards
 (which xrdp does not map), the machine's own desktop for every user, no polkit
 prompts, the kiosks' USB devices over USB/IP (agent on port 3241; the kernel
 needs `vhci-hcd`, which the script installs where it is packaged separately),
@@ -129,7 +132,8 @@ upgrade.
 `xfce`, `plasmax11`, ...). A desktop that runs only on Wayland cannot be served
 by xrdp. KDE Plasma 6 keeps its X11 session in a package of its own, which
 Kubuntu (25.10 and later) and Fedora leave out of a fresh install; the script
-adds it. Plasma 6.8 and later have none (Arch, openSUSE Tumbleweed), nor does
+adds it, and turns KDE's compositor off in remote sessions, which have no GPU
+for it. Plasma 6.8 and later have none (Arch, openSUSE Tumbleweed), nor does
 the newest GNOME: remote sessions there need a second desktop, such as Xfce.
 
 ## Build it
@@ -167,9 +171,12 @@ image, testing against a real RDP server, and cutting a release.
 
 Design boundaries, not bugs waiting to be filed:
 
-- **The session takes the display's own resolution**, at its highest refresh
+- **The session takes each display's own resolution**, at its highest refresh
   rate (a 4K screen that manages only 30 Hz at 4K gets its largest 60 Hz mode);
-  there is no setting for it. One display per session.
+  there is no setting for it. Up to four displays make one desktop, side by
+  side in the order the graphics card lists them, the first the primary — the
+  server's taskbar goes there. The order cannot be changed yet, and a display
+  plugged in during a session joins at the next one.
 - **No clipboard redirection.**
 - **A smart-card reader on a Linux server is the whole server's.** Every remote
   session there can reach the readers pcscd has; the card's PIN still guards it.
