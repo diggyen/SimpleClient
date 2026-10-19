@@ -64,7 +64,7 @@ func TestEngine_Session(t *testing.T) {
 	log := useFakeEngine(t, "")
 	pointer := make(chan [2]int, 1)
 	e, err := StartEngine("10.0.0.5:3389", Credentials{Username: "admin", Password: "s3cret", Domain: "CORP"},
-		func(x, y int) { pointer <- [2]int{x, y} })
+		[]string{"/drive:hotplug,*"}, func(x, y int) { pointer <- [2]int{x, y} })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestEngine_Session(t *testing.T) {
 	}
 	want := []string{
 		"arg /v:10.0.0.5:3389", "arg /u:admin", "arg /d:CORP", "arg /kbd:layout:0x00000409",
-		"arg /log-level:WARN", "password s3cret", "start",
+		"arg /drive:hotplug,*", "arg /log-level:WARN", "password s3cret", "start",
 		"m 5 6", "k 30 0 1", "k 72 1 1", "b 1 1 5 6", "b 1 0 5 6", "w -2 5 6", "q",
 	}
 	if lines := strings.Split(strings.TrimSpace(string(got)), "\n"); strings.Join(lines, "|") != strings.Join(want, "|") {
@@ -109,7 +109,7 @@ func TestEngine_Session(t *testing.T) {
 // A rejected account is reported as such, not as an engine that cannot run.
 func TestEngine_AuthError(t *testing.T) {
 	useFakeEngine(t, "auth")
-	_, err := StartEngine("10.0.0.5:3389", Credentials{Username: "admin", Password: "wrong"}, nil)
+	_, err := StartEngine("10.0.0.5:3389", Credentials{Username: "admin", Password: "wrong"}, nil, nil)
 	var ee *EngineError
 	if !errors.As(err, &ee) || ee.Class != "auth" || errors.Is(err, ErrNoEngine) {
 		t.Fatalf("got %v, want an auth EngineError", err)
@@ -120,11 +120,11 @@ func TestEngine_AuthError(t *testing.T) {
 // is not there at all leaves the session to the built-in client.
 func TestEngine_FallsBack(t *testing.T) {
 	useFakeEngine(t, "crash")
-	if _, err := StartEngine("10.0.0.5:3389", Credentials{}, nil); !errors.Is(err, ErrNoEngine) {
+	if _, err := StartEngine("10.0.0.5:3389", Credentials{}, nil, nil); !errors.Is(err, ErrNoEngine) {
 		t.Fatalf("crash: got %v, want ErrNoEngine", err)
 	}
 	EnginePath = filepath.Join(t.TempDir(), "missing")
-	if _, err := StartEngine("10.0.0.5:3389", Credentials{}, nil); !errors.Is(err, ErrNoEngine) {
+	if _, err := StartEngine("10.0.0.5:3389", Credentials{}, nil, nil); !errors.Is(err, ErrNoEngine) {
 		t.Fatalf("missing: got %v, want ErrNoEngine", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestEngine_FallsBack(t *testing.T) {
 // A session whose connection died is worth reconnecting; Failed says so.
 func TestEngine_Lost(t *testing.T) {
 	useFakeEngine(t, "lost")
-	e, err := StartEngine("10.0.0.5:3389", Credentials{Username: "u", Password: "p"}, nil)
+	e, err := StartEngine("10.0.0.5:3389", Credentials{Username: "u", Password: "p"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -118,6 +118,12 @@ coldplug
 sleep 1
 coldplug
 
+# A card reader's slot is a disk that is always there: a card going in is a
+# new medium, which the kernel notices only when it asks the drive. On a
+# desktop udisks has it ask; here it asks every two seconds, so a card put in
+# during a session shows up as a drive.
+echo 2000 > /sys/module/block/parameters/events_dfl_poll_msecs 2>/dev/null
+
 # Run the CPU flat out. A kiosk spends its life decoding the remote desktop;
 # left to the BIOS's P-state a low-power thin-client CPU decodes at a fraction
 # of its speed, which is the difference between smooth and stuttering.

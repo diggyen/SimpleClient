@@ -175,6 +175,26 @@ RUN set -e; cd /src; \
     cmake --build freerdp-build; \
     cmake --install freerdp-build
 
+# Smart cards: pcscd, which FreeRDP's smart-card redirection reaches through
+# libpcsclite, and the CCID driver, which covers nearly every USB reader and
+# token. pcscd is built here rather than taken from Alpine, whose build finds
+# readers through udev: the kiosk runs no udev daemon, so a reader plugged in
+# after boot would never be seen. Built for libusb, pcscd looks for readers
+# itself, every second. The CCID driver is Alpine's. The tarball's SHA-512
+# matched Alpine's own record of it when the sum below was taken.
+ARG PCSC_VERSION=2.5.2
+ARG PCSC_SHA256=60a08942d8c00a1d86a3bf4c64eddbf7a5569c7c54f6904e3f07801bb5316acd
+RUN set -e; apk add --no-cache meson flex perl ccid; cd /src; \
+    curl -fsSLo pcsc.tar.xz "https://pcsclite.apdu.fr/files/pcsc-lite-${PCSC_VERSION}.tar.xz"; \
+    echo "${PCSC_SHA256}  pcsc.tar.xz" | sha256sum -c -; \
+    tar -xJf pcsc.tar.xz; \
+    meson setup pcsc-build "pcsc-lite-${PCSC_VERSION}" --prefix=/usr --libdir=lib --buildtype=release \
+        -Dlibudev=false -Dlibusb=true -Dpolkit=false -Dlibsystemd=false -Dserial=false \
+        -Dusbdropdir=/usr/lib/pcsc/drivers -Dipcdir=/run/pcscd; \
+    meson compile -C pcsc-build; \
+    meson install -C pcsc-build; \
+    grep -A1 ifdCapabilities /usr/lib/pcsc/drivers/ifd-ccid.bundle/Contents/Info.plist
+
 COPY engine/ /src/engine/
 COPY build/copy-bins.sh /usr/local/bin/copy-bins
 # yuv_test checks the engine's own YUV conversion against FreeRDP's, byte for
@@ -186,6 +206,9 @@ RUN set -e; chmod +x /usr/local/bin/copy-bins; \
     cc -O2 -Wall -o /usr/bin/sc-rdp /src/engine/sc-rdp.c /src/engine/kms.c /src/engine/yuv.c $FLAGS; \
     copy-bins /out sc-rdp; \
     if [ -d /usr/lib/freerdp3 ]; then mkdir -p /out/usr/lib; cp -a /usr/lib/freerdp3 /out/usr/lib/; fi; \
+    CCID=/usr/lib/pcsc/drivers/ifd-ccid.bundle; \
+    copy-bins /out pcscd /usr/lib/libpcsclite.so.1 /usr/lib/libpcsclite_real.so.1 "$CCID/Contents/Linux/libccid.so"; \
+    cp -a "$CCID/Contents/Info.plist" "/out$CCID/Contents/"; \
     find /out -type f | sort; du -sh /out
 
 # ── Initramfs ─────────────────────────────────────────────────────────────────
@@ -280,8 +303,14 @@ COPY build/sc-install /rootfs/sbin/sc-install
 COPY build/sc-net /rootfs/sbin/sc-net
 COPY build/grub-disk.cfg /rootfs/usr/share/simpleclient/grub-disk.cfg
 
+# /media is where USB drives are mounted for sessions to offer the server.
+# FreeRDP looks there, and under /media/<user>, by the name of the user it runs
+# as; without a passwd entry to name root it finds no drives at all.
 RUN mkdir -p /out \
  && mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/tmp /rootfs/run /rootfs/etc /rootfs/bin \
+        /rootfs/media \
+ && echo 'root:x:0:0:root:/tmp:/bin/sh' > /rootfs/etc/passwd \
+ && echo 'root:x:0:' > /rootfs/etc/group \
  && chmod +x /rootfs/init /rootfs/sbin/simpleclient /rootfs/sbin/sc-install /rootfs/sbin/sc-net \
         /rootfs/usr/share/udhcpc/default.script
 

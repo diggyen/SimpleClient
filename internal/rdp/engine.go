@@ -77,10 +77,11 @@ type Engine struct {
 	Display                string
 }
 
-// StartEngine connects to addr ("host:port") through the engine. onPointer,
-// if not nil, is called when the remote desktop moves the pointer. A nil
+// StartEngine connects to addr ("host:port") through the engine, with the
+// engine options devices gives for the kiosk's USB devices. onPointer, if not
+// nil, is called when the remote desktop moves the pointer. A nil
 // session and ErrNoEngine mean the built-in client should be used instead.
-func StartEngine(addr string, creds Credentials, onPointer func(x, y int)) (*Engine, error) {
+func StartEngine(addr string, creds Credentials, devices []string, onPointer func(x, y int)) (*Engine, error) {
 	if _, err := os.Stat(EnginePath); err != nil {
 		return nil, ErrNoEngine
 	}
@@ -114,7 +115,7 @@ func StartEngine(addr string, creds Credentials, onPointer func(x, y int)) (*Eng
 	// The connection first, then "start". The password goes down the pipe:
 	// on the command line every process could read it.
 	var b strings.Builder
-	for _, a := range engineArgs(addr, creds) {
+	for _, a := range engineArgs(addr, creds, devices) {
 		fmt.Fprintf(&b, "arg %s\n", a)
 	}
 	fmt.Fprintf(&b, "password %s\nstart\n", creds.Password)
@@ -142,7 +143,7 @@ func StartEngine(addr string, creds Credentials, onPointer func(x, y int)) (*Eng
 
 // engineArgs are the FreeRDP arguments for one connection. The engine adds
 // its own for the display: the resolution, the graphics pipeline, H.264.
-func engineArgs(addr string, creds Credentials) []string {
+func engineArgs(addr string, creds Credentials, devices []string) []string {
 	args := []string{"/v:" + addr}
 	if creds.Username != "" {
 		args = append(args, "/u:"+creds.Username)
@@ -166,6 +167,7 @@ func engineArgs(addr string, creds Credentials) []string {
 			}
 		}
 	}
+	args = append(args, devices...)
 
 	if Debug {
 		args = append(args, "/log-level:DEBUG")

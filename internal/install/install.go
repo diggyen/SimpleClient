@@ -84,7 +84,7 @@ func Disks() []Disk {
 		if size < MinSize {
 			continue
 		}
-		if isInstallMedium(filepath.Join(devDir, name)) {
+		if IsInstallMedium(filepath.Join(devDir, name)) {
 			continue
 		}
 		disks = append(disks, Disk{Name: name, Model: model(dir, name), Size: size, Bus: bus(dir, name)})
@@ -153,10 +153,10 @@ func readTrim(path string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// isInstallMedium reports whether dev holds the SimpleClient ISO — the USB
+// IsInstallMedium reports whether dev holds the SimpleClient ISO — the USB
 // stick written with it, booted from right now. Its ISO 9660 primary volume
 // descriptor is sector 16: "CD001" at byte 1, the volume ID at byte 40.
-func isInstallMedium(dev string) bool {
+func IsInstallMedium(dev string) bool {
 	f, err := os.Open(dev)
 	if err != nil {
 		return false

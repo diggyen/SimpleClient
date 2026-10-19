@@ -8,6 +8,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 	"github.com/diggyen/SimpleClient/internal/install"
+	"github.com/diggyen/SimpleClient/internal/usb"
 	"github.com/diggyen/SimpleClient/internal/version"
 )
 
@@ -100,6 +101,9 @@ func startInstall(state *UIState) {
 	in.Phase = InstallRunning
 	in.Step, in.Total, in.StepName, in.Err = 0, 6, "", ""
 
+	// A USB disk may have drives mounted for sessions; the installer is about
+	// to write over it.
+	usb.HoldDisk(disk.Name)
 	log.Printf("install: %s (%s), %s", disk.Path(), disk.Label(), opt.Table)
 	go func() {
 		err := install.Run(disk, opt, func(step, total int, name string) {

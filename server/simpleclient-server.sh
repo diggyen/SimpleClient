@@ -12,20 +12,24 @@
 #     them a Turkish keyboard types as a US one
 #   - sound both ways, through PipeWire or PulseAudio, whichever the desktop
 #     runs, and USB drives through xrdp's FUSE file system
+#   - the kiosks' printers, scanners, smart-card readers and serial adapters
+#     attached here over USB/IP, as if plugged in, by an agent the kiosks
+#     reach on port 3241; the PC/SC daemon and CCID driver for the cards
 #   - the desktop the machine already has (Cinnamon, MATE, Xfce, KDE Plasma,
 #     GNOME, ...) for every user without a ~/.xsession of their own
 #   - no polkit password prompts for colour profiles and package lists,
 #     which a remote session otherwise gets on every login
-#   - port 3389 open in ufw or firewalld
+#   - ports 3389 and 3241 open in ufw or firewalld
 # It can be run again: to upgrade, or after a distribution upgrade has
 # replaced the libraries xrdp was built against.
 #
-# Usage:  sudo bash simpleclient-server.sh [--session NAME] [--no-audio]
+# Usage:  sudo bash simpleclient-server.sh [--session NAME] [--no-audio] [--no-usb]
 #   --session NAME  the desktop for remote sessions, a file name from
 #                   /usr/share/xsessions without .desktop (cinnamon, mate,
 #                   xfce, plasmax11, ubuntu-xorg, ...); default: the first of
 #                   those this machine has
 #   --no-audio      leave sound alone
+#   --no-usb        no USB/IP agent: drives still come, by name
 set -Eeuo pipefail
 
 XRDP_VERSION=0.10.6.1
@@ -51,12 +55,14 @@ die() {
 
 WANT_SESSION=""
 AUDIO=1
+USB=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --session) WANT_SESSION=${2:-}; shift ;;
         --session=*) WANT_SESSION=${1#--session=} ;;
         --no-audio) AUDIO=0 ;;
-        -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+        --no-usb) USB=0 ;;
+        -h|--help) sed -n '2,/^set -Eeuo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         *) die "bilinmeyen seçenek: $1" ;;
     esac
     shift
@@ -318,17 +324,20 @@ EOF
 
 # Remote sessions are not at the console, so polkit asks for a password — on
 # every login, for things no one asked for: colour profiles for the virtual
-# display, refreshing the package lists.
+# display, refreshing the package lists. And it refuses them the smart-card
+# daemon outright, which allows only the user at the console: a card in a
+# kiosk's reader would be unusable in the session it was put in for.
 configure_polkit() {
     local actions=(org.freedesktop.color-manager.create-device org.freedesktop.color-manager.create-profile
                    org.freedesktop.color-manager.delete-device org.freedesktop.color-manager.delete-profile
                    org.freedesktop.color-manager.modify-device org.freedesktop.color-manager.modify-profile
-                   org.freedesktop.packagekit.system-sources-refresh)
+                   org.freedesktop.packagekit.system-sources-refresh
+                   org.debian.pcsc-lite.access_pcsc org.debian.pcsc-lite.access_card)
     if [ -d /etc/polkit-1/rules.d ] || [ -d /usr/share/polkit-1/rules.d ]; then
         mkdir -p /etc/polkit-1/rules.d
         {
             echo "// Written by simpleclient-server.sh: no password prompts in remote"
-            echo "// sessions for colour profiles and package lists."
+            echo "// sessions for colour profiles and package lists; smart cards."
             echo "polkit.addRule(function(action, subject) {"
             echo "    var quiet = [$(printf '"%s", ' "${actions[@]}" | sed 's/, $//')];"
             echo "    if (quiet.indexOf(action.id) >= 0 && subject.local === false) {"
@@ -435,13 +444,472 @@ setup_audio() {
     warn "PipeWire (0.3.58+) ya da PulseAudio bulunamadı; ses atlandı"
 }
 
+# ── USB ──────────────────────────────────────────────────────────────────────
+# A kiosk's drives come through RDP, by name. Everything else it offers —
+# printers, scanners, smart-card readers, serial adapters — is attached here
+# over USB/IP by the agent below, which the kiosks reach on port 3241: the
+# devices appear as if plugged into this machine, and go when the session
+# ends. That takes the kernel's vhci-hcd; smart cards also take the PC/SC
+# daemon and the CCID driver.
+USB_READY=0
+setup_usb() {
+    if ! modprobe vhci-hcd 2>/dev/null; then
+        case $FAMILY in
+            apt) apt-get install -y "linux-modules-extra-$(uname -r)" || true ;;
+            dnf) dnf install -y "kernel-modules-extra-$(uname -r)" || true ;;
+        esac
+        if ! modprobe vhci-hcd 2>/dev/null; then
+            warn "Bu çekirdekte USB/IP (vhci-hcd) yok: kiosklardaki yazıcı, tarayıcı ve kart okuyucular bu makineye takılamaz; USB bellekler yine gelir"
+            return
+        fi
+    fi
+    say "USB: kiosklardaki yazıcı, tarayıcı, kart okuyucu ve seri aygıtlar bu makineye USB/IP ile takılır"
+    case $FAMILY in
+        apt) apt-get install -y --no-install-recommends python3 pcscd libccid acl ;;
+        dnf) dnf install -y python3 pcsc-lite pcsc-lite-ccid acl ;;
+        zypper) zypper -n in python3 pcsc-lite pcsc-ccid acl ;;
+        pacman) pacman -S --noconfirm --needed python pcsclite ccid acl ;;
+    esac
+    echo vhci-hcd > /etc/modules-load.d/simpleclient-usb.conf
+    write_usb_agent
+    cat > /etc/systemd/system/simpleclient-usb.service <<'UNIT'
+[Unit]
+Description=SimpleClient USB agent: the kiosks' USB devices over USB/IP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/env python3 /usr/local/sbin/simpleclient-usb-agent
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    USB_READY=1
+}
+
+write_usb_agent() {
+    cat > /usr/local/sbin/simpleclient-usb-agent <<'AGENT'
+#!/usr/bin/env python3
+# simpleclient-usb-agent, written by simpleclient-server.sh.
+#
+# Attaches the USB devices of SimpleClient kiosks that have a session open on
+# this machine: printers, scanners, smart-card readers, serial adapters appear
+# here as if plugged in, for as long as the kiosk stays connected.
+#
+# A kiosk connects to port 3241 when its session starts and keeps the
+# connection open; it offers its devices over USB/IP on its own port 3240, to
+# this machine only. Only a kiosk with an RDP connection open here is served.
+# Nothing that would act as a keyboard or mouse here is let through: the
+# interfaces of attached devices start unauthorized, and only the others are
+# authorized. Each device's nodes are given to the user whose session the
+# kiosk is in, as a desktop does for the user at its console.
+import errno
+import glob
+import ipaddress
+import logging
+import os
+import re
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+AGENT_PORT = 3241
+USBIP_PORT = 3240
+RDP_PORT = int(os.environ.get("SIMPLECLIENT_RDP_PORT", "3389"))
+VHCI = "/sys/devices/platform/vhci_hcd.0"
+USB = "/sys/bus/usb/devices"
+SESMAN_LOG = "/var/log/xrdp-sesman.log"
+
+USBIP_VERSION = 0x0111
+OP_REQ_DEVLIST, OP_REP_DEVLIST = 0x8005, 0x0005
+OP_REQ_IMPORT, OP_REP_IMPORT = 0x8003, 0x0003
+DEVICE_LEN = 312
+VDEV_ST_NULL, VDEV_ST_USED = 4, 6
+CLASS_HID, CLASS_HUB = 0x03, 0x09
+
+log = logging.getLogger("simpleclient-usb")
+
+# vhci's ports are shared by every kiosk: which one each attached device is
+# on, and whose it is.
+lock = threading.Lock()
+owners = {}  # port -> Kiosk
+kiosks = {}  # ip -> Kiosk
+
+
+def read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def write(path, value):
+    with open(path, "w") as f:
+        f.write(value)
+
+
+def normal_ip(addr):
+    ip = ipaddress.ip_address(addr.split("%", 1)[0])
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return str(ip)
+
+
+def recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("connection closed")
+        buf += chunk
+    return buf
+
+
+def parse_device(rec):
+    (busnum, devnum, speed, vid, pid, _bcd, cls, _sub, _proto, _conf, _nconf,
+     nintf) = struct.unpack(">IIIHHHBBBBBB", rec[288:312])
+    return {"busid": rec[256:288].split(b"\0", 1)[0].decode(), "busnum": busnum,
+            "devnum": devnum, "speed": speed, "vid": vid, "pid": pid, "class": cls,
+            "nintf": nintf}
+
+
+def devlist(ip):
+    """The devices a kiosk offers, from its USB/IP port."""
+    with socket.create_connection((ip, USBIP_PORT), timeout=5) as s:
+        s.sendall(struct.pack(">HHI", USBIP_VERSION, OP_REQ_DEVLIST, 0))
+        _, code, status = struct.unpack(">HHI", recv_exact(s, 8))
+        if code != OP_REP_DEVLIST or status != 0:
+            raise ConnectionError("device list refused")
+        (n,) = struct.unpack(">I", recv_exact(s, 4))
+        devs = []
+        for _ in range(n):
+            d = parse_device(recv_exact(s, DEVICE_LEN))
+            d["classes"] = [recv_exact(s, 4)[0] for _ in range(d["nintf"])]
+            devs.append(d)
+        return devs
+
+
+def ports():
+    """vhci's ports: (port, hub, status, devid, local bus ID)."""
+    out = []
+    for name in sorted(os.listdir(VHCI)):
+        if name != "status" and not name.startswith("status."):
+            continue
+        for line in read(os.path.join(VHCI, name)).splitlines()[1:]:
+            f = line.split()
+            if len(f) >= 7 and f[0] in ("hs", "ss"):
+                out.append((int(f[1]), f[0], int(f[2]), int(f[4], 16), f[6]))
+    return out
+
+
+def import_device(ip, dev):
+    """Asks a kiosk for a device: the connection it is now carried on, and the
+    device as the kiosk describes it."""
+    s = socket.create_connection((ip, USBIP_PORT), timeout=10)
+    try:
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        # A kiosk switched off mid-session is noticed in half a minute, and
+        # its devices unplugged here.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 4)
+        busid = dev["busid"].encode().ljust(32, b"\0")
+        s.sendall(struct.pack(">HHI", USBIP_VERSION, OP_REQ_IMPORT, 0) + busid)
+        _, code, status = struct.unpack(">HHI", recv_exact(s, 8))
+        if code != OP_REP_IMPORT or status != 0:
+            raise ConnectionError("refused by the kiosk (status %d)" % status)
+        d = parse_device(recv_exact(s, DEVICE_LEN))
+        if d["busid"] != dev["busid"]:
+            raise ConnectionError("the kiosk answered for another device")
+        return s, d
+    except BaseException:
+        s.close()
+        raise
+
+
+def plug(s, d):
+    """Plugs an imported device into a free vhci port: the port and the
+    device's ID there. Callers hold lock."""
+    devid = (d["busnum"] << 16) | d["devnum"]
+    hub = "ss" if d["speed"] >= 5 else "hs"
+    for port, h, st, _, _ in ports():
+        if h != hub or st != VDEV_ST_NULL:
+            continue
+        try:
+            write(VHCI + "/attach", "%d %d %d %d" % (port, s.fileno(), devid, d["speed"]))
+            return port, devid
+        except OSError as e:
+            if e.errno != errno.EBUSY:
+                raise
+    raise OSError("no free USB/IP port")
+
+
+def detach(port):
+    try:
+        write(VHCI + "/detach", str(port))
+    except OSError:
+        pass
+
+
+def session_user(ip):
+    """The user whose session the kiosk at ip is in: the last login sesman
+    took from there."""
+    try:
+        with open(SESMAN_LOG, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - (1 << 20)))
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    user = None
+    for m in re.finditer(r"login request from xrdp for user: (\S+) IP: (\S+)", text):
+        try:
+            if normal_ip(m.group(2)) == ip:
+                user = m.group(1)
+        except ValueError:
+            pass
+    return user
+
+
+def rdp_peers():
+    """The addresses with an RDP connection open to this machine."""
+    peers = set()
+    for name in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(name) as f:
+                lines = f.read().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()
+            if len(f) < 4 or f[3] != "01" or int(f[1].rsplit(":", 1)[1], 16) != RDP_PORT:
+                continue
+            raw = bytes.fromhex(f[2].rsplit(":", 1)[0])
+            if sys.byteorder == "little":
+                # Each 32-bit word is printed in host order.
+                raw = b"".join(raw[i:i + 4][::-1] for i in range(0, len(raw), 4))
+            peers.add(normal_ip(str(ipaddress.ip_address(raw))))
+    return peers
+
+
+def device_nodes(busid):
+    """The device nodes of a USB device and of its interfaces' drivers."""
+    nodes = []
+    for root, _, files in os.walk(os.path.join(USB, busid)):
+        if "uevent" in files:
+            m = re.search(r"^DEVNAME=(.+)$", read(os.path.join(root, "uevent")), re.M)
+            if m:
+                nodes.append("/dev/" + m.group(1))
+    return nodes
+
+
+class Kiosk(threading.Thread):
+    def __init__(self, conn, ip):
+        super().__init__(daemon=True)
+        self.conn, self.ip, self.buf = conn, ip, b""
+        self.ports = {}  # bus ID on the kiosk -> (port, devid)
+        self.user = None
+
+    def run(self):
+        try:
+            self.serve()
+        except Exception as e:  # noqa: BLE001 - one kiosk must not stop the others
+            log.info("%s: %s", self.ip, e)
+        finally:
+            with lock:
+                for busid, (port, _) in self.ports.items():
+                    if owners.get(port) is self:
+                        detach(port)
+                        del owners[port]
+                        log.info("%s: %s detached", self.ip, busid)
+                if kiosks.get(self.ip) is self:
+                    del kiosks[self.ip]
+            self.conn.close()
+
+    def readline(self):
+        while b"\n" not in self.buf:
+            chunk = self.conn.recv(256)
+            if not chunk or len(self.buf) > 4096:
+                return None
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1)
+        return line.decode("ascii", "replace").strip()
+
+    def serve(self):
+        self.conn.settimeout(10)
+        if not (self.readline() or "").startswith("SIMPLECLIENT-USB "):
+            return
+        self.conn.sendall(b"OK 1\n")
+        self.conn.settimeout(2)
+        start = heard = time.monotonic()
+        rdp_seen, refresh, next_check = None, True, 0.0
+        while True:
+            try:
+                line = self.readline()
+                if line is None:
+                    return
+                heard = time.monotonic()
+                if line.startswith("DEVICES"):
+                    refresh = True
+            except socket.timeout:
+                pass
+            now = time.monotonic()
+            if now - heard > 35:
+                log.info("%s: no word from the kiosk", self.ip)
+                return
+            if not refresh and now < next_check:
+                continue
+            next_check = now + 5
+            if self.ip not in rdp_peers():
+                # Its session is being set up, or reconnecting.
+                if (rdp_seen is None and now - start > 60) or (rdp_seen and now - rdp_seen > 30):
+                    log.info("%s: no RDP session from the kiosk", self.ip)
+                    return
+                continue
+            rdp_seen = now
+            self.sync(refresh)
+            refresh = False
+
+    def sync(self, refresh):
+        if refresh or self.user is None:
+            self.user = session_user(self.ip)
+        with lock:
+            state = {p: (st, devid, local) for p, _, st, devid, local in ports()}
+            for busid, (port, devid) in list(self.ports.items()):
+                st, dv, local = state.get(port, (0, 0, ""))
+                if owners.get(port) is not self or st != VDEV_ST_USED or dv != devid:
+                    # Unplugged at the kiosk: vhci let go of it by itself.
+                    del self.ports[busid]
+                    if owners.get(port) is self:
+                        del owners[port]
+                    log.info("%s: %s unplugged", self.ip, busid)
+                else:
+                    self.admit(local)
+        if not refresh:
+            return
+        try:
+            offered = devlist(self.ip)
+        except OSError as e:
+            log.info("%s: no device list: %s", self.ip, e)
+            return
+        for d in offered:
+            if d["busid"] in self.ports:
+                continue
+            name = "%s (%04x:%04x)" % (d["busid"], d["vid"], d["pid"])
+            if d["class"] == CLASS_HUB or any(c in (CLASS_HID, CLASS_HUB) for c in d["classes"]):
+                log.info("%s: %s not attached: it would act as a keyboard or mouse here", self.ip, name)
+                continue
+            try:
+                s, dev = import_device(self.ip, d)
+                try:
+                    with lock:
+                        port, devid = plug(s, dev)
+                        owners[port] = self
+                finally:
+                    # The kernel holds the connection now.
+                    s.close()
+            except Exception as e:  # noqa: BLE001
+                log.info("%s: %s not attached: %s", self.ip, name, e)
+                continue
+            self.ports[d["busid"]] = (port, devid)
+            log.info("%s: %s attached on port %d%s", self.ip, name, port,
+                     " for " + self.user if self.user else "")
+            threading.Thread(target=self.settle, args=(port, devid), daemon=True).start()
+
+    def settle(self, port, devid):
+        """Admits a just-attached device's interfaces as they appear."""
+        for _ in range(20):
+            time.sleep(0.5)
+            with lock:
+                if owners.get(port) is not self:
+                    return
+                for p, _, st, dv, local in ports():
+                    if p == port and st == VDEV_ST_USED and dv == devid:
+                        self.admit(local)
+
+    def admit(self, local):
+        """Authorizes a device's interfaces but input ones, and gives its
+        nodes to the session's user."""
+        for intf in glob.glob(os.path.join(USB, local, local + ":*")):
+            cls = read(os.path.join(intf, "bInterfaceClass"))
+            if cls and int(cls, 16) != CLASS_HID and read(os.path.join(intf, "authorized")) == "0":
+                try:
+                    write(os.path.join(intf, "authorized"), "1")
+                except OSError as e:
+                    log.info("%s: %s: %s", self.ip, intf, e)
+        if self.user:
+            for node in device_nodes(local):
+                try:
+                    subprocess.run(["setfacl", "-m", "u:%s:rw" % self.user, node],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                except OSError:
+                    return
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
+    subprocess.run(["modprobe", "vhci-hcd"], check=False)
+    if not os.path.isdir(VHCI):
+        log.error("vhci-hcd is not available in this kernel: USB/IP cannot attach anything")
+        sys.exit(1)
+    for hub in glob.glob(VHCI + "/usb[0-9]*"):
+        write(hub + "/interface_authorized_default", "0")
+    # What a previous run attached belongs to no kiosk now; each one in a
+    # session connects again within seconds and gets its devices back.
+    for port, _, st, _, _ in ports():
+        if st == VDEV_ST_USED:
+            detach(port)
+    try:
+        srv = socket.create_server(("", AGENT_PORT), family=socket.AF_INET6, dualstack_ipv6=True)
+    except OSError:
+        srv = socket.create_server(("", AGENT_PORT))
+    log.info("listening on port %d for kiosks with an RDP session on port %d", AGENT_PORT, RDP_PORT)
+    while True:
+        conn, addr = srv.accept()
+        ip = normal_ip(addr[0])
+        k = Kiosk(conn, ip)
+        with lock:
+            old = kiosks.get(ip)
+            kiosks[ip] = k
+        if old:
+            # The kiosk connected again: the old connection is dead, and
+            # its devices go back before the new one takes them.
+            try:
+                old.conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            old.join(10)
+        k.start()
+
+
+if __name__ == "__main__":
+    main()
+AGENT
+    chmod 755 /usr/local/sbin/simpleclient-usb-agent
+}
+
 # ── Firewall and services ────────────────────────────────────────────────────
 open_firewall() {
+    local ports=(3389) p
+    if [ "$USB_READY" = 1 ]; then
+        ports+=(3241)
+    fi
     if installed ufw && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw allow 3389/tcp
+        for p in "${ports[@]}"; do
+            ufw allow "$p/tcp"
+        done
     fi
     if installed firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
-        firewall-cmd --permanent --add-port=3389/tcp
+        for p in "${ports[@]}"; do
+            firewall-cmd --permanent --add-port="$p/tcp"
+        done
         firewall-cmd --reload
     fi
 }
@@ -450,16 +918,28 @@ start_services() {
     # Freshly installed files take the SELinux labels the policy gives
     # xrdp's own paths.
     if installed selinuxenabled && selinuxenabled; then
-        restorecon -R /usr/sbin/xrdp* /etc/xrdp /usr/lib*/xrdp 2>/dev/null || true
+        restorecon -R /usr/sbin/xrdp* /etc/xrdp /usr/lib*/xrdp /usr/local/sbin 2>/dev/null || true
     fi
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
         systemctl enable xrdp-sesman xrdp
         systemctl restart xrdp-sesman xrdp
+        if [ "$USB_READY" = 1 ]; then
+            systemctl enable --now pcscd.socket 2>/dev/null || true
+            systemctl enable simpleclient-usb
+            systemctl restart simpleclient-usb
+        fi
         sleep 1
         systemctl is-active --quiet xrdp || die "xrdp başlamadı: journalctl -u xrdp"
+        if [ "$USB_READY" = 1 ] && ! systemctl is-active --quiet simpleclient-usb; then
+            warn "USB ajanı başlamadı: journalctl -u simpleclient-usb"
+        fi
     else
-        warn "systemd çalışmıyor: xrdp-sesman ve xrdp elle başlatılmalı"
+        local extra=""
+        if [ "$USB_READY" = 1 ]; then
+            extra=", pcscd ve simpleclient-usb-agent"
+        fi
+        warn "systemd çalışmıyor: xrdp-sesman, xrdp$extra elle başlatılmalı"
     fi
 }
 
@@ -474,6 +954,9 @@ configure_session
 configure_polkit
 if [ "$AUDIO" = 1 ]; then
     setup_audio
+fi
+if [ "$USB" = 1 ]; then
+    setup_usb
 fi
 open_firewall
 start_services

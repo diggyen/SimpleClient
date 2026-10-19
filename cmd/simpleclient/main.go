@@ -20,9 +20,11 @@ import (
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
+	"github.com/diggyen/SimpleClient/internal/install"
 	"github.com/diggyen/SimpleClient/internal/rdp"
 	"github.com/diggyen/SimpleClient/internal/scanner"
 	"github.com/diggyen/SimpleClient/internal/ui"
+	"github.com/diggyen/SimpleClient/internal/usb"
 )
 
 func main() {
@@ -89,6 +91,11 @@ func main() {
 	for _, d := range audio.Scan() {
 		warnf("sound: %s", d)
 	}
+
+	// USB drives are mounted as they are plugged in, for sessions to offer the
+	// server; the stick the kiosk boots from is not one of them.
+	usb.SetMediumCheck(install.IsInstallMedium)
+	usb.Startup()
 
 	scan := scanner.New(cfg.MaxWorkers, cfg.ScanTimeout)
 

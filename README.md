@@ -39,10 +39,9 @@ sync
 
 Verify it first if you like: `shasum -a 256 -c SHA256SUMS`.
 
-Boots on UEFI and legacy BIOS machines. **Secure Boot must be off** — the
-bootloader is unsigned, and a machine enforcing Secure Boot refuses the stick
-without printing anything, which looks exactly like an empty drive. If it does
-not boot, [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-usb-stick-does-not-boot)
+Boots on UEFI and legacy BIOS machines, with Secure Boot on or off: the boot
+chain is the one Debian's own install media use — shim signed by Microsoft,
+GRUB and the kernel signed by Debian. If it does not boot, [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-usb-stick-does-not-boot)
 walks through the causes in order of likelihood.
 
 ## Use it
@@ -56,6 +55,11 @@ walks through the causes in order of likelihood.
 | `F5` | Rescan the network |
 | `F2` | Switch language (English ⇄ Türkçe), and the keyboard layout with it |
 | `F3` | Switch keyboard layout on its own (US ⇄ TR-Q ⇄ TR-F) |
+| `F4` | Move sound to the next output: speakers or headphones, the monitor, a USB headset |
+| `F6` | In the credential dialog: show or hide the domain field |
+| `F7` | Connect to a server by address (`10.0.0.5`, `rdp.example.com:53389`) |
+| `F8` | Network settings: DHCP or a fixed address |
+| `F9` | Install to the machine's disk (when started from a USB stick or CD) |
 | `Ctrl`+`Alt`+`End` | Disconnect from an active session |
 
 The scan probes TCP port 3389 across the subnet the machine got from DHCP. If
@@ -75,9 +79,27 @@ next time you open its dialog, with the cursor in the password field. That
 memory lives in RAM and is gone after a power cycle — the image boots read-only
 and has nowhere to write. The password is never stored.
 
-The kiosk reaches **its own subnet only**. A server on another subnet is not
-discovered, but it can be added by hand: `rdphost=<ip>` on the GRUB command line
-puts it in the list ready to connect.
+The scan covers **the kiosk's own subnet only**. A server anywhere else is
+reached with `F7`, by address or name; once connected to, it stays in the list.
+
+## USB devices
+
+What is plugged into the kiosk goes to the server the session is with — only
+that one, and only while the session lasts:
+
+- **Drives** — USB sticks, USB disks, SD cards (FAT, exFAT, NTFS, ext4) — appear
+  on the server as a drive under their own name: in *This PC* on Windows, in
+  `~/thinclient_drives` on Linux. A stick can be pulled out at any time;
+  what the server saved is on it within a second.
+- **Everything else** — printers, scanners, smart-card readers and tokens
+  (e-İmza, ID cards), USB-serial console cables, other devices — goes to the
+  server whole, as if plugged into it, and works there with the server's own
+  drivers. A Windows server gets them through RDP's USB redirection, smart-card
+  readers through its smart-card redirection. A Linux server gets them over
+  USB/IP when it runs SimpleClient's agent, which the server script below
+  installs.
+- **Keyboards, mice, touch screens, headsets, hubs and network adapters** stay
+  with the kiosk, which uses them.
 
 ## Linux servers
 
@@ -87,7 +109,9 @@ as bitmaps: no H.264, a fraction of the frame rate. One script, run once on the
 server, builds xrdp 0.10 with H.264 and sets it up for the kiosks — up to 120
 fps, sound both ways through PipeWire or PulseAudio, the Turkish keyboards
 (which xrdp does not map), the machine's own desktop for every user, no polkit
-prompts, port 3389 open:
+prompts, the kiosks' USB devices over USB/IP (agent on port 3241; the kernel
+needs `vhci-hcd`, which the script installs where it is packaged separately),
+ports 3389 and 3241 open:
 
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/diggyen/SimpleClient/iyilestirme/server/simpleclient-server.sh
@@ -138,22 +162,14 @@ image, testing against a real RDP server, and cutting a release.
 
 Design boundaries, not bugs waiting to be filed:
 
-- **Secure Boot is not supported.** The bootloader is unsigned.
-- **No RemoteFX/GFX codecs.** A server sending only those shows a black screen
-  on a session that is genuinely live. Every Windows server tested falls back to
-  legacy bitmap updates, which work.
-- **Colour depth is whatever the server picks.** Windows commonly negotiates
-  16bpp, which is what the tile decoder is tuned for.
-- **Resolution follows the framebuffer** the kernel hands over; there is no
-  override.
-- **No in-UI host entry.** A server off the local subnet has to be named at boot
-  with `rdphost=<ip>`; there is no box to type one into while running.
-- **No clipboard, audio or drive redirection.**
-- **Extended keys are not flagged.** The arrow cluster and the navigation keys
-  reach a session as their numpad equivalents; right Ctrl and right Alt are not
-  mapped.
-- **One keyboard and one pointer.** On a machine with two keyboards, the first
-  recognised wins.
+- **The session takes the display's own resolution**, at its highest refresh
+  rate (a 4K screen that manages only 30 Hz at 4K gets its largest 60 Hz mode);
+  there is no setting for it. One display per session.
+- **No clipboard redirection.**
+- **A smart-card reader on a Linux server is the whole server's.** Every remote
+  session there can reach the readers pcscd has; the card's PIN still guards it.
+- **A webcam with a microphone stays with the kiosk**, which takes it for a
+  headset.
 
 ## Repository layout
 
@@ -175,7 +191,7 @@ go missing. See [ARCHITECTURE.md](docs/ARCHITECTURE.md#rdp).
 
 ## Requirements
 
-- x86-64 machine, UEFI or BIOS, Secure Boot off
+- x86-64 machine, UEFI or BIOS, Secure Boot on or off
 - 512 MB RAM
 - A wired or wireless NIC with a driver in Alpine's `linux-lts` kernel
 - Somewhere on the same subnet actually listening on 3389

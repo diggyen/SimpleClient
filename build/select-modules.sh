@@ -7,7 +7,8 @@
 # the ones /init loads. Copying the whole tree would add ~200 MB; these subtrees
 # cover NIC, framebuffer/DRM, input and HID/USB, which is everything a
 # framebuffer kiosk touches, plus the disk controllers (NVMe, SATA, eMMC, USB
-# storage) and file systems that installing to disk and booting from it need.
+# storage) and file systems that installing to disk and booting from it need,
+# and the ones a USB drive brought to a session carries: FAT, exFAT, NTFS.
 #
 # Of kernel/net only af_packet, which is not optional: busybox udhcpc opens an
 # AF_PACKET socket to send its DHCP discover. Without it every boot silently
@@ -49,7 +50,7 @@ done
 cp -a "$S/kernel/sound" "$D/kernel/"
 mkdir -p "$D/kernel/net"
 cp -a "$S/kernel/net/packet" "$D/kernel/net/"
-for m in sd_mod sr_mod virtio_blk vmw_pvscsi loop fat vfat ext4 jbd2 mbcache isofs efivarfs \
+for m in sd_mod sr_mod virtio_blk vmw_pvscsi loop fat vfat exfat ntfs3 ext4 jbd2 mbcache isofs efivarfs \
          nls_ascii nls_cp437 nls_iso8859-1 nls_utf8 crc32c_generic crc32c-intel libcrc32c; do
     for f in $(find "$S/kernel" -name "$m.ko*"); do
         r=${f#"$S"/}

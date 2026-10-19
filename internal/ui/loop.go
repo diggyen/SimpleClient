@@ -15,6 +15,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 	"github.com/diggyen/SimpleClient/internal/network"
 	"github.com/diggyen/SimpleClient/internal/rdp"
+	"github.com/diggyen/SimpleClient/internal/usb"
 )
 
 // SessionState holds the state of an active RDP session.
@@ -452,11 +453,16 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	addr := selected.AddrRDP()
 	state.Mu.Unlock()
 
+	// The kiosk's USB devices go to this server, and only for as long as the
+	// session lasts.
+	devices := usb.Begin(selected.IP)
+	defer devices.End()
+
 	// The server maps scancodes to characters by the layout announced at
 	// connect time, so it follows the one selected on the kiosk (F3).
 	rdp.KeyboardLayout = rdp.LayoutID(string(inputdev.CurrentLayout()))
 
-	client, err := dial(state, addr, creds, fb)
+	client, err := dial(state, addr, creds, fb, devices)
 	if err != nil {
 		state.Mu.Lock()
 		state.Modal.Error = rdpErrToMessage(err)
@@ -481,7 +487,7 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 		// and Windows both keep a disconnected session), so put the user back
 		// into it rather than dropping them on the host list to type the
 		// password again.
-		client = reconnect(state, addr, creds, fb)
+		client = reconnect(state, addr, creds, fb, devices)
 		if client == nil {
 			break
 		}
@@ -502,7 +508,7 @@ var reconnectDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Sec
 
 // reconnect retries a failed session, showing the connecting screen meanwhile.
 // It returns nil once every attempt has failed.
-func reconnect(state *UIState, addr string, creds rdp.Credentials, fb framebuffer.Device) rdp.Session {
+func reconnect(state *UIState, addr string, creds rdp.Credentials, fb framebuffer.Device, devices *usb.Session) rdp.Session {
 	state.Mu.Lock()
 	state.Transition(ScreenConnecting)
 	state.Dirty = true
@@ -510,7 +516,7 @@ func reconnect(state *UIState, addr string, creds rdp.Credentials, fb framebuffe
 
 	for _, d := range reconnectDelays {
 		time.Sleep(d)
-		if c, err := dial(state, addr, creds, fb); err == nil {
+		if c, err := dial(state, addr, creds, fb, devices); err == nil {
 			return c
 		}
 	}
@@ -520,12 +526,12 @@ func reconnect(state *UIState, addr string, creds rdp.Credentials, fb framebuffe
 // dial connects through the session engine, and through the built-in client
 // where the engine cannot run: no engine in the image, no display KMS can
 // drive (a firmware framebuffer on a machine whose GPU has no driver).
-func dial(state *UIState, addr string, creds rdp.Credentials, fb framebuffer.Device) (rdp.Session, error) {
+func dial(state *UIState, addr string, creds rdp.Credentials, fb framebuffer.Device, devices *usb.Session) (rdp.Session, error) {
 	var onPointer func(x, y int)
 	if state.pointer != nil {
 		onPointer = state.pointer.Warp
 	}
-	e, err := rdp.StartEngine(addr, creds, onPointer)
+	e, err := rdp.StartEngine(addr, creds, devices.Args(), onPointer)
 	if err == nil {
 		return e, nil
 	}
