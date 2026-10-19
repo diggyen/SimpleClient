@@ -7,8 +7,10 @@ environment underneath.
 ![The host picker](docs/screenshots/02-list.png)
 
 It draws straight to the Linux framebuffer (`/dev/fb0`) and reads raw evdev
-input. There is no X11 and no Wayland: the whole system is a kernel, busybox and
-one static Go binary in an initramfs, about 40 MB of ISO. Every pixel above —
+input. There is no X11 and no Wayland: the whole system is a kernel and an
+initramfs — busybox, the Go binary that draws the UI, FreeRDP for the session.
+The ISO is about 250 MB, most of it the kernel's drivers and the firmware
+graphics and wireless chips load. Every pixel above —
 the mark, the lettering, the signal bars — is drawn by the binary itself; there
 is no toolkit and no image asset in the ISO.
 
@@ -141,7 +143,7 @@ needs `vhci-hcd`, which the script installs where it is packaged separately),
 ports 3389 and 3241 open:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/diggyen/SimpleClient/iyilestirme/server/simpleclient-server.sh
+curl -fsSLO https://raw.githubusercontent.com/diggyen/SimpleClient/main/server/simpleclient-server.sh
 sudo bash simpleclient-server.sh
 ```
 
@@ -236,4 +238,5 @@ go missing. See [ARCHITECTURE.md](docs/ARCHITECTURE.md#rdp).
 - 512 MB RAM
 - A wired NIC, or a wireless card or USB stick (Intel, Realtek, MediaTek,
   Qualcomm Atheros, Broadcom, Marvell, Ralink), with a driver in Debian's kernel
-- Somewhere on the same subnet actually listening on 3389
+- An RDP server: one on the kiosk's subnet is found by itself, one anywhere
+  else is reached with `F7`

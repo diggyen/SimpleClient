@@ -62,8 +62,9 @@ jobs:
             ## SimpleClient ${{ github.ref_name }}
 
             Bootable kiosk image. Boot it and it scans the local network for
-            RDP hosts, then connects to the one you pick. No installation, no
-            desktop environment — it draws straight to the framebuffer.
+            RDP hosts, then connects to the one you pick — full screen, with no
+            desktop environment underneath. It runs from the USB stick, or
+            installs to the machine's disk with **F9**.
 
             The boot menu offers **English** and **Türkçe**; press **F2** at any
             time to switch language while it is running.
@@ -85,4 +86,6 @@ jobs:
             sha256sum -c SHA256SUMS
             ```
 
-            Boots on both UEFI and legacy BIOS machines.
+            Boots on UEFI and legacy BIOS machines, with Secure Boot on or off.
+            A Linux server is set up for the kiosks with one script — see the
+            README.

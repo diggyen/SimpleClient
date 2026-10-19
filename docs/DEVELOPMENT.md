@@ -69,8 +69,11 @@ entirely (the hybrid MBR/GPT, the EFI system partition, `BOOTX64.EFI`). A green
 CD-ROM run says nothing about them. This is not hypothetical: the CD-ROM run was
 once treated as proof the stick would boot, and it never was.
 
-Secure Boot is still not covered. The firmware here enrols no keys, so it never
-enforces, and `BOOTX64.EFI` is unsigned.
+Secure Boot is not covered by these runs: the firmware here enrols no keys, so
+it never enforces. To try it, boot OVMF's Secure Boot build with Microsoft's
+keys enrolled — `OVMF_CODE.secboot.fd` with `OVMF_VARS.secboot.fd` on Fedora,
+`OVMF_CODE_4M.secboot.fd` with `OVMF_VARS_4M.ms.fd` on Debian — on
+`-machine q35,smm=on` with `-global driver=cfi.pflash01,property=secure,value=on`.
 
 ### Giving the guest something to find
 

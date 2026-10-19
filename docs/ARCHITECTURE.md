@@ -1,8 +1,9 @@
 # Architecture
 
-SimpleClient is a bootable image whose entire userspace is one static Go binary.
-There is no display server, no session manager, no desktop. The binary owns the
-framebuffer, reads input devices directly, and draws every pixel itself.
+SimpleClient is a bootable image with no display server, no session manager and
+no desktop. One static Go binary owns the framebuffer, reads the input devices
+directly and draws every pixel of its screens itself; a session is drawn by
+`sc-rdp`, FreeRDP drawing straight to the display through KMS.
 
 This document covers the parts that are decisions rather than code — the things
 you cannot recover by reading the files.
@@ -11,40 +12,49 @@ you cannot recover by reading the files.
 
 ```
 ┌──────────────────────────────────────────────┐
-│ GRUB          picks a language, sets a mode  │
+│ GRUB          picks a language and a kernel  │
 ├──────────────────────────────────────────────┤
-│ Linux         linux-lts, no modules loaded   │
-│               beyond the list /init insmods  │
+│ Linux         Debian's, signed: the newest   │
+│               and an LTS; drivers loaded by  │
+│               the hardware's modaliases      │
 ├──────────────────────────────────────────────┤
-│ /init         busybox sh: mounts, network,   │
-│               waits for input, execs us      │
+│ /init         busybox sh: drivers, network,  │
+│               waits for input, runs us       │
 ├──────────────────────────────────────────────┤
-│ simpleclient  one static binary, PID ~1      │
+│ simpleclient  one static Go binary           │
 │   ├ framebuffer  mmap'd /dev/fb0             │
 │   ├ inputdev     /dev/input/event*           │
 │   ├ scanner      TCP 3389 across the subnet  │
 │   ├ ui           render loop + screens       │
-│   └ rdp          grdp, patched               │
+│   └ rdp          runs sc-rdp, or grdp        │
+├──────────────────────────────────────────────┤
+│ sc-rdp        FreeRDP 3, FFmpeg for H.264,   │
+│               drawing through KMS            │
 └──────────────────────────────────────────────┘
 ```
 
-Nothing above `simpleclient` persists state. There is no writable root: the
-image boots into an initramfs held in RAM, so every boot is identical and
-pulling the power is a supported way to turn it off.
+There is no writable root: the image boots into an initramfs held in RAM, so
+every boot is identical and pulling the power is a supported way to turn it
+off. What the kiosk keeps — the network settings, the wireless network, the
+startup server, and on an installed kiosk the servers and accounts it has
+connected to — is a few small files under `simpleclient/`: on the data
+partition of an installed kiosk, on the EFI partition of the USB stick a live
+one runs from.
 
 ## Boot
 
 `build/init` runs as PID 1. In order:
 
 1. Mounts `/proc`, `/sys`, `/dev`.
-2. `insmod`s a fixed list of modules — framebuffer, evdev, the common NIC
-   drivers, `atkbd`, `psmouse`, `usbhid`. There is no udev and no autoloading;
-   a NIC outside that list is a NIC the image cannot use.
+2. Loads the drivers the hardware asks for: every device's modalias goes
+   through `modprobe`, as udev would do it — there is no udev. The graphics
+   driver comes first, with its firmware, so the UI starts on it.
 3. Waits (briefly) for a pointer device to appear. `psmouse` takes a moment to
    probe, and without the wait the kiosk can reach the UI before the mouse
    exists and come up keyboard-only. The wait is capped — a machine with no
    mouse must still boot.
-4. Brings up the network with `udhcpc`, falling back to link-local.
+4. Brings up the network with `udhcpc`, falling back to link-local, and joins
+   the kept wireless network with `wpa_supplicant`.
 5. Logs the framebuffer geometry, the input devices and their capability
    bitmaps to the console, then `exec`s `/sbin/simpleclient`.
 
@@ -140,13 +150,12 @@ included. The local screens ignore releases; a live session forwards all of
 them, and must, because a remote that is sent presses without releases has
 every key held down and a remote with no Shift, Ctrl or Alt cannot be driven.
 
-Not yet forwarded correctly: RDP's *extended* flag. grdp's KeyDown/KeyUp take a
-bare scancode with no way to set it, so the arrow cluster and the navigation
-keys arrive as their numpad equivalents. Fixing it means a fourth patch in
-`build/patches/`.
+The engine sends RDP's *extended* flag with the keys that carry it. The
+built-in client cannot: grdp's KeyDown/KeyUp take a bare scancode, so on it the
+arrow cluster and the navigation keys arrive as their numpad equivalents.
 
-Only one keyboard and one pointer are read. On a machine with both an internal
-and a USB keyboard, the first match wins. `-kbd` and `-mouse` override.
+Every keyboard and pointer is read, including ones plugged in later. `-kbd` and
+`-mouse` (`kbddev=` and `mousedev=` on the GRUB line) pin the nodes instead.
 
 ### Remembered accounts
 
@@ -155,10 +164,9 @@ address, so reopening its dialog fills them in and puts the cursor in the
 password field. Only the successful attempt is recorded: an account that was
 rejected is not one to offer back.
 
-This is a map in `UIState` and nothing more. The image boots from a read-only
-initramfs, so it does not survive a power cycle, and making it do so would mean
-adding a writable partition to the image. The password is deliberately never
-part of it.
+A kiosk running from a USB stick or CD keeps them in RAM until it is switched
+off; an installed one keeps them on its data partition. The password is not
+part of it, unless `F10` asks for it (see the README).
 
 ## Discovery
 
@@ -172,15 +180,28 @@ never reports zero for a live host: a switched LAN answers in well under a
 millisecond, and the list reads zero as "not measured" and draws nothing.
 
 The kiosk scans **its own subnet only**. A server on another subnet is not
-discovered, but `rdphost=<ip>` on the kernel command line seeds the list with a
-hand-picked address before the scan; the scanner deduplicates by IP, so if that
-address is also local the scan just fills in its latency. This is the one door
-past the subnet boundary — see [Known limitations](#known-limitations).
+discovered: `F7` connects to it by address or name, and once connected to it
+stays in the list. `rdphost=<ip>` on the kernel command line seeds the list with
+a hand-picked address before the scan; the scanner deduplicates by IP, so if
+that address is also local the scan just fills in its latency.
 
 ## RDP
 
-`internal/rdp` wraps `github.com/tomatome/grdp`, which is vendored and patched.
-The patches are in `build/patches/` and CI fails if they go missing:
+Sessions run in `sc-rdp` (`engine/`), a FreeRDP 3 client built for the kiosk.
+It draws straight to the display through KMS — page flips at the display's own
+refresh rate, a hardware cursor where the display has one, up to four displays
+side by side as one desktop — and decodes RemoteFX and H.264 (AVC420 and
+AVC444, with an FFmpeg built for nothing else) through the graphics pipeline.
+Sound, the microphone, drives, USB devices and smart cards go through
+FreeRDP's own channels. The kiosk starts one per session and talks to it over
+two pipes, described at the top of `sc-rdp.c`; the password never goes on its
+command line. With no DRM device it draws into the fbdev framebuffer instead.
+
+Where the engine cannot run — it is missing, or finds no display at all —
+`internal/rdp` falls back to a built-in client, `github.com/tomatome/grdp`,
+which is vendored and patched. It decodes legacy bitmap updates only, into the
+framebuffer. The patches are in `build/patches/` and CI fails if they go
+missing:
 
 | Patch | Why |
 | --- | --- |
@@ -188,22 +209,6 @@ The patches are in `build/patches/` and CI fails if they go missing:
 | `0002` | a `cliprdr` source file uses Windows-only symbols with no build tag, so the package does not compile for Linux |
 | `0003` | the client's close path is not exported, so a session cannot be torn down cleanly |
 
-Incoming bitmap updates are decoded and written straight into the framebuffer.
-Once a session is live the UI stops drawing entirely — RDP frames go to
-`/dev/fb0` directly, and `Render` returns early for `ScreenSession`.
-
 ## Known limitations
 
-These are design boundaries, not bugs waiting to be filed:
-
-- **Secure Boot is not supported.** `BOOTX64.EFI` comes from `grub-mkrescue`
-  and is unsigned. A machine enforcing Secure Boot refuses the stick and
-  reports nothing, which looks exactly like an empty drive.
-- **No RemoteFX/GFX codecs.** grdp ignores surface commands; servers that send
-  only those show nothing. Every Windows server tested falls back to legacy
-  bitmap updates.
-- **Colour depth is whatever the server picks.** Windows commonly negotiates
-  16bpp, which is what the tile decoder is tuned for.
-- **Resolution follows the framebuffer** the kernel hands over. There is no
-  override, and the session opens at that size.
-- **No manual host entry**, no clipboard, no audio, no drive redirection.
+See the README's [Known limitations](../README.md#known-limitations).

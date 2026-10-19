@@ -33,9 +33,8 @@
 #   bash build/test-qemu.sh --headless --uefi
 #   bash build/test-qemu.sh --headless --usb --uefi
 #
-# Secure Boot is still not covered: the firmware below enrols no keys, so it
-# never enforces. GRUB's BOOTX64.EFI here is unsigned and a machine that does
-# enforce will refuse it — silently, looking exactly like an empty stick.
+# Secure Boot is not covered: the firmware below enrols no keys, so it never
+# enforces. DEVELOPMENT.md says how to boot with Microsoft's keys enrolled.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

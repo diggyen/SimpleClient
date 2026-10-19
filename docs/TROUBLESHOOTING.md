@@ -25,7 +25,7 @@ A healthy boot looks like this:
 [simpleclient-init] input caps: N: Name="..."|H: Handlers=...|B: EV=...|B: KEY=...
 [simpleclient-init] entropy: 256 hwrng=virtio_rng.0
 [simpleclient-init] DHCP on eth0: inet 10.0.2.15/24
-simpleclient: warning: input: keyboard=/dev/input/event0 mouse=/dev/input/event1
+simpleclient: warning: input: [/dev/input/event0 /dev/input/event1]
 ```
 
 Where it stops tells you which stage failed.
@@ -39,12 +39,14 @@ device.
 
 ### 1. Is Secure Boot on?
 
-**This is the most likely cause.** `BOOTX64.EFI` is produced by `grub-mkrescue`
-and is unsigned, so a machine enforcing Secure Boot refuses it *silently* — no
-message, no menu, exactly like an empty stick.
+The stick boots with Secure Boot on: its boot chain is Debian's — shim signed by
+Microsoft's third-party UEFI CA, then GRUB and the kernel signed by Debian. Some
+machines trust only Microsoft's Windows CA out of the box — Secured-core PCs,
+some Lenovo and HP business models — and refuse it *silently*: no message, no
+menu, exactly like an empty stick.
 
-Turn Secure Boot off in firmware setup. There is no workaround in the image;
-supporting it would mean building a signed `shim` chain.
+In firmware setup, allow the third-party CA (Lenovo: *Allow Microsoft 3rd Party
+UEFI CA*; HP: *Enable MS UEFI CA key*), or turn Secure Boot off.
 
 ### 2. Did the write actually succeed?
 
@@ -126,25 +128,23 @@ shipped.
 
 ## The keyboard does not work (the mouse does)
 
-Read the last line of the console:
+Read the `input:` line on the console — the nodes the kiosk reads:
 
 ```
-simpleclient: warning: input: keyboard=/dev/input/event0 mouse=/dev/input/event1
+simpleclient: warning: input: [/dev/input/event0 /dev/input/event1]
 ```
 
-- **`keyboard=(none)`** — no device on this machine was recognised as a
-  keyboard. Send the `input caps:` line with a bug report; it holds exactly what
+Every keyboard and pointer is read, built in or USB, including one plugged in
+later.
+
+- **None of them is your keyboard** — nothing on this machine was recognised
+  as one. Send the `input caps:` line with a bug report; it holds exactly what
   the kernel said about every device.
-- **A node is named but typing does nothing** — the wrong device was chosen.
-  Override it:
-
-  Add `-kbd /dev/input/eventN` to the command in `build/init`, rebuild, and use
-  the `input caps:` dump to work out which `eventN` is the real keyboard: the
-  one whose `B: KEY=` bitmap covers ordinary letters, not a power button or a
-  video bus.
-
-Only one keyboard is read. On a machine with both a built-in and a USB keyboard
-the first match wins, and it may not be the one you are typing on.
+- **Recognised, but typing does nothing** — pin the node: press `e` in the
+  boot menu and add `kbddev=/dev/input/eventN` (and `mousedev=` likewise) to
+  the `linux` line. The `input caps:` dump tells which `eventN` is the real
+  keyboard: the one whose `B: KEY=` bitmap covers ordinary letters, not a power
+  button or a video bus.
 
 ### Typing works on the host list but not in the credential dialog
 
@@ -183,9 +183,9 @@ The kiosk probes TCP 3389 across **its own subnet only**.
 1. **Check the `DHCP on eth0:` line.** If it shows a `169.254.x.x` address there
    was no DHCP server and it fell back to link-local — it is scanning a subnet
    with nothing on it.
-2. **No `DHCP` line at all** means the NIC has no driver. `/init` `insmod`s a
-   fixed list (`e1000`, `e1000e`, `r8169`, `igb`, `igc`, `tg3`); there is no
-   autoloading. A NIC outside that list cannot be used without adding it.
+2. **No `DHCP` line at all, and an empty `interfaces:` line**, means no
+   network interface came up: the NIC has no driver in Debian's kernel, or no
+   firmware in the image. A USB network adapter gets round it.
 3. **A server on a different subnet** is not discovered — the scan only reaches
    the local one — but it can be added by hand: put `rdphost=<ip>` on the GRUB
    command line and it appears in the list ready to connect.
@@ -231,47 +231,32 @@ step, and the last one to appear is the one that failed.
 
 ---
 
-## The session connects but the remote cannot be controlled
+## The session types the wrong characters
 
-Keys do nothing, or the remote behaves as though a key were held down.
+Inside a session the key is forwarded as it is and the server applies its own
+keyboard layout: the wrong characters there are the server's layout setting,
+not the kiosk's. A Linux server set up with the script has the Turkish layouts,
+which xrdp does not map by itself.
 
-**Before v0.4.2 nothing could be controlled.** grdp numbers mouse buttons
-0=left, 2=right, 1=middle — not what its own parameter name, evdev or RDP use —
-so this client's 1 for left reached the server as a *middle* click. Nothing
-activated, so no field could be focused, so the keyboard looked dead too:
-pointer moved, clicks did nothing, typing went nowhere. Verified fixed against a
-live Windows server — a left click focuses a field and typing lands in it.
-Update.
-
-**Before v0.4.1** keys had a second fault on top: presses were sent without
-releases, and the modifiers never at all. The input reader emitted key presses
-but never releases, so every key pressed stayed down on the remote for the rest
-of the session — one keystroke and the far end is stuck repeating it. Shift,
-Ctrl and Alt were swallowed entirely and never reached the remote at all.
-Update.
-
-Still missing: keys that RDP marks *extended* — the arrow cluster, Home, End,
-Page Up/Down, Insert, Delete — are sent without that flag, so the remote sees
-the numpad scancode and behaves according to its Num Lock. Right Ctrl and right
-Alt (AltGr) are not mapped at all; use the left-hand ones.
+Only on the built-in client — which runs a session when the engine cannot
+drive the display — do the arrow cluster and the navigation keys arrive as
+their number-pad equivalents, and do what the server's Num Lock says.
 
 ---
 
 ## The session connects but the screen stays black
 
-Almost always a codec problem, not a connection problem.
+The connection is up and the server has nothing to show: its desktop did not
+start. On a Linux server it is usually one of these:
 
-grdp ignores surface-command updates, so a server sending **only** RemoteFX/GFX
-displays nothing while the session is genuinely live. Every Windows server
-tested falls back to legacy bitmap updates, which work. On the server, disable
-"Use advanced RemoteFX graphics" / force legacy bitmap encoding.
-
-Colour depth is whatever the server picks; the tile decoder is tuned for the
-16bpp Windows commonly negotiates.
-
-To confirm the decoder is at fault rather than the link, point the live test at
-the same server and look at the PNG it writes — see
-[DEVELOPMENT.md](DEVELOPMENT.md#testing-against-a-real-rdp-server).
+- **A desktop that runs only on Wayland** — the newest GNOME, Plasma 6.8 and
+  later — which xrdp cannot start. The server script says so as it runs; MATE
+  or Xfce for remote sessions gets round it.
+- **The same user logged in at the server's console.** GNOME and KDE in
+  particular do not start a second session for a user who has one; log out
+  there.
+- **Anything else** is in `~/.xsession-errors` in the user's home on the
+  server.
 
 ---
 
