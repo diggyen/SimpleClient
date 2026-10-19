@@ -15,8 +15,10 @@
 #   - the kiosks' printers, scanners, smart-card readers and serial adapters
 #     attached here over USB/IP, as if plugged in, by an agent the kiosks
 #     reach on port 3241; the PC/SC daemon and CCID driver for the cards
-#   - the desktop the machine already has (Cinnamon, MATE, Xfce, KDE Plasma,
-#     GNOME, ...) for every user without a ~/.xsession of their own
+#   - the desktop the machine already has (MATE, Xfce, KDE Plasma, GNOME, ...)
+#     for every user without a ~/.xsession of their own — except Cinnamon,
+#     which cannot run without its compositor: remote sessions get MATE
+#     instead, installed if need be, and the console keeps Cinnamon
 #   - no polkit password prompts for colour profiles and package lists,
 #     which a remote session otherwise gets on every login
 #   - ports 3389 and 3241 open in ufw or firewalld
@@ -25,9 +27,10 @@
 #
 # Usage:  sudo bash simpleclient-server.sh [--session NAME] [--h264] [--no-audio] [--no-usb]
 #   --session NAME  the desktop for remote sessions, a file name from
-#                   /usr/share/xsessions without .desktop (cinnamon, mate,
-#                   xfce, plasmax11, ubuntu-xorg, ...); default: the first of
-#                   those this machine has
+#                   /usr/share/xsessions without .desktop (mate, xfce,
+#                   cinnamon, plasmax11, ubuntu-xorg, ...); mate and xfce are
+#                   installed if missing. Default: the first of those this
+#                   machine has, and mate where that is Cinnamon
 #   --h264          H.264 before RemoteFX, for kiosks on a link slower than a
 #                   LAN: an eighth of the data for desktop work and a third
 #                   for video, at half the frame rate and five times xrdp's
@@ -318,15 +321,60 @@ add_plasma_x11() {
     fi
 }
 
+# install_desktop NAME installs MATE (mate) or Xfce (xfce) for remote
+# sessions, unless the machine has it; it fails if it still does not.
+install_desktop() {
+    [ -r "/usr/share/xsessions/$1.desktop" ] && return 0
+    case $1 in mate|xfce) ;; *) return 1 ;; esac
+    say "$1 masaüstü kuruluyor (uzak oturumlar için)"
+    case $FAMILY:$1 in
+    apt:mate|apt:xfce)
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update || true
+        if [ "$1" = mate ]; then
+            apt-get install -y mate-desktop-environment-core || true
+        else
+            apt-get install -y xfce4 || true
+        fi
+        ;;
+    dnf:*) dnf install -y "@$1-desktop" || true ;;
+    zypper:*) zypper -n in -t pattern "$1" || true ;;
+    pacman:mate) pacman -S --noconfirm --needed mate || true ;;
+    pacman:xfce) pacman -S --noconfirm --needed xfce4 || true ;;
+    esac
+    [ -r "/usr/share/xsessions/$1.desktop" ]
+}
+
 # check_session stops before the long build when there is no desktop to
 # start remotely.
+#
+# Cinnamon cannot run without its compositor, which in a remote session — no
+# GPU there, whatever the machine has — draws every frame in software:
+# dragging a 1280x800 window across a 1920x1080 kiosk took 2.9 of a 4-vCPU
+# VM's cores and still made only 32 frames a second. MATE runs without one
+# (configure_dconf turns it off for remote sessions) and moved the same window
+# at over 100 frames a second on 0.9 core. So a machine whose desktop is
+# Cinnamon gets MATE for remote sessions; its console keeps Cinnamon, and
+# --session cinnamon keeps it for remote sessions too.
 check_session() {
+    if [ -n "$WANT_SESSION" ]; then
+        install_desktop "$WANT_SESSION" || true
+    fi
     local first=$WANT_SESSION
     if [ -z "$first" ]; then
         first=$(pick_session)
     fi
     case $first in
         ""|plasmax11) add_plasma_x11 ;;
+    esac
+    case "$WANT_SESSION:$first" in
+    :cinnamon|:cinnamon2d)
+        if install_desktop mate; then
+            WANT_SESSION=mate
+        else
+            warn "MATE kurulamadı: uzak oturumlar Cinnamon'la açılacak, sunucu işlemcisi çok yorulur"
+        fi
+        ;;
     esac
     SESSION=$(pick_session)
     if [ -z "$SESSION" ]; then
@@ -377,6 +425,13 @@ fi
 case "${XDG_CURRENT_DESKTOP:-}" in
     *KDE*) export KWIN_COMPOSE=N QT_QUICK_BACKEND=software ;;
 esac
+# The defaults remote sessions start with where the user has chosen nothing —
+# MATE's window manager without its compositor — are in a dconf profile of
+# their own (/etc/dconf/db/simpleclient.d); the console keeps the machine's.
+# Set whatever the desktop, so that one started from ~/.xsession has it too.
+if [ -r /etc/dconf/profile/simpleclient ] && [ -r /etc/dconf/db/simpleclient ]; then
+    export DCONF_PROFILE=simpleclient
+fi
 
 # The distribution's Xsession sets up what its display manager would (D-Bus,
 # agents, input methods) before running the session.
@@ -388,6 +443,52 @@ fi
 exec sh -c "${START:-xterm}"
 EOF
     chmod 755 /etc/xrdp/startwm.sh
+    if [ -r /usr/share/xsessions/mate.desktop ]; then
+        configure_dconf
+    fi
+}
+
+# configure_dconf writes the dconf profile startwm.sh gives remote sessions:
+# the user's own settings, then the defaults below, then the databases the
+# machine's own profile has.
+#
+# MATE's window manager composites in software as long as its compositor is
+# on, as Cinnamon's does: a 1280x800 window dragged across a 1920x1080 kiosk
+# moved at 45 frames a second with it, at over 100 without it, for the same
+# server CPU. So remote MATE sessions start with it off.
+configure_dconf() {
+    if ! command -v dconf >/dev/null; then
+        case $FAMILY in
+        apt) apt-get install -y dconf-cli || true ;;
+        dnf) dnf install -y dconf || true ;;
+        zypper) zypper -n in dconf || true ;;
+        pacman) pacman -S --noconfirm --needed dconf || true ;;
+        esac
+    fi
+    if ! command -v dconf >/dev/null; then
+        warn "dconf kurulamadı: uzak MATE oturumlarında pencere birleştirici açık kalır, kareler yavaşlar"
+        return 0
+    fi
+    mkdir -p /etc/dconf/profile /etc/dconf/db/simpleclient.d
+    local p
+    {
+        echo "user-db:user"
+        echo "system-db:simpleclient"
+        for p in /etc/dconf/profile/user /usr/share/dconf/profile/user; do
+            if [ -r "$p" ]; then
+                grep -E '^(system|file)-db:' "$p" | grep -v -x 'system-db:simpleclient' || true
+                break
+            fi
+        done
+    } > /etc/dconf/profile/simpleclient
+    cat > /etc/dconf/db/simpleclient.d/00-simpleclient <<'EOF'
+# Written by simpleclient-server.sh: what remote sessions start with where the
+# user has chosen nothing (DCONF_PROFILE=simpleclient, set in
+# /etc/xrdp/startwm.sh). The console keeps the machine's own settings.
+[org/mate/marco/general]
+compositing-manager=false
+EOF
+    dconf update || warn "dconf update başarısız: uzak MATE oturumlarında pencere birleştirici açık kalabilir"
 }
 
 # Remote sessions are not at the console, so polkit asks for a password — on
@@ -1036,7 +1137,10 @@ start_services
 case $(systemd-detect-virt 2>/dev/null || true) in
     vmware|kvm|microsoft|oracle|xen)
         say "Sanal makine: görüntü işlemcide kodlanır, masaüstü yazılımla çizilir. Aynı anda bağlanan"
-        say "her kiosk için 2 vCPU ayırın (şu an $(nproc)); Cinnamon yerine MATE ya da Xfce daha hafiftir."
+        case $SESSION in
+        cinnamon*) say "her kiosk için 3 vCPU ayırın (şu an $(nproc)); --session mate ile 1 vCPU yeter." ;;
+        *) say "her kiosk için 1 vCPU ayırın (şu an $(nproc))." ;;
+        esac
         ;;
 esac
 CODECS="RemoteFX, H.264 ($H264)"

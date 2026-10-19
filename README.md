@@ -152,8 +152,15 @@ repositories have no x264, so there it builds with Cisco's OpenH264, which
 encodes about a quarter fewer frames (55 fps against 75 on the same machine);
 with RPM Fusion enabled it takes x264. Run it again after a distribution
 upgrade.
-`--session NAME` picks the desktop when there are several (`cinnamon`, `mate`,
-`xfce`, `plasmax11`, ...). A desktop that runs only on Wayland cannot be served
+`--session NAME` picks the desktop when there are several (`mate`, `xfce`,
+`cinnamon`, `plasmax11`, ...); MATE and Xfce are installed when asked for.
+Cinnamon, Linux Mint's own, cannot run without its compositor, which a remote
+session — no GPU there — draws in software: dragging a 1280x800 window across
+a 1920x1080 kiosk took 2.9 cores of a 4-vCPU VM and made 32 fps. So remote
+sessions of a Cinnamon machine get MATE (installed if need be), with MATE's own
+compositor off: the same window moves at over 100 fps on 0.9 core, and at 80
+on a 3440x1440 kiosk. The console keeps Cinnamon; `--session cinnamon` keeps it
+for remote sessions too. A desktop that runs only on Wayland cannot be served
 by xrdp. KDE Plasma 6 keeps its X11 session in a package of its own, which
 Kubuntu (25.10 and later) and Fedora leave out of a fresh install; the script
 adds it, and turns KDE's compositor off in remote sessions, which have no GPU
