@@ -2,10 +2,10 @@
 #
 #   docker build --target export --output type=local,dest=dist -f build/Dockerfile .
 #
-# The kernel comes from Alpine's linux-lts package rather than being compiled
-# from source: a source build costs 30-40 minutes of CI time and only covers the
-# hardware whose drivers were configured in, whereas the distro kernel ships a
-# broad module set that actually boots on real machines.
+# The kernel is Debian's signed one rather than compiled from source: a source
+# build costs 30-40 minutes of CI time, only covers the hardware whose drivers
+# were configured in, and could not boot under Secure Boot; the distro kernel
+# ships a broad module set that actually boots on real machines.
 #
 # The Go binary is fully static (CGO_ENABLED=0). That works because vendor/
 # carries a patch removing a vestigial `import "C"` from grdp/plugin — see
@@ -14,6 +14,7 @@
 # 3.24: supported until mid-2028, and its linux-lts (6.18) knows the GPUs, NICs
 # and audio codecs of current machines while still running the old ones.
 ARG ALPINE_VERSION=3.24
+ARG DEBIAN_VERSION=trixie
 
 # ── Go binary ─────────────────────────────────────────────────────────────────
 FROM --platform=linux/amd64 golang:1.23-alpine AS go-builder
@@ -35,10 +36,53 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
       -ldflags "-s -w -X github.com/diggyen/SimpleClient/internal/version.Version=${VERSION}" \
       -o /out/simpleclient ./cmd/simpleclient
 
-# ── Kernel + initramfs ────────────────────────────────────────────────────────
+# ── Kernel and the Secure Boot chain ──────────────────────────────────────────
+# The kernel, its modules and the UEFI boot loaders come from Debian, signed:
+# shim (signed by Microsoft) loads GRUB (signed by Debian), which loads the
+# kernel (signed by Debian) — the chain Debian's own install media boot with.
+# So the kiosk boots with Secure Boot on, out of the box, on any machine that
+# trusts Microsoft's UEFI CA, which is every PC sold with Windows; with Secure
+# Boot off it boots the same way. Under Secure Boot the kernel loads only
+# signed modules, and Debian's are signed.
+#
+# Debian stable's kernel is an LTS series kept up to date for the release's
+# whole life. The userland stays Alpine's; a kernel does not care whose libc
+# runs above it.
+#
+# Packages are unpacked with dpkg-deb rather than installed: their maintainer
+# scripts would run grub-install and build an initramfs inside the container.
+FROM --platform=linux/amd64 debian:${DEBIAN_VERSION} AS boot-builder
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        grub-pc-bin grub-common xorriso mtools dosfstools kmod xz-utils zstd \
+ && mkdir -p /deb /signed && cd /deb \
+ && KPKG=$(apt-cache depends linux-image-amd64 | awk '$1 == "Depends:" && $2 ~ /^linux-image-[0-9]/ { print $2; exit }') \
+ && echo "kernel package: $KPKG" \
+ && apt-get download "$KPKG" shim-signed shim-helpers-amd64-signed grub-efi-amd64-signed \
+ && for p in *.deb; do dpkg-deb -x "$p" /signed; done \
+ && rm -rf /var/lib/apt/lists/*
+
+# Modules go from Debian's compression to gzip, the one busybox's modprobe
+# reads. A module's signature is part of the uncompressed file, so it survives.
+RUN set -e; \
+    M=$(ls -d /signed/usr/lib/modules/* /signed/lib/modules/* 2>/dev/null | head -1); \
+    KVER=$(basename "$M"); echo "kernel: $KVER"; \
+    mkdir -p /kernel/lib/modules; mv "$M" /kernel/lib/modules/; \
+    cp "/signed/boot/vmlinuz-$KVER" /kernel/vmlinuz; \
+    cd "/kernel/lib/modules/$KVER"; \
+    find . -name '*.ko.xz' -exec xz -d {} +; \
+    find . -name '*.ko.zst' -exec zstd -q -d --rm {} +; \
+    find . -name '*.ko' -exec gzip -9 {} +; \
+    depmod -b /kernel "$KVER"; \
+    ls -l /signed/usr/lib/shim /signed/usr/lib/grub/x86_64-efi-signed
+
+# ── Initramfs ─────────────────────────────────────────────────────────────────
 FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS rootfs-builder
 
-RUN apk add --no-cache linux-lts busybox-static kmod cpio gzip
+RUN apk add --no-cache busybox-static kmod cpio gzip
+COPY --from=boot-builder /kernel/lib/modules /lib/modules
 
 # NIC firmware. Most onboard NICs need none, but these do: bnx2/bnx2x (HP
 # ProLiant and many Dell servers' Broadcom NetXtreme II) do not come up at all
@@ -77,7 +121,6 @@ COPY build/init /rootfs/init
 COPY build/udhcpc-default.script /rootfs/usr/share/udhcpc/default.script
 
 RUN mkdir -p /out \
- && cp /boot/vmlinuz-lts /out/vmlinuz \
  && mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/tmp /rootfs/etc /rootfs/bin \
  && chmod +x /rootfs/init /rootfs/sbin/simpleclient /rootfs/usr/share/udhcpc/default.script
 
@@ -95,7 +138,7 @@ RUN cp /bin/busybox.static /rootfs/bin/busybox \
  && test -L /rootfs/bin/sh \
  && test "$(readlink /rootfs/bin/sh)" = "/bin/busybox"
 
-# Alpine's kernel builds most drivers as modules, so the initramfs has to carry
+# Debian's kernel builds most drivers as modules, so the initramfs has to carry
 # the ones /init loads. Copying the whole tree would add ~200 MB; these subtrees
 # cover NIC, framebuffer/DRM, input and HID/USB, which is everything a
 # framebuffer kiosk touches.
@@ -159,23 +202,47 @@ RUN cd /rootfs && find . | cpio -oH newc | gzip -9 > /out/initramfs.cpio.gz \
  && ls -lh /out/initramfs.cpio.gz
 
 # ── ISO ───────────────────────────────────────────────────────────────────────
-FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS iso-builder
+# One image that boots four ways: BIOS/CSM and UEFI, each from a CD or from a
+# USB stick written with dd. The layout and the xorriso call are grub-mkrescue's,
+# done by hand because grub-mkrescue only knows how to make an unsigned EFI
+# image:
+#   BIOS     GRUB i386-pc as an El Torito image, and boot_hybrid.img as the
+#            MBR boot code when the ISO is a disk.
+#   UEFI     a FAT image holding shim as \EFI\boot\bootx64.efi, with Debian's
+#            signed CD GRUB next to it as grubx64.efi — the name shim loads. It
+#            is both the El Torito EFI image and a GPT partition, for the CD and
+#            the USB case. That GRUB finds the medium by /.disk/info and reads
+#            /boot/grub/grub.cfg, the same file the BIOS GRUB reads.
+FROM boot-builder AS iso-builder
 
-# grub-bios is what makes the image bootable on legacy/CSM machines; grub-efi
-# covers UEFI. grub-mkrescue emits a hybrid image when both are installed.
-RUN apk add --no-cache grub grub-bios grub-efi xorriso mtools dosfstools
-
-COPY --from=rootfs-builder /out/vmlinuz /iso/boot/vmlinuz
 COPY --from=rootfs-builder /out/initramfs.cpio.gz /iso/boot/initramfs.cpio.gz
 COPY build/grub.cfg /iso/boot/grub/grub.cfg
 
-RUN mkdir -p /out \
- && grub-mkrescue -o /out/simpleclient.iso /iso -- -volid SIMPLECLIENT \
- && ls -lh /out/simpleclient.iso
+RUN set -e; \
+    cp /kernel/vmlinuz /iso/boot/vmlinuz; \
+    mkdir -p /iso/.disk /iso/boot/grub/i386-pc /iso/boot/grub/fonts /efi/EFI/boot /out; \
+    echo "SimpleClient" > /iso/.disk/info; \
+    cp /usr/lib/grub/i386-pc/*.mod /usr/lib/grub/i386-pc/*.lst /iso/boot/grub/i386-pc/; \
+    cp /usr/share/grub/unicode.pf2 /iso/boot/grub/fonts/; \
+    grub-mkimage -O i386-pc-eltorito -p /boot/grub -o /iso/boot/grub/i386-pc/eltorito.img biosdisk iso9660; \
+    cp /signed/usr/lib/shim/shimx64.efi.signed /efi/EFI/boot/bootx64.efi; \
+    cp /signed/usr/lib/shim/mmx64.efi.signed /efi/EFI/boot/mmx64.efi; \
+    cp /signed/usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed /efi/EFI/boot/grubx64.efi; \
+    cp -r /efi/EFI /iso/; \
+    mkfs.vfat -C /iso/boot/efi.img 8192 >/dev/null; \
+    mcopy -s -i /iso/boot/efi.img /efi/EFI ::/; \
+    xorriso -as mkisofs -r -J -joliet-long -V SIMPLECLIENT -o /out/simpleclient.iso \
+        -b boot/grub/i386-pc/eltorito.img -no-emul-boot -boot-load-size 4 -boot-info-table \
+        --grub2-boot-info --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
+        -apm-block-size 2048 \
+        --efi-boot boot/efi.img -efi-boot-part --efi-boot-image \
+        --protective-msdos-label \
+        /iso; \
+    ls -lh /out/simpleclient.iso
 
 # ── Export ────────────────────────────────────────────────────────────────────
 FROM scratch AS export
 COPY --from=go-builder /out/simpleclient /
 COPY --from=rootfs-builder /out/initramfs.cpio.gz /
-COPY --from=rootfs-builder /out/vmlinuz /
+COPY --from=boot-builder /kernel/vmlinuz /
 COPY --from=iso-builder /out/simpleclient.iso /

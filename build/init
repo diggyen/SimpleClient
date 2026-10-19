@@ -31,8 +31,20 @@ echo /bin/modprobe > /proc/sys/kernel/modprobe 2>/dev/null
 # Silence kernel log noise so it does not scribble over the UI.
 echo 0 > /proc/sys/kernel/printk 2>/dev/null
 
+# How this machine booted. Under Secure Boot the kernel locks itself down and
+# loads signed modules only, which is worth knowing when a driver is missing.
+if [ -d /sys/firmware/efi ]; then
+    mount -t securityfs securityfs /sys/kernel/security 2>/dev/null
+    sb=off
+    dmesg | grep -q "Secure boot enabled" && sb=on
+    lockdown=$(sed -n 's/.*\[\(.*\)\].*/\1/p' /sys/kernel/security/lockdown 2>/dev/null)
+    log "firmware: UEFI, Secure Boot $sb, lockdown ${lockdown:-?}"
+else
+    log "firmware: BIOS"
+fi
+
 # ── Kernel modules ────────────────────────────────────────────────────────────
-# Alpine's kernel builds nearly everything as a module. Two passes load them.
+# Debian's kernel builds nearly everything as a module. Two passes load them.
 #
 # First, a fixed list of what the kiosk cannot run without, so a machine whose
 # hardware the second pass somehow misses still boots to a usable screen:
