@@ -382,6 +382,22 @@ if [ "$GOT_IP" = "0" ]; then
     done
 fi
 
+# ── Startup server ────────────────────────────────────────────────────────────
+# The server the kiosk goes to as it starts (F10 in the connection dialog),
+# kept where the network settings are: the data partition of an installed
+# kiosk, the EFI partition of the USB stick a live one runs from — not that of
+# a stick merely plugged into an installed one.
+if [ -f /data/simpleclient/autoconnect ]; then
+    cp /data/simpleclient/autoconnect /run/sc-autoconnect
+elif [ -z "$SLOT" ] && EFI_DEV=$(findfs LABEL=SC_EFI 2>/dev/null); then
+    mkdir -p /run/sc-efi
+    if mount -t vfat -o ro "$EFI_DEV" /run/sc-efi 2>/dev/null; then
+        cp /run/sc-efi/simpleclient/autoconnect /run/sc-autoconnect 2>/dev/null
+        umount /run/sc-efi
+    fi
+fi
+chmod 600 /run/sc-autoconnect 2>/dev/null
+
 # ── Kiosk loop ────────────────────────────────────────────────────────────────
 # Restart simpleclient if it exits, so a crash does not leave a blank screen.
 while true; do

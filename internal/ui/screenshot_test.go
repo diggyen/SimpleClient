@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diggyen/SimpleClient/internal/autoconnect"
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
@@ -32,6 +33,9 @@ func TestScreenshots(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// From the defaults, whatever the tests before this one left switched.
+	i18n.Set(i18n.Default)
+	inputdev.SetLayout(inputdev.LayoutUS)
 	t.Cleanup(func() {
 		i18n.Set(i18n.Default)
 		inputdev.SetLayout(inputdev.LayoutUS)
@@ -140,6 +144,29 @@ func TestScreenshots(t *testing.T) {
 		renderDiscovery(b, st)
 		renderConnecting(b, st)
 	})
+	shot("06-credentials-startup", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenModal, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Modal: ModalState{Fields: [4]string{"10.7.7.101", "kiosk", "secret123", ""},
+				FocusIdx: fieldPassword, Auto: autoconnect.Logon},
+		}
+		renderDiscovery(b, st)
+		renderModal(b, st)
+	})
+	now := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
+	clock = func() time.Time { return now }
+	t.Cleanup(func() { clock = time.Now })
+	shot("07-startup-countdown", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenAuto, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1, SpinnerTick: 2,
+			AutoAt: now.Add(4 * time.Second), AutoNet: true,
+		}
+		st.Modal.Fields[fieldServer] = st.Hosts[1].Address()
+		renderDiscovery(b, st)
+		renderAuto(b, st)
+	})
 
 	// The narrowest panel the kiosk is expected to boot on. Everything has to
 	// fit here before it is worth judging at 1280.
@@ -170,6 +197,16 @@ func TestScreenshots(t *testing.T) {
 			Screen: ScreenDiscovery, Hosts: sampleHosts(5),
 			SelectedIdx: 1, ScanDone: true, ScanProgress: 1,
 		})
+	})
+	shot("08-turkish-startup", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenModal, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Modal: ModalState{Fields: [4]string{"10.7.7.101", "kiosk", "secret123", ""},
+				FocusIdx: fieldPassword, Auto: autoconnect.Logon},
+		}
+		renderDiscovery(b, st)
+		renderModal(b, st)
 	})
 
 	t.Logf("wrote screenshots to %s", dir)

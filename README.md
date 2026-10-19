@@ -60,6 +60,7 @@ walks through the causes in order of likelihood.
 | `F7` | Connect to a server by address (`10.0.0.5`, `rdp.example.com:53389`) |
 | `F8` | Network settings: DHCP or a fixed address |
 | `F9` | Install to the machine's disk (when started from a USB stick or CD) |
+| `F10` | In the credential dialog: what the kiosk does at startup — the server list, this server's dialog, or logging on to it |
 | `Ctrl`+`Alt`+`End` | Disconnect from an active session |
 
 The scan probes TCP port 3389 across the subnet the machine got from DHCP. If
@@ -75,9 +76,20 @@ The layout applies to the credential dialog only: inside a session the raw
 keycode is forwarded and the remote machine applies its own.
 
 Once a host has been connected to, its username and domain are filled in the
-next time you open its dialog, with the cursor in the password field. That
-memory lives in RAM and is gone after a power cycle — the image boots read-only
-and has nowhere to write. The password is never stored.
+next time you open its dialog, with the cursor in the password field. A kiosk
+running from a USB stick or CD keeps that in RAM until it is switched off; an
+installed one keeps it on its disk, with the servers it has connected to. The
+password is not kept, unless F10 asks for it.
+
+`F10` in the dialog makes that server the one the kiosk starts at. Either its
+dialog opens at power-on with the account filled in, or — with the password
+kept — the kiosk logs on by itself after a five-second countdown, which `Esc`
+leaves for the server list. Either way it goes back there when the session
+ends, and keeps trying a server that is not up yet. The choice is saved once a
+connection made with it works, where the network settings are: on the disk of
+an installed kiosk, on the USB stick of a live one. A kept password is encoded
+there, not encrypted — whoever has the disk or the stick can read it — so keep
+it for an account set up for a kiosk.
 
 The scan covers **the kiosk's own subnet only**. A server anywhere else is
 reached with `F7`, by address or name; once connected to, it stays in the list.

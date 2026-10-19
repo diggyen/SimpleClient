@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 
+	"github.com/diggyen/SimpleClient/internal/autoconnect"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 )
 
@@ -13,6 +14,7 @@ const (
 	modalFieldG = 12 // gap between fields
 	modalLabelW = 88 // label column; the widest label is Turkish "Etki alanı:"
 	modalHintH  = CharH + 8
+	modalHintG  = 6 // between the two toggles under the fields
 	modalBtnH   = 32
 	modalBtnW   = 132
 	modalBtnGap = 14
@@ -27,6 +29,7 @@ type modalLayout struct {
 	Fields  []image.Rectangle // as many as the dialog shows
 	LabelX  int
 	Domain  image.Rectangle // the "F6 Domain" toggle under the fields
+	Auto    image.Rectangle // the "F10 At startup" toggle under it
 	ErrorY  int
 	Connect image.Rectangle
 	Cancel  image.Rectangle
@@ -37,7 +40,7 @@ type modalLayout struct {
 func layoutModal(screen image.Rectangle, fields int) modalLayout {
 	h := cardHeader + modalPad +
 		fields*modalFieldH + (fields-1)*modalFieldG +
-		modalFieldG + modalHintH +
+		modalFieldG + 2*modalHintH + modalHintG +
 		modalErrH + modalPad + modalBtnH + modalPad
 
 	box := image.Rect(0, 0, modalW, h).
@@ -59,6 +62,8 @@ func layoutModal(screen image.Rectangle, fields int) modalLayout {
 	}
 
 	l.Domain = image.Rect(inputX, y, inputX+domainToggleWidth(), y+modalHintH)
+	y += modalHintH + modalHintG
+	l.Auto = image.Rect(inputX, y, inputX+inputW, y+modalHintH)
 	y += modalHintH
 
 	l.ErrorY = y + 3
@@ -74,6 +79,17 @@ func layoutModal(screen image.Rectangle, fields int) modalLayout {
 // gap DrawKeycap's callers leave, and the label.
 func domainToggleWidth() int {
 	return TextWidth("F6", false) + 10 + 7 + TextWidth(i18n.T(i18n.HintDomain), false)
+}
+
+// autoLabel names a startup choice for the dialog's F10 toggle.
+func autoLabel(m autoconnect.Mode) string {
+	switch m {
+	case autoconnect.Dialog:
+		return i18n.T(i18n.HintAutoDialog)
+	case autoconnect.Logon:
+		return i18n.T(i18n.HintAutoLogon)
+	}
+	return i18n.T(i18n.HintAutoOff)
 }
 
 // renderModal draws the credential entry modal over the current screen.
@@ -128,6 +144,14 @@ func renderModal(img *image.RGBA, state *UIState) {
 	// control the mouse clicks.
 	x := l.Domain.Min.X + DrawKeycap(img, l.Domain.Min.X, l.Domain.Min.Y, "F6") + 7
 	DrawText(img, x, l.Domain.Min.Y+4, i18n.T(i18n.HintDomain), ColorDim)
+
+	// What the kiosk does at startup, lit once it is more than the list.
+	x = l.Auto.Min.X + DrawKeycap(img, l.Auto.Min.X, l.Auto.Min.Y, "F10") + 7
+	label, c := autoLabel(m.Auto), ColorDim
+	if m.Auto != autoconnect.Off {
+		c = ColorText
+	}
+	DrawText(img, x, l.Auto.Min.Y+4, label, c)
 
 	if m.Error != "" {
 		DrawText(img, l.LabelX, l.ErrorY, m.Error, ColorError)

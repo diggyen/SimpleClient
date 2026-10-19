@@ -121,6 +121,15 @@ const (
 	NetErrDNS
 	NetErrApply // "%s" is the reason
 
+	// Going to a server at startup (F10 in the connection dialog).
+	HintAutoOff    // the toggle: the server list at startup, as without it
+	HintAutoDialog // the toggle: this server's dialog at startup
+	HintAutoLogon  // the toggle: logging on to it, the password kept
+	AutoCountdown  // "%d" is seconds
+	AutoWaitNet
+	AutoRetry // "%d" is seconds
+	AutoKeys
+
 	numKeys // must stay last
 )
 
@@ -205,6 +214,14 @@ var catalogues = map[Lang]*catalogue{
 		NetErrGateway:  "The gateway is not in this subnet",
 		NetErrDNS:      "Invalid DNS server address",
 		NetErrApply:    "Could not apply: %s",
+
+		HintAutoOff:    "At startup: the server list",
+		HintAutoDialog: "At startup: this server",
+		HintAutoLogon:  "At startup: log on, password kept here",
+		AutoCountdown:  "Logging on in %d s",
+		AutoWaitNet:    "Waiting for the network",
+		AutoRetry:      "Trying again in %d s",
+		AutoKeys:       "Enter: now    Esc: server list",
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
@@ -283,6 +300,14 @@ var catalogues = map[Lang]*catalogue{
 		NetErrGateway:  "Ağ geçidi bu alt ağda değil",
 		NetErrDNS:      "DNS sunucusu adresi geçersiz",
 		NetErrApply:    "Uygulanamadı: %s",
+
+		HintAutoOff:    "Açılışta: sunucu listesi",
+		HintAutoDialog: "Açılışta: bu sunucu",
+		HintAutoLogon:  "Açılışta: oturum aç, parola cihazda saklanır",
+		AutoCountdown:  "%d sn içinde oturum açılacak",
+		AutoWaitNet:    "Ağ bekleniyor",
+		AutoRetry:      "%d sn sonra yeniden denenecek",
+		AutoKeys:       "Enter: hemen    Esc: sunucu listesi",
 	},
 }
 

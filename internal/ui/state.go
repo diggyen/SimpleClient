@@ -2,7 +2,9 @@ package ui
 
 import (
 	"sync"
+	"time"
 
+	"github.com/diggyen/SimpleClient/internal/autoconnect"
 	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/domain"
 )
@@ -17,6 +19,7 @@ const (
 	ScreenSession                  // Active RDP session
 	ScreenInstall                  // Install-to-disk dialog
 	ScreenNetwork                  // Network settings dialog
+	ScreenAuto                     // Counting down to logging on to the startup server
 )
 
 // ModalState holds the state of the connection dialog.
@@ -37,6 +40,9 @@ type ModalState struct {
 	ShowDomain bool
 	FocusIdx   int    // a field, then the connect button, then cancel
 	Error      string // Error message to display
+	// Auto is what the kiosk is to do with this server at startup (F10),
+	// kept once a connection with it works; see autoconnect.go.
+	Auto autoconnect.Mode
 }
 
 // The dialog's text fields, in focus order.
@@ -135,6 +141,18 @@ type UIState struct {
 	SavePath    string
 	SpinnerTick int // Used for connecting-screen spinner animation
 
+	// Auto is the server to go to at startup and after each session there,
+	// nil without one. While the auto screen counts down, AutoAt is when it
+	// logs on, AutoNet whether the kiosk has an address to do it from, and
+	// AutoErr why the last attempt failed. unattended marks the connection
+	// the countdown started, for connect to know a failure is to be tried
+	// again rather than shown in the dialog.
+	Auto       *autoconnect.Config
+	AutoAt     time.Time
+	AutoNet    bool
+	AutoErr    string
+	unattended bool
+
 	// pointer is the input reader, set once by Run before anything else
 	// runs; nil in tests.
 	pointer pointer
@@ -199,6 +217,10 @@ func (s *UIState) OpenModalFor() {
 	}
 	s.Modal.Fields[fieldServer] = host.Address()
 	s.Modal.FocusIdx = fieldUser
+	if s.isAutoServer(host.Address(), *host) {
+		s.fillFromAuto()
+		return
+	}
 	hint, ok := s.lastUser[host.AddrRDP()]
 	if !ok {
 		return
@@ -223,11 +245,15 @@ func (s *UIState) OpenModalManual() {
 func (s *UIState) Transition(to Screen) {
 	s.Dirty = true
 
+	// A session that ends goes back to where the kiosk starts: the list,
+	// or the startup server's dialog or countdown. One that drops is
+	// reconnected, with the connecting screen up meanwhile.
 	allowed := map[Screen][]Screen{
-		ScreenDiscovery:  {ScreenModal, ScreenInstall, ScreenNetwork},
+		ScreenDiscovery:  {ScreenModal, ScreenInstall, ScreenNetwork, ScreenAuto},
 		ScreenModal:      {ScreenDiscovery, ScreenConnecting},
-		ScreenConnecting: {ScreenSession, ScreenModal},
-		ScreenSession:    {ScreenDiscovery},
+		ScreenConnecting: {ScreenSession, ScreenModal, ScreenAuto},
+		ScreenSession:    {ScreenDiscovery, ScreenConnecting, ScreenModal, ScreenAuto},
+		ScreenAuto:       {ScreenConnecting, ScreenModal},
 	}
 	for _, valid := range allowed[s.Screen] {
 		if valid == to {

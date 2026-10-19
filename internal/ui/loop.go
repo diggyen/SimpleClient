@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"image"
+	"log"
 	"strings"
 	"time"
 
+	"github.com/diggyen/SimpleClient/internal/autoconnect"
 	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/config"
 	"github.com/diggyen/SimpleClient/internal/domain"
@@ -64,6 +66,13 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 
 	if cfg.StaticHost != "" && !state.AddStaticHost(cfg.StaticHost) {
 		state.ErrorMsg = "rdphost: " + cfg.StaticHost + "?"
+	}
+
+	// A startup server set with F10: its dialog, or the countdown to logging
+	// on to it, instead of the list.
+	if a, ok := autoconnect.Load(); ok {
+		state.Auto = &a
+		state.startAuto(time.Now())
 	}
 
 	var session *SessionState
@@ -136,10 +145,20 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		// ── Render tick ──────────────────────────────────────────────────────
 		case <-ticker.C:
 			state.Mu.Lock()
+			// The countdown to the startup server, over: log on. The screen
+			// changes here, under the lock, so the next tick cannot start a
+			// second connection before this one has begun.
+			if state.Screen == ScreenAuto && state.autoDue(time.Now()) {
+				state.openAutoModal()
+				state.unattended = true
+				state.Transition(ScreenConnecting)
+				go connect(state, fb, &session)
+			}
 			// The connecting screen redraws every tick regardless: its spinner
 			// has to animate, and it is the one screen whose exit is driven by
-			// a background goroutine rather than by an event on this loop.
-			if state.Screen != ScreenSession && (state.Dirty || state.Screen == ScreenConnecting) {
+			// a background goroutine rather than by an event on this loop. The
+			// countdown has its spinner and its seconds.
+			if state.Screen != ScreenSession && (state.Dirty || state.Screen == ScreenConnecting || state.Screen == ScreenAuto) {
 				spinTick++
 				state.SpinnerTick = spinTick / 4
 				mx, my := input.MousePos()
@@ -215,6 +234,8 @@ func handleInput(
 		handleInstallKey(ev, state)
 	case ScreenNetwork:
 		handleNetKey(ev, state)
+	case ScreenAuto:
+		handleAutoKey(ev, state)
 	}
 }
 
@@ -285,10 +306,16 @@ func handleModalKey(
 	case inputdev.KeyF6:
 		state.Modal.toggleDomain()
 
+	case inputdev.KeyF10:
+		state.toggleAuto()
+
 	case inputdev.KeyEnter:
 		if state.Modal.FocusIdx == state.Modal.focusCancel() {
 			state.Transition(ScreenDiscovery)
 		} else {
+			// Off the dialog at once: a second Enter before the connection
+			// has begun would start another.
+			state.Transition(ScreenConnecting)
 			go connect(state, fb, session)
 		}
 
@@ -387,8 +414,11 @@ func handleMouseClick(
 		switch {
 		case p.In(l.Domain):
 			state.Modal.toggleDomain()
+		case p.In(l.Auto):
+			state.toggleAuto()
 		case p.In(l.Connect):
 			state.Modal.FocusIdx = state.Modal.focusConnect()
+			state.Transition(ScreenConnecting)
 			go connect(state, fb, session)
 		case p.In(l.Cancel):
 			state.Transition(ScreenDiscovery)
@@ -432,6 +462,9 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 		Password: state.Modal.Fields[fieldPassword],
 		Domain:   state.Modal.domain(),
 	}
+	mode := state.Modal.Auto
+	unattended := state.unattended
+	state.unattended = false
 	state.Transition(ScreenConnecting)
 	state.Modal.Error = ""
 	state.Mu.Unlock()
@@ -440,9 +473,14 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	host, err := domain.ParseAddress(server)
 	state.Mu.Lock()
 	if err != nil {
-		state.Modal.Error = i18n.T(i18n.ErrBadAddress)
-		state.Modal.FocusIdx = fieldServer
-		state.Transition(ScreenModal)
+		if unattended {
+			// The DNS server may not be up yet either.
+			state.autoFailed(i18n.T(i18n.ErrBadAddress), time.Now())
+		} else {
+			state.Modal.Error = i18n.T(i18n.ErrBadAddress)
+			state.Modal.FocusIdx = fieldServer
+			state.Transition(ScreenModal)
+		}
 		state.Mu.Unlock()
 		return
 	}
@@ -465,17 +503,29 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	client, err := dial(state, addr, creds, fb, devices)
 	if err != nil {
 		state.Mu.Lock()
-		state.Modal.Error = rdpErrToMessage(err)
-		state.Transition(ScreenModal)
+		if unattended && !authFailed(err) {
+			state.autoFailed(rdpErrToMessage(err), time.Now())
+		} else {
+			state.Modal.Error = rdpErrToMessage(err)
+			state.Transition(ScreenModal)
+		}
 		state.Mu.Unlock()
 		return
 	}
 
 	state.Mu.Lock()
 	// Only now, with the session up: an account that was rejected is not one to
-	// offer back the next time.
+	// offer back the next time, nor a server to start at.
 	state.saveConnection(selected, creds.Username, creds.Domain)
+	auto, changed := state.keepAuto(server, creds, mode)
+	installed := state.Boot.Installed()
 	state.Mu.Unlock()
+	if changed {
+		// On a USB stick this mounts its EFI partition: not under the lock.
+		if _, err := saveAuto(auto, installed); err != nil {
+			log.Printf("ui: startup server: %v", err)
+		}
+	}
 
 	for {
 		runSession(state, fb, session, selected, client)
@@ -493,10 +543,13 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 		}
 	}
 
-	// Connection closed.
+	// Connection closed: back to where the kiosk starts — the startup
+	// server's dialog or countdown, if this was it, else the list.
 	state.Mu.Lock()
 	*session = nil
-	state.Transition(ScreenDiscovery)
+	if !state.isAutoServer(server, selected) || !state.startAuto(time.Now()) {
+		state.Transition(ScreenDiscovery)
+	}
 	state.ErrorMsg = i18n.T(i18n.Disconnected)
 	state.Mu.Unlock()
 }
@@ -595,6 +648,12 @@ func disconnect(state *UIState, session *SessionState) {
 	state.Transition(ScreenDiscovery)
 	state.ErrorMsg = i18n.T(i18n.Disconnected)
 	state.Mu.Unlock()
+}
+
+// authFailed reports whether err is the server turning the account down,
+// which trying again will not change.
+func authFailed(err error) bool {
+	return rdpErrToMessage(err) == i18n.T(i18n.ErrAuthFailed)
 }
 
 // rdpErrToMessage maps a connection error onto a localised, user-facing message.
