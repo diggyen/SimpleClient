@@ -91,15 +91,16 @@ that one, and only while the session lasts:
   on the server as a drive under their own name: in *This PC* on Windows, in
   `~/thinclient_drives` on Linux. A stick can be pulled out at any time;
   what the server saved is on it within a second.
-- **Everything else** — printers, scanners, smart-card readers and tokens
-  (e-İmza, ID cards), USB-serial console cables, other devices — goes to the
-  server whole, as if plugged into it, and works there with the server's own
-  drivers. A Windows server gets them through RDP's USB redirection, smart-card
-  readers through its smart-card redirection. A Linux server gets them over
-  USB/IP when it runs SimpleClient's agent, which the server script below
-  installs.
+- **Everything else** — printers, scanners, webcams, smart-card readers and
+  tokens (e-İmza, ID cards), USB-serial console cables, other devices — goes to
+  the server whole, as if plugged into it, and works there with the server's
+  own drivers. A Windows server gets them through RDP's USB redirection,
+  smart-card readers through its smart-card redirection. A Linux server gets
+  them over USB/IP when it runs SimpleClient's agent, which the server script
+  below installs.
 - **Keyboards, mice, touch screens, headsets, hubs and network adapters** stay
-  with the kiosk, which uses them.
+  with the kiosk, which uses them. A webcam's microphone goes with the webcam,
+  for the video call it is part of.
 
 ## Linux servers
 
@@ -180,8 +181,6 @@ Design boundaries, not bugs waiting to be filed:
 - **No clipboard redirection.**
 - **A smart-card reader on a Linux server is the whole server's.** Every remote
   session there can reach the readers pcscd has; the card's PIN still guards it.
-- **A webcam with a microphone stays with the kiosk**, which takes it for a
-  headset.
 
 ## Repository layout
 

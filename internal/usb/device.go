@@ -1,14 +1,14 @@
 // Package usb hands the kiosk's USB devices to the session. A drive is
 // mounted and offered to the server by name, as a drive of its own (RDP drive
 // redirection, which Windows and xrdp both serve). Everything else that is not
-// the kiosk's own — printers, scanners, smart-card readers, serial adapters —
-// goes to the server whole: over RDP's USB redirection to a Windows server, or
-// over USB/IP to a Linux one running SimpleClient's agent, where it appears as
-// if plugged in. Either way only to the server the session is with, and only
-// while it lasts.
+// the kiosk's own — printers, scanners, webcams, smart-card readers, serial
+// adapters — goes to the server whole: over RDP's USB redirection to a Windows
+// server, or over USB/IP to a Linux one running SimpleClient's agent, where it
+// appears as if plugged in. Either way only to the server the session is with,
+// and only while it lasts.
 //
 // Keyboards, mice and touch screens, headsets, hubs and network adapters stay
-// with the kiosk, which needs them.
+// with the kiosk, which needs them. A webcam's microphone goes with the webcam.
 package usb
 
 import (
@@ -53,6 +53,7 @@ const (
 	classStorage   = 0x08
 	classHub       = 0x09
 	classSmartCard = 0x0b
+	classVideo     = 0x0e
 	classWireless  = 0xe0
 )
 
@@ -83,10 +84,17 @@ type Device struct {
 
 // Kind sorts the device. Anything the kiosk uses itself stays; a drive is a
 // drive; the rest is the server's. A printer with a card slot is a printer:
-// storage among other functions goes with them.
+// storage among other functions goes with them. A webcam is a camera, though
+// it has a microphone and often a snapshot button: a video call on the server
+// wants the microphone in front of the user, and the button is no use here.
 func (d Device) Kind() Kind {
 	if d.Net || d.Class == classHub || d.Class == classWireless {
 		return Local
+	}
+	for _, i := range d.Interfaces {
+		if i.Class == classVideo {
+			return Redirect
+		}
 	}
 	storage, other := false, false
 	for _, i := range d.Interfaces {

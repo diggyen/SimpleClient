@@ -67,11 +67,12 @@ func TestKind(t *testing.T) {
 		"1-6 ff,ff net",  // USB network adapter
 		"2-1.4 e0,e0",    // Bluetooth
 		"2-1.5 0e,0e,01", // webcam with a microphone
+		"2-1.6 0e,0e,03", // webcam with a snapshot button
 		"2-2 02,0a",      // serial adapter (CDC ACM)
 	)
 	want := map[string]Kind{
 		"1-1": Local, "1-2": Storage, "1-3": Redirect, "1-4": Redirect, "1-5": Local,
-		"1-6": Local, "2-1.4": Local, "2-1.5": Local, "2-2": Redirect,
+		"1-6": Local, "2-1.4": Local, "2-1.5": Redirect, "2-1.6": Redirect, "2-2": Redirect,
 	}
 	devs := Scan()
 	if len(devs) != len(want) {

@@ -527,11 +527,11 @@ setup_usb() {
             dnf) dnf install -y "kernel-modules-extra-$(uname -r)" || true ;;
         esac
         if ! modprobe vhci-hcd 2>/dev/null; then
-            warn "Bu çekirdekte USB/IP (vhci-hcd) yok: kiosklardaki yazıcı, tarayıcı ve kart okuyucular bu makineye takılamaz; USB bellekler yine gelir"
+            warn "Bu çekirdekte USB/IP (vhci-hcd) yok: kiosklardaki yazıcı, tarayıcı, kamera ve kart okuyucular bu makineye takılamaz; USB bellekler yine gelir"
             return
         fi
     fi
-    say "USB: kiosklardaki yazıcı, tarayıcı, kart okuyucu ve seri aygıtlar bu makineye USB/IP ile takılır"
+    say "USB: kiosklardaki yazıcı, tarayıcı, kamera, kart okuyucu ve seri aygıtlar bu makineye USB/IP ile takılır"
     case $FAMILY in
         apt) apt-get install -y --no-install-recommends python3 pcscd libccid acl ;;
         dnf) dnf install -y python3 pcsc-lite pcsc-lite-ccid acl ;;
@@ -563,8 +563,9 @@ write_usb_agent() {
 # simpleclient-usb-agent, written by simpleclient-server.sh.
 #
 # Attaches the USB devices of SimpleClient kiosks that have a session open on
-# this machine: printers, scanners, smart-card readers, serial adapters appear
-# here as if plugged in, for as long as the kiosk stays connected.
+# this machine: printers, scanners, webcams, smart-card readers, serial
+# adapters appear here as if plugged in, for as long as the kiosk stays
+# connected.
 #
 # A kiosk connects to port 3241 when its session starts and keeps the
 # connection open; it offers its devices over USB/IP on its own port 3240, to
@@ -598,7 +599,7 @@ OP_REQ_DEVLIST, OP_REP_DEVLIST = 0x8005, 0x0005
 OP_REQ_IMPORT, OP_REP_IMPORT = 0x8003, 0x0003
 DEVICE_LEN = 312
 VDEV_ST_NULL, VDEV_ST_USED = 4, 6
-CLASS_HID, CLASS_HUB = 0x03, 0x09
+CLASS_HID, CLASS_HUB, CLASS_VIDEO = 0x03, 0x09, 0x0e
 
 log = logging.getLogger("simpleclient-usb")
 
@@ -871,7 +872,10 @@ class Kiosk(threading.Thread):
             if d["busid"] in self.ports:
                 continue
             name = "%s (%04x:%04x)" % (d["busid"], d["vid"], d["pid"])
-            if d["class"] == CLASS_HUB or any(c in (CLASS_HID, CLASS_HUB) for c in d["classes"]):
+            # A webcam's snapshot button is an input interface: the camera
+            # comes, and the button stays unauthorized like any other.
+            if d["class"] == CLASS_HUB or CLASS_HUB in d["classes"] or (
+                    CLASS_HID in d["classes"] and CLASS_VIDEO not in d["classes"]):
                 log.info("%s: %s not attached: it would act as a keyboard or mouse here", self.ip, name)
                 continue
             try:
