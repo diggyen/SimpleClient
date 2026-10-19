@@ -56,10 +56,14 @@ func TestLiveConnect(t *testing.T) {
 
 	for frames < 3 {
 		select {
-		case img, ok := <-c.Frames():
+		case update, ok := <-c.Frames():
 			if !ok {
 				t.Fatalf("frame channel closed after %d frames", frames)
 			}
+			if len(update) == 0 {
+				t.Fatal("received an empty update")
+			}
+			img := update[0]
 			if img == nil {
 				t.Fatal("received a nil frame")
 			}
@@ -112,14 +116,16 @@ func writeCompositeScreenshot(t *testing.T, c *Client, path string, width, heigh
 collect:
 	for {
 		select {
-		case img, ok := <-c.Frames():
+		case update, ok := <-c.Frames():
 			if !ok {
 				break collect
 			}
-			b := img.Bounds()
-			draw.Draw(canvas, b, img, b.Min, draw.Src)
-			painted = painted.Union(b)
-			tiles++
+			for _, img := range update {
+				b := img.Bounds()
+				draw.Draw(canvas, b, img, b.Min, draw.Src)
+				painted = painted.Union(b)
+				tiles++
+			}
 		case <-timeout:
 			break collect
 		}

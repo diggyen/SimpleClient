@@ -282,6 +282,28 @@ func (c *MCSClient) SetClientDesktop(width, height uint16) {
 	c.clientCoreData.DesktopHeight = height
 }
 
+// AddVirtualChannel announces a static virtual channel in the client network
+// data, so the server creates it and the channel is joined at connect time.
+func (c *MCSClient) AddVirtualChannel(name string, option uint32) {
+	c.clientNetworkData.AddVirtualChannel(name, option)
+}
+
+func (c *MCSClient) SetClientKeyboardLayout(klid uint32) {
+	c.clientCoreData.KbdLayout = gcc.KeyboardLayout(klid)
+}
+
+// SetClientColorDepth asks for a 16- or 24-bit session. 16 bits halves the
+// bitmap stream and uses the cheapest RLE decoder, which is what keeps a slow
+// thin client smooth; 24 bits trades that for gradients without banding.
+func (c *MCSClient) SetClientColorDepth(bits int) {
+	switch bits {
+	case 16:
+		c.clientCoreData.HighColorDepth = gcc.HIGH_COLOR_16BPP
+	case 24:
+		c.clientCoreData.HighColorDepth = gcc.HIGH_COLOR_24BPP
+	}
+}
+
 func (c *MCSClient) SetClientDynvcProtocol() {
 	c.clientCoreData.EarlyCapabilityFlags = gcc.RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL
 	c.clientNetworkData.AddVirtualChannel(drdynvc.ChannelName, drdynvc.ChannelOption)

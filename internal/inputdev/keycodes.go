@@ -1,6 +1,9 @@
 package inputdev
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+	"unicode"
+)
 
 // Special key constants (Linux keycodes).
 const (
@@ -15,9 +18,12 @@ const (
 	KeyRightShift = 54
 	KeyAlt        = 56
 	KeySpace      = 57
+	KeyCapsLock   = 58
+	KeyRightCtrl  = 97
 	KeyF1         = 59
 	KeyF2         = 60
 	KeyF3         = 61
+	KeyF4         = 62
 	KeyF5         = 63
 	KeyF10        = 68
 	KeyUp         = 103
@@ -289,6 +295,21 @@ var layouts = map[Layout]map[int][2]rune{
 // considering shift. Returns 0 if the keycode has no printable character.
 func KeycodeToRune(keycode int, shifted bool) rune {
 	return KeycodeToRuneIn(CurrentLayout(), keycode, shifted)
+}
+
+// KeycodeToRuneCaps is KeycodeToRune with Caps Lock applied: on a letter key
+// Caps Lock inverts Shift, on everything else it does nothing. The letter test
+// runs on the layout's own pair, so Turkish i/İ and ı/I come out right.
+func KeycodeToRuneCaps(keycode int, shifted, caps bool) rune {
+	return KeycodeToRuneCapsIn(CurrentLayout(), keycode, shifted, caps)
+}
+
+// KeycodeToRuneCapsIn is KeycodeToRuneCaps against a named layout.
+func KeycodeToRuneCapsIn(layout Layout, keycode int, shifted, caps bool) rune {
+	if caps && unicode.IsLetter(KeycodeToRuneIn(layout, keycode, false)) {
+		shifted = !shifted
+	}
+	return KeycodeToRuneIn(layout, keycode, shifted)
 }
 
 // KeycodeToRuneIn is KeycodeToRune against a named layout, so a layout can be

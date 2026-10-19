@@ -48,9 +48,11 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 	// Start initial scan.
 	ctx, cancelScan := context.WithCancel(context.Background())
 	cidr, _ := network.DetectCIDR()
+	state.Subnet = cidr
 	scanCh := scan.Start(ctx, []string{cidr})
 
 	ticker := time.NewTicker(16 * time.Millisecond) // ~60 FPS
+	netTicker := time.NewTicker(3 * time.Second)
 	state.Dirty = true
 	spinTick := 0
 
@@ -88,6 +90,25 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 			if inSession {
 				handleSessionInput(ev, state, current, input)
 			}
+
+		// ── Late network ─────────────────────────────────────────────────────
+		// A NIC whose link or DHCP lease came up after boot leaves the first
+		// scan with no subnet. Rather than waiting for someone to think of F5,
+		// scan as soon as an address appears.
+		case <-netTicker.C:
+			state.Mu.Lock()
+			if state.Subnet == "" && state.Screen == ScreenDiscovery {
+				if cidr, _ := network.DetectCIDR(); cidr != "" {
+					cancelScan()
+					ctx, cancelScan = context.WithCancel(context.Background())
+					state.Subnet = cidr
+					state.ScanDone = false
+					state.ScanProgress = 0
+					scanCh = scan.Start(ctx, []string{cidr})
+					state.Dirty = true
+				}
+			}
+			state.Mu.Unlock()
 
 		// ── Render tick ──────────────────────────────────────────────────────
 		case <-ticker.C:
@@ -139,6 +160,18 @@ func handleInput(
 	// F2 cycles the UI language from any non-session screen. Handled before the
 	// per-screen switch so it also works while the credential modal is open —
 	// F2 produces no rune, so it never collides with text entry.
+	// F4 moves sound to the next output: speakers or headphones, the monitor,
+	// a USB headset. Automatic choice is right most of the time; this is for
+	// the rest.
+	if ev.KeyCode == inputdev.KeyF4 {
+		if rdp.Audio != nil {
+			rdp.Audio.Sel.Cycle()
+			rdp.Audio.Reselect()
+		}
+		state.Dirty = true
+		return
+	}
+
 	if ev.KeyCode == inputdev.KeyF3 {
 		inputdev.NextLayout()
 		state.Dirty = true
@@ -191,6 +224,7 @@ func handleDiscoveryKey(
 		state.ScanProgress = 0
 		state.ErrorMsg = ""
 		cidr, _ := network.DetectCIDR()
+		state.Subnet = cidr
 		*scanCh = scan.Start(newCtx, []string{cidr})
 	}
 }
@@ -269,6 +303,8 @@ func handleSessionInput(
 		} else {
 			session.Client.SendMouseUp(ev.Button, ev.MouseX, ev.MouseY)
 		}
+	case inputdev.EvMouseWheel:
+		session.Client.SendWheel(ev.Wheel, ev.MouseX, ev.MouseY)
 	}
 }
 
@@ -339,6 +375,10 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	state.Modal.Error = ""
 	state.Mu.Unlock()
 
+	// The server maps scancodes to characters by the layout announced at
+	// connect time, so it follows the one selected on the kiosk (F3).
+	rdp.KeyboardLayout = rdp.LayoutID(string(inputdev.CurrentLayout()))
+
 	client, err := rdp.New(addr, creds, fb.Width(), fb.Height())
 	if err != nil {
 		state.Mu.Lock()
@@ -348,13 +388,64 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 		return
 	}
 
-	writer := &rdp.FrameWriter{FB: fb}
 	state.Mu.Lock()
 	// Only now, with the session up: an account that was rejected is not one to
 	// offer back the next time.
 	state.RememberCredential(addr, creds.Username, creds.Domain)
+	state.Mu.Unlock()
+
+	for {
+		runSession(state, fb, session, selected, client)
+		if !client.Failed() {
+			break
+		}
+		// The session died on an error — the network dropped, the server
+		// stopped answering. The desktop is still running on the server (xrdp
+		// and Windows both keep a disconnected session), so put the user back
+		// into it rather than dropping them on the host list to type the
+		// password again.
+		client = reconnect(state, addr, creds, fb)
+		if client == nil {
+			break
+		}
+	}
+
+	// Connection closed.
+	state.Mu.Lock()
+	*session = nil
+	state.Transition(ScreenDiscovery)
+	state.ErrorMsg = i18n.T(i18n.Disconnected)
+	state.Mu.Unlock()
+}
+
+// reconnectDelays is the back-off between reconnection attempts: long enough
+// for a switch port or a Wi-Fi bridge to come back, short enough that a user
+// staring at the screen is not left wondering.
+var reconnectDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
+
+// reconnect retries a failed session, showing the connecting screen meanwhile.
+// It returns nil once every attempt has failed.
+func reconnect(state *UIState, addr string, creds rdp.Credentials, fb framebuffer.Device) *rdp.Client {
+	state.Mu.Lock()
+	state.Transition(ScreenConnecting)
+	state.Dirty = true
+	state.Mu.Unlock()
+
+	for _, d := range reconnectDelays {
+		time.Sleep(d)
+		if c, err := rdp.New(addr, creds, fb.Width(), fb.Height()); err == nil {
+			return c
+		}
+	}
+	return nil
+}
+
+// runSession shows one live connection until it ends.
+func runSession(state *UIState, fb framebuffer.Device, session **SessionState, host domain.Host, client *rdp.Client) {
+	writer := &rdp.FrameWriter{FB: fb}
+	state.Mu.Lock()
 	*session = &SessionState{
-		Host:      selected,
+		Host:      host,
 		Client:    client,
 		Writer:    writer,
 		Connected: true,
@@ -368,16 +459,9 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	writer.MoveCursor(mx, my)
 
 	// RDP frame rendering loop (blocks until connection closes).
-	for frame := range client.Frames() {
-		writer.Write(frame)
+	for update := range client.Frames() {
+		writer.WriteUpdate(update)
 	}
-
-	// Connection closed.
-	state.Mu.Lock()
-	*session = nil
-	state.Transition(ScreenDiscovery)
-	state.ErrorMsg = i18n.T(i18n.Disconnected)
-	state.Mu.Unlock()
 }
 
 func disconnect(state *UIState, session *SessionState) {

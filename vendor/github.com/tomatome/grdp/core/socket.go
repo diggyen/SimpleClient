@@ -9,12 +9,18 @@ import (
 	//"crypto/tls"
 	"errors"
 	"net"
+	"sync"
+
 	"github.com/icodeface/tls"
 )
 
 type SocketLayer struct {
 	conn    net.Conn
 	tlsConn *tls.Conn
+	// wmu serialises writes. Input, audio acknowledgements and channel
+	// traffic are sent from different goroutines, and two PDUs interleaved
+	// on the wire is a corrupt stream the server drops the session over.
+	wmu sync.Mutex
 }
 
 func NewSocketLayer(conn net.Conn) *SocketLayer {
@@ -33,6 +39,8 @@ func (s *SocketLayer) Read(b []byte) (n int, err error) {
 }
 
 func (s *SocketLayer) Write(b []byte) (n int, err error) {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
 	if s.tlsConn != nil {
 		return s.tlsConn.Write(b)
 	}

@@ -49,10 +49,14 @@ type FrameWriter struct {
 
 // Write draws one screen update tile and pushes just that region to the screen.
 func (fw *FrameWriter) Write(img image.Image) {
-	if img == nil {
-		return
-	}
+	fw.WriteUpdate([]image.Image{img})
+}
 
+// WriteUpdate draws every tile of one server update and pushes just the
+// touched regions to the screen, repainting the pointer once at the end rather
+// than after each tile that happened to cross it — which is what made it
+// flicker while anything under it was changing.
+func (fw *FrameWriter) WriteUpdate(tiles []image.Image) {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
 
@@ -61,23 +65,34 @@ func (fw *FrameWriter) Write(img image.Image) {
 		fw.canvas = image.NewRGBA(screen)
 	}
 
-	// Tiles are positioned in remote-desktop coordinates. The session is opened
-	// at the framebuffer's own resolution, so they line up 1:1; anything outside
-	// the screen (a server that ignored the requested size) is clipped rather
-	// than scaled, which keeps text sharp.
-	r := img.Bounds().Intersect(screen)
-	if r.Empty() {
-		return
+	cursorHit := false
+	for _, img := range tiles {
+		if img == nil {
+			continue
+		}
+		// Tiles are positioned in remote-desktop coordinates. The session is
+		// opened at the framebuffer's own resolution, so they line up 1:1;
+		// anything outside the screen (a server that ignored the requested
+		// size) is clipped rather than scaled, which keeps text sharp.
+		r := img.Bounds().Intersect(screen)
+		if r.Empty() {
+			continue
+		}
+
+		draw.Draw(fw.canvas, r, img, r.Min, draw.Src)
+
+		// Only the touched rectangle goes to the framebuffer. A full-screen
+		// blit per tile would be roughly a thousand times the work for a busy
+		// desktop.
+		fw.FB.BlitRect(fw.canvas, r)
+
+		if fw.cursorVisible && r.Overlaps(fw.cursorRect()) {
+			cursorHit = true
+		}
 	}
 
-	draw.Draw(fw.canvas, r, img, r.Min, draw.Src)
-
-	// Only the touched rectangle goes to the framebuffer. A full-screen blit per
-	// tile would be roughly a thousand times the work for a busy desktop.
-	fw.FB.BlitRect(fw.canvas, r)
-
 	// A tile that covers the pointer has just painted over it.
-	if fw.cursorVisible && r.Overlaps(fw.cursorRect()) {
+	if cursorHit {
 		fw.paintCursor()
 	}
 }
@@ -88,6 +103,9 @@ func (fw *FrameWriter) MoveCursor(x, y int) {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
 
+	if fw.cursorVisible && fw.cursorX == x && fw.cursorY == y {
+		return
+	}
 	if fw.cursorVisible && fw.canvas != nil {
 		// Repaint the desktop where the pointer used to be, so it does not
 		// leave a trail across the session.

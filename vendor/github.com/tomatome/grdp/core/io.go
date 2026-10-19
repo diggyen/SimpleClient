@@ -2,7 +2,11 @@ package core
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
+	"runtime/debug"
+
+	"github.com/tomatome/grdp/glog"
 )
 
 type ReadBytesComplete func(result []byte, err error)
@@ -12,6 +16,22 @@ func StartReadBytes(len int, r io.Reader, cb ReadBytesComplete) {
 	go func() {
 		_, err := io.ReadFull(r, b)
 		//glog.Debug("StartReadBytes Get", n, "Bytes:", hex.EncodeToString(b))
+		// Every protocol layer parses on this goroutine. A malformed or
+		// unexpected packet that panics a parser must end the session, not the
+		// whole process: report it as a read error, which each layer already
+		// turns into "error"/"close", and drop the connection.
+		defer func() {
+			if p := recover(); p != nil {
+				glog.Error("rdp: parser panic:", p, string(debug.Stack()))
+				func() {
+					defer func() { _ = recover() }()
+					cb(nil, fmt.Errorf("rdp: protocol error: %v", p))
+				}()
+				if c, ok := r.(io.Closer); ok {
+					_ = c.Close()
+				}
+			}
+		}()
 		cb(b, err)
 	}()
 }

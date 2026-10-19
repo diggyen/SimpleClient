@@ -213,7 +213,10 @@ type Channels struct {
 	emission.Emitter
 	channels      map[string]ChannelClient
 	transport     core.Transport
-	buff          *bytes.Buffer
+	// buffs reassembles fragmented channel PDUs, one buffer per channel: a
+	// single shared buffer mixed the fragments of two channels whenever their
+	// PDUs interleaved, which sound and dynamic channels do constantly.
+	buffs         map[string]*bytes.Buffer
 	channelSender core.ChannelSender
 }
 
@@ -222,7 +225,7 @@ func NewChannels(t core.Transport) *Channels {
 		Emitter:   *emission.NewEmitter(),
 		channels:  make(map[string]ChannelClient, 20),
 		transport: t,
-		buff:      &bytes.Buffer{},
+		buffs:     make(map[string]*bytes.Buffer, 20),
 	}
 	t.On("channel", c.process)
 	return c
@@ -290,15 +293,21 @@ func (c *Channels) process(channel string, s []byte) {
 	flags, _ := core.ReadUInt32LE(r)
 	glog.Debugf("channel:%s length: %d, flags: %d", channel, ln, flags)
 	if flags&CHANNEL_FLAG_FIRST == 0 || flags&CHANNEL_FLAG_LAST == 0 {
+		buff := c.buffs[channel]
+		if buff == nil {
+			buff = &bytes.Buffer{}
+			c.buffs[channel] = buff
+		}
 		if flags&CHANNEL_FLAG_FIRST != 0 {
-			c.buff.Reset()
+			buff.Reset()
 		}
 		b, _ := core.ReadBytes(r.Len(), r)
-		c.buff.Write(b)
+		buff.Write(b)
 		if flags&CHANNEL_FLAG_LAST == 0 {
 			return
 		}
-		s = c.buff.Bytes()
+		// Copied out: the channel may keep the slice past the next PDU.
+		s = append([]byte(nil), buff.Bytes()...)
 	} else {
 		s, _ = core.ReadBytes(r.Len(), r)
 	}

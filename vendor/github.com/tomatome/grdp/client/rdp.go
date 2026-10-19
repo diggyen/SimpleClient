@@ -17,6 +17,7 @@ import (
 )
 
 type RdpClient struct {
+	setting  *Setting
 	tpkt     *tpkt.TPKT
 	x224     *x224.X224
 	mcs      *t125.MCSClient
@@ -26,7 +27,7 @@ type RdpClient struct {
 }
 
 func newRdpClient(s *Setting) *RdpClient {
-	return &RdpClient{}
+	return &RdpClient{setting: s}
 }
 
 func bitmapDecompress(bitmap *pdu.BitmapData) []byte {
@@ -61,6 +62,19 @@ func (c *RdpClient) Login(host, user, pwd string, width, height int) error {
 	c.channels = plugin.NewChannels(c.sec)
 
 	c.mcs.SetClientDesktop(uint16(width), uint16(height))
+	if c.setting != nil {
+		if c.setting.KeyboardLayout != 0 {
+			c.mcs.SetClientKeyboardLayout(c.setting.KeyboardLayout)
+		}
+		if c.setting.ColorDepth != 0 {
+			c.mcs.SetClientColorDepth(c.setting.ColorDepth)
+		}
+		for _, t := range c.setting.Channels {
+			name, option := t.GetType()
+			c.mcs.AddVirtualChannel(name, option)
+			c.channels.Register(t)
+		}
+	}
 
 	c.sec.SetUser(user)
 	c.sec.SetPwd(pwd)
@@ -103,12 +117,39 @@ func (c *RdpClient) MouseMove(x, y int) {
 	c.pdu.SendInputEvents(pdu.INPUT_EVENT_MOUSE, []pdu.InputEventsInterface{p})
 }
 
+// KeyEvent sends one scancode, with the extended (E0) prefix when asked for.
+// KeyDown/KeyUp cannot express that, so without it the arrow keys, Home/End,
+// Insert/Delete, PageUp/PageDown, right Ctrl, AltGr and the Windows keys all
+// reach the server as their numeric-keypad twins.
+func (c *RdpClient) KeyEvent(sc int, extended, down bool) {
+	p := &pdu.ScancodeKeyEvent{}
+	p.KeyCode = uint16(sc)
+	if extended {
+		p.KeyboardFlags |= pdu.KBDFLAGS_EXTENDED
+	}
+	if !down {
+		p.KeyboardFlags |= pdu.KBDFLAGS_RELEASE
+	}
+	c.pdu.SendInputEvents(pdu.INPUT_EVENT_SCANCODE, []pdu.InputEventsInterface{p})
+}
+
+// MouseWheel sends one wheel notch; scroll > 0 rolls away from the user.
+//
+// Upstream sent the pointer event under the scancode input type and with a
+// zero rotation, so the server dropped it. The rotation is the low 9 bits of
+// the flags: 120 per notch, negative values as a 9-bit two's complement with
+// PTRFLAGS_WHEEL_NEGATIVE as the sign bit.
 func (c *RdpClient) MouseWheel(scroll, x, y int) {
 	p := &pdu.PointerEvent{}
 	p.PointerFlags |= pdu.PTRFLAGS_WHEEL
+	if scroll < 0 {
+		p.PointerFlags |= pdu.PTRFLAGS_WHEEL_NEGATIVE | uint16((0x100-120)&0xFF)
+	} else {
+		p.PointerFlags |= 120
+	}
 	p.XPos = uint16(x)
 	p.YPos = uint16(y)
-	c.pdu.SendInputEvents(pdu.INPUT_EVENT_SCANCODE, []pdu.InputEventsInterface{p})
+	c.pdu.SendInputEvents(pdu.INPUT_EVENT_MOUSE, []pdu.InputEventsInterface{p})
 }
 
 func (c *RdpClient) MouseUp(button int, x, y int) {

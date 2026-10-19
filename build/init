@@ -15,12 +15,21 @@ mount -t devtmpfs devtmpfs /dev 2>/dev/null
 mkdir -p /dev/pts /dev/shm
 mount -t devpts devpts /dev/pts 2>/dev/null
 
+# The kernel loads modules on its own too — an HD Audio codec driver once the
+# controller has probed the codec, a filesystem when a USB stick is mounted —
+# by running the path in /proc/sys/kernel/modprobe, /sbin/modprobe by default.
+# Busybox puts its applets in /bin, so without this every one of those requests
+# failed silently: sound cards came up with no codec and made no sound.
+echo /bin/modprobe > /proc/sys/kernel/modprobe 2>/dev/null
+
 # Silence kernel log noise so it does not scribble over the UI.
 echo 0 > /proc/sys/kernel/printk 2>/dev/null
 
 # ── Kernel modules ────────────────────────────────────────────────────────────
-# Alpine's kernel builds nearly everything as a module, so nothing below is
-# optional:
+# Alpine's kernel builds nearly everything as a module. Two passes load them.
+#
+# First, a fixed list of what the kiosk cannot run without, so a machine whose
+# hardware the second pass somehow misses still boots to a usable screen:
 #   evdev      creates /dev/input/event*; without it the keyboard is invisible
 #              to userspace and the kiosk cannot be operated at all
 #   af_packet  udhcpc opens an AF_PACKET socket to send its DHCP discover
@@ -30,11 +39,64 @@ echo 0 > /proc/sys/kernel/printk 2>/dev/null
 #                disk, no entropy-gathering daemon and a CPU whose RDRAND the
 #                kernel does not trust, getrandom() blocks — the connection then
 #                fails with a timeout against a server that is answering fine.
+#   uhci_hcd,    ehci_pci (USB2.0/EHCI) does not handle low/full-speed devices
+#   ohci_pci     itself — it hands them to a companion UHCI (most Intel
+#                chipsets, e.g. the ICH10/C600-series boards under HP ProLiant
+#                Gen7/Gen8) or OHCI controller. Without the companion driver a
+#                USB keyboard or mouse plugged into such a machine enumerates
+#                nowhere. QEMU testing never caught this because test-qemu.sh
+#                drove input over PS/2.
+#   alx ... 8139too  onboard NICs of mid-2010s desktops and thin clients (a Dell
+#                Wyse 7010 among them); without the right one there is no ethN
+#                at all and the scan has no subnet to look at.
 for m in evdev af_packet simpledrm bochs virtio_pci virtio_net virtio_gpu \
-         virtio_rng e1000 e1000e r8169 igb igc tg3 atkbd psmouse usbhid \
-         hid_generic xhci_pci ehci_pci; do
+         virtio_rng e1000 e1000e r8169 igb igc tg3 \
+         alx atl1c atl1e atl1 atl2 b44 bnx2 jme sky2 skge forcedeth \
+         8139cp 8139too \
+         atkbd psmouse usbhid hid_generic \
+         xhci_pci ehci_pci uhci_hcd ohci_pci; do
     modprobe "$m" 2>/dev/null
 done
+
+# Second, coldplug: every device the kernel has found announces the driver it
+# wants as a modalias, and modprobe resolves that through modules.alias. This
+# is what covers the long tail — any NIC, USB controller, HID device or chipset
+# the list above does not name — on old hardware and new alike, the same way a
+# full distribution's initramfs does it.
+#
+# Display adapters (PCI class 03) are skipped: a native GPU driver taking over
+# would tear down the simpledrm framebuffer the kiosk draws on. Three rounds,
+# because loading a driver makes new devices appear behind it: a USB host
+# controller brings up its hubs and devices, a HID transport its HID devices.
+coldplug() {
+    for f in /sys/bus/pci/devices/*/modalias /sys/bus/usb/devices/*/modalias \
+             /sys/bus/hid/devices/*/modalias /sys/bus/serio/devices/*/modalias \
+             /sys/bus/acpi/devices/*/modalias /sys/bus/platform/devices/*/modalias \
+             /sys/bus/i2c/devices/*/modalias /sys/bus/virtio/devices/*/modalias \
+             /sys/bus/hdaudio/devices/*/modalias /sys/bus/sdio/devices/*/modalias; do
+        [ -r "$f" ] || continue
+        alias=$(cat "$f" 2>/dev/null)
+        [ -n "$alias" ] || continue
+        case "$alias" in
+            pci:*bc03sc*) continue ;;
+        esac
+        modprobe -q "$alias" 2>/dev/null
+    done
+}
+coldplug
+sleep 1
+coldplug
+sleep 1
+coldplug
+
+# Run the CPU flat out. A kiosk spends its life decoding the remote desktop;
+# left to the BIOS's P-state a low-power thin-client CPU decodes at a fraction
+# of its speed, which is the difference between smooth and stuttering.
+modprobe acpi-cpufreq 2>/dev/null
+for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    [ -w "$g" ] && echo performance > "$g" 2>/dev/null
+done
+log "modules: $(wc -l < /proc/modules 2>/dev/null) loaded; cpufreq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_driver 2>/dev/null)"
 
 # ── Display ───────────────────────────────────────────────────────────────────
 if [ ! -e /dev/fb0 ]; then
@@ -83,17 +145,27 @@ fi
 # ── Kernel command line options ───────────────────────────────────────────────
 # lang=tr on the GRUB command line selects the startup UI language. F2 still
 # toggles it at runtime.
+# kbddev=/dev/input/eventN and mousedev=/dev/input/eventN pin the input nodes,
+# bypassing autodetection, for the one machine where it still picks the wrong
+# device — a GRUB command-line edit (press 'e'), no rebuild.
+# bpp=24 asks for a 24-bit session instead of the default 16.
 # rdpdebug logs the whole RDP handshake to the console, which grub.cfg points at
 # the serial port. Diagnostic only — the RDP library prints the password in
 # clear text at that level.
 LANG_ARG=""
 RDP_ARG=""
+KBD_ARG=""
+MOUSE_ARG=""
+BPP_ARG=""
 HOST_ARG=""
 for arg in $(cat /proc/cmdline 2>/dev/null); do
     case "$arg" in
         lang=*)   LANG_ARG="-lang=${arg#lang=}" ;;
         rdpdebug) RDP_ARG="-rdp-debug" ;;
         rdphost=*) HOST_ARG="-host=${arg#rdphost=}" ;;
+        kbddev=*) KBD_ARG="-kbd=${arg#kbddev=}" ;;
+        mousedev=*) MOUSE_ARG="-mouse=${arg#mousedev=}" ;;
+        bpp=*) BPP_ARG="-bpp=${arg#bpp=}" ;;
     esac
 done
 
@@ -102,21 +174,43 @@ ip link set lo up 2>/dev/null
 
 # Kernel is booted with net.ifnames=0 (see grub.cfg) so interfaces are ethN,
 # but fall back to whatever non-loopback interfaces exist.
-IFACES=$(ls /sys/class/net 2>/dev/null | grep -v '^lo$')
+#
+# A NIC does not exist the moment its driver is loaded: some (igb, bnx2 with
+# its firmware, USB adapters) take a few seconds to register. Listing the
+# interfaces straight away found none on those machines and left the kiosk
+# with no network at all, so wait for one — up to ten seconds.
+i=0
+while [ "$i" -lt 40 ]; do
+    IFACES=$(ls /sys/class/net 2>/dev/null | grep -v '^lo$')
+    [ -n "$IFACES" ] && break
+    i=$((i + 1))
+    sleep 0.25
+done
+log "interfaces: $(echo $IFACES)"
 
 for i in $IFACES; do
     ip link set "$i" up 2>/dev/null
 done
 
+# udhcpc stays running in the background on every interface (-b): a lease
+# that is not there at boot — cable plugged in later, DHCP server slow to
+# answer — is picked up whenever it arrives, and an existing one is renewed
+# instead of silently expiring. The kiosk notices the new address on its own
+# and scans it. The first attempt is waited for, so the usual case boots with
+# its address already in place.
+for i in $IFACES; do
+    udhcpc -i "$i" -b -t 4 -T 2 -A 5 >/dev/null 2>&1
+done
+
 GOT_IP=0
 for i in $IFACES; do
-    out=$(udhcpc -i "$i" -n -q -t 5 -T 3 2>&1)
-    if [ $? -eq 0 ]; then
+    a=$(ip -4 -o addr show dev "$i" 2>/dev/null | grep -o 'inet [0-9./]*')
+    if [ -n "$a" ]; then
         GOT_IP=1
-        log "DHCP on $i: $(ip -4 addr show "$i" | grep -o 'inet [0-9./]*')"
-        break
+        log "DHCP on $i: $a"
+    else
+        log "no lease yet on $i (carrier=$(cat /sys/class/net/$i/carrier 2>/dev/null))"
     fi
-    log "DHCP failed on $i: $(echo "$out" | tr '\n' '|')"
 done
 
 if [ "$GOT_IP" = "0" ]; then
@@ -133,7 +227,7 @@ fi
 # ── Kiosk loop ────────────────────────────────────────────────────────────────
 # Restart simpleclient if it exits, so a crash does not leave a blank screen.
 while true; do
-    /sbin/simpleclient $LANG_ARG $RDP_ARG $HOST_ARG
+    /sbin/simpleclient $LANG_ARG $RDP_ARG $HOST_ARG $KBD_ARG $MOUSE_ARG $BPP_ARG
     log "simpleclient exited ($?); restarting in 2s"
     sleep 2
 done

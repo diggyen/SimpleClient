@@ -1,0 +1,374 @@
+diff --git a/vendor/github.com/tomatome/grdp/client/client.go b/vendor/github.com/tomatome/grdp/client/client.go
+index b8f237e..00b4bbb 100644
+--- a/vendor/github.com/tomatome/grdp/client/client.go
++++ b/vendor/github.com/tomatome/grdp/client/client.go
+@@ -6,6 +6,7 @@ import (
+ 	"os"
+ 
+ 	"github.com/tomatome/grdp/glog"
++	"github.com/tomatome/grdp/plugin"
+ 	"github.com/tomatome/grdp/protocol/pdu"
+ 	"github.com/tomatome/grdp/protocol/rfb"
+ )
+@@ -81,6 +82,13 @@ func (c *Client) KeyUp(sc int, name string) {
+ func (c *Client) KeyDown(sc int, name string) {
+ 	c.ctl.KeyDown(sc, name)
+ }
++// KeyEvent sends a scancode press or release, with the E0 prefix when extended
++// is set. Only the RDP backend can express it.
++func (c *Client) KeyEvent(sc int, extended, down bool) {
++	if r, ok := c.ctl.(*RdpClient); ok {
++		r.KeyEvent(sc, extended, down)
++	}
++}
+ func (c *Client) MouseMove(x, y int) {
+ 	c.ctl.MouseMove(x, y)
+ }
+@@ -125,12 +133,13 @@ func (c *Client) OnBitmap(f func([]Bitmap)) {
+ 			for _, v := range br.Rects {
+ 				b := Bitmap{int(v.Rect.X), int(v.Rect.Y), int(v.Rect.X + v.Rect.Width), int(v.Rect.Y + v.Rect.Height),
+ 					int(v.Rect.Width), int(v.Rect.Height),
+-					Bpp(uint16(br.Pf.BitsPerPixel)), false, v.Data}
++					Bpp(uint16(br.Pf.BitsPerPixel)), false, v.Data, false}
+ 				bs = append(bs, b)
+ 			}
+ 		} else {
+ 			for _, v := range data.([]pdu.BitmapData) {
+ 				IsCompress := v.IsCompress()
++				raw := !IsCompress
+ 				stream := v.BitmapDataStream
+ 				if IsCompress {
+ 					stream = bitmapDecompress(&v)
+@@ -138,7 +147,7 @@ func (c *Client) OnBitmap(f func([]Bitmap)) {
+ 				}
+ 
+ 				b := Bitmap{int(v.DestLeft), int(v.DestTop), int(v.DestRight), int(v.DestBottom),
+-					int(v.Width), int(v.Height), Bpp(v.BitsPerPixel), IsCompress, stream}
++					int(v.Width), int(v.Height), Bpp(v.BitsPerPixel), IsCompress, stream, raw}
+ 				bs = append(bs, b)
+ 			}
+ 		}
+@@ -158,6 +167,12 @@ type Bitmap struct {
+ 	BitsPerPixel int    `json:"bitsPerPixel"`
+ 	IsCompress   bool   `json:"isCompress"`
+ 	Data         []byte `json:"data"`
++	// Raw is set when Data is the stream exactly as the server sent it,
++	// uncompressed: rows bottom-up, each padded to four bytes, pixels
++	// little-endian. Decompressed tiles come out of the RLE decoder top-down
++	// with big-endian 16-bit pixels instead, and IsCompress cannot tell the
++	// two apart because it is cleared after decompression.
++	Raw bool `json:"raw"`
+ }
+ 
+ func Bpp(bp uint16) int {
+@@ -169,6 +184,17 @@ type Setting struct {
+ 	Height   int
+ 	Protocol string
+ 	LogLevel glog.LEVEL
++
++	// KeyboardLayout is the Windows keyboard layout id (KLID) announced to the
++	// server, e.g. 0x41F for Turkish Q. Zero keeps the US default. xrdp picks
++	// its scancode-to-keysym table from it.
++	KeyboardLayout uint32
++	// ColorDepth is the session colour depth in bits, 16 or 24. Zero keeps
++	// the library default (24).
++	ColorDepth int
++	// Channels are static virtual channels to announce and serve: sound,
++	// the dynamic-channel transport, anything implemented outside grdp.
++	Channels []plugin.ChannelTransport
+ }
+ 
+ func NewSetting() *Setting {
+diff --git a/vendor/github.com/tomatome/grdp/client/rdp.go b/vendor/github.com/tomatome/grdp/client/rdp.go
+index 8a8e8ce..a06da21 100644
+--- a/vendor/github.com/tomatome/grdp/client/rdp.go
++++ b/vendor/github.com/tomatome/grdp/client/rdp.go
+@@ -17,6 +17,7 @@ import (
+ )
+ 
+ type RdpClient struct {
++	setting  *Setting
+ 	tpkt     *tpkt.TPKT
+ 	x224     *x224.X224
+ 	mcs      *t125.MCSClient
+@@ -26,7 +27,7 @@ type RdpClient struct {
+ }
+ 
+ func newRdpClient(s *Setting) *RdpClient {
+-	return &RdpClient{}
++	return &RdpClient{setting: s}
+ }
+ 
+ func bitmapDecompress(bitmap *pdu.BitmapData) []byte {
+@@ -61,6 +62,19 @@ func (c *RdpClient) Login(host, user, pwd string, width, height int) error {
+ 	c.channels = plugin.NewChannels(c.sec)
+ 
+ 	c.mcs.SetClientDesktop(uint16(width), uint16(height))
++	if c.setting != nil {
++		if c.setting.KeyboardLayout != 0 {
++			c.mcs.SetClientKeyboardLayout(c.setting.KeyboardLayout)
++		}
++		if c.setting.ColorDepth != 0 {
++			c.mcs.SetClientColorDepth(c.setting.ColorDepth)
++		}
++		for _, t := range c.setting.Channels {
++			name, option := t.GetType()
++			c.mcs.AddVirtualChannel(name, option)
++			c.channels.Register(t)
++		}
++	}
+ 
+ 	c.sec.SetUser(user)
+ 	c.sec.SetPwd(pwd)
+@@ -103,12 +117,39 @@ func (c *RdpClient) MouseMove(x, y int) {
+ 	c.pdu.SendInputEvents(pdu.INPUT_EVENT_MOUSE, []pdu.InputEventsInterface{p})
+ }
+ 
++// KeyEvent sends one scancode, with the extended (E0) prefix when asked for.
++// KeyDown/KeyUp cannot express that, so without it the arrow keys, Home/End,
++// Insert/Delete, PageUp/PageDown, right Ctrl, AltGr and the Windows keys all
++// reach the server as their numeric-keypad twins.
++func (c *RdpClient) KeyEvent(sc int, extended, down bool) {
++	p := &pdu.ScancodeKeyEvent{}
++	p.KeyCode = uint16(sc)
++	if extended {
++		p.KeyboardFlags |= pdu.KBDFLAGS_EXTENDED
++	}
++	if !down {
++		p.KeyboardFlags |= pdu.KBDFLAGS_RELEASE
++	}
++	c.pdu.SendInputEvents(pdu.INPUT_EVENT_SCANCODE, []pdu.InputEventsInterface{p})
++}
++
++// MouseWheel sends one wheel notch; scroll > 0 rolls away from the user.
++//
++// Upstream sent the pointer event under the scancode input type and with a
++// zero rotation, so the server dropped it. The rotation is the low 9 bits of
++// the flags: 120 per notch, negative values as a 9-bit two's complement with
++// PTRFLAGS_WHEEL_NEGATIVE as the sign bit.
+ func (c *RdpClient) MouseWheel(scroll, x, y int) {
+ 	p := &pdu.PointerEvent{}
+ 	p.PointerFlags |= pdu.PTRFLAGS_WHEEL
++	if scroll < 0 {
++		p.PointerFlags |= pdu.PTRFLAGS_WHEEL_NEGATIVE | uint16((0x100-120)&0xFF)
++	} else {
++		p.PointerFlags |= 120
++	}
+ 	p.XPos = uint16(x)
+ 	p.YPos = uint16(y)
+-	c.pdu.SendInputEvents(pdu.INPUT_EVENT_SCANCODE, []pdu.InputEventsInterface{p})
++	c.pdu.SendInputEvents(pdu.INPUT_EVENT_MOUSE, []pdu.InputEventsInterface{p})
+ }
+ 
+ func (c *RdpClient) MouseUp(button int, x, y int) {
+diff --git a/vendor/github.com/tomatome/grdp/core/io.go b/vendor/github.com/tomatome/grdp/core/io.go
+index fa6334e..b73b8d5 100644
+--- a/vendor/github.com/tomatome/grdp/core/io.go
++++ b/vendor/github.com/tomatome/grdp/core/io.go
+@@ -2,7 +2,11 @@ package core
+ 
+ import (
+ 	"encoding/binary"
++	"fmt"
+ 	"io"
++	"runtime/debug"
++
++	"github.com/tomatome/grdp/glog"
+ )
+ 
+ type ReadBytesComplete func(result []byte, err error)
+@@ -12,6 +16,22 @@ func StartReadBytes(len int, r io.Reader, cb ReadBytesComplete) {
+ 	go func() {
+ 		_, err := io.ReadFull(r, b)
+ 		//glog.Debug("StartReadBytes Get", n, "Bytes:", hex.EncodeToString(b))
++		// Every protocol layer parses on this goroutine. A malformed or
++		// unexpected packet that panics a parser must end the session, not the
++		// whole process: report it as a read error, which each layer already
++		// turns into "error"/"close", and drop the connection.
++		defer func() {
++			if p := recover(); p != nil {
++				glog.Error("rdp: parser panic:", p, string(debug.Stack()))
++				func() {
++					defer func() { _ = recover() }()
++					cb(nil, fmt.Errorf("rdp: protocol error: %v", p))
++				}()
++				if c, ok := r.(io.Closer); ok {
++					_ = c.Close()
++				}
++			}
++		}()
+ 		cb(b, err)
+ 	}()
+ }
+diff --git a/vendor/github.com/tomatome/grdp/core/rle.go b/vendor/github.com/tomatome/grdp/core/rle.go
+index 67ffcc9..f729c34 100644
+--- a/vendor/github.com/tomatome/grdp/core/rle.go
++++ b/vendor/github.com/tomatome/grdp/core/rle.go
+@@ -470,7 +470,9 @@ func decompress2(output *[]uint8, width, height int, input []uint8, size int) bo
+ 	}
+ 	j := 0
+ 	for _, v := range out {
+-		(*output)[j], (*output)[j+1] = PutUint16BE(v)
++		// Written in place: PutUint16BE allocates a 2-byte slice per call, which
++		// was one heap allocation per pixel — 4096 for every 64x64 tile.
++		(*output)[j], (*output)[j+1] = uint8(v>>8), uint8(v)
+ 		j += 2
+ 	}
+ 	return true
+diff --git a/vendor/github.com/tomatome/grdp/core/socket.go b/vendor/github.com/tomatome/grdp/core/socket.go
+index 875a5ec..9533226 100644
+--- a/vendor/github.com/tomatome/grdp/core/socket.go
++++ b/vendor/github.com/tomatome/grdp/core/socket.go
+@@ -9,12 +9,18 @@ import (
+ 	//"crypto/tls"
+ 	"errors"
+ 	"net"
++	"sync"
++
+ 	"github.com/icodeface/tls"
+ )
+ 
+ type SocketLayer struct {
+ 	conn    net.Conn
+ 	tlsConn *tls.Conn
++	// wmu serialises writes. Input, audio acknowledgements and channel
++	// traffic are sent from different goroutines, and two PDUs interleaved
++	// on the wire is a corrupt stream the server drops the session over.
++	wmu sync.Mutex
+ }
+ 
+ func NewSocketLayer(conn net.Conn) *SocketLayer {
+@@ -33,6 +39,8 @@ func (s *SocketLayer) Read(b []byte) (n int, err error) {
+ }
+ 
+ func (s *SocketLayer) Write(b []byte) (n int, err error) {
++	s.wmu.Lock()
++	defer s.wmu.Unlock()
+ 	if s.tlsConn != nil {
+ 		return s.tlsConn.Write(b)
+ 	}
+diff --git a/vendor/github.com/tomatome/grdp/plugin/channel.go b/vendor/github.com/tomatome/grdp/plugin/channel.go
+index 6859601..c49181a 100644
+--- a/vendor/github.com/tomatome/grdp/plugin/channel.go
++++ b/vendor/github.com/tomatome/grdp/plugin/channel.go
+@@ -213,7 +213,10 @@ type Channels struct {
+ 	emission.Emitter
+ 	channels      map[string]ChannelClient
+ 	transport     core.Transport
+-	buff          *bytes.Buffer
++	// buffs reassembles fragmented channel PDUs, one buffer per channel: a
++	// single shared buffer mixed the fragments of two channels whenever their
++	// PDUs interleaved, which sound and dynamic channels do constantly.
++	buffs         map[string]*bytes.Buffer
+ 	channelSender core.ChannelSender
+ }
+ 
+@@ -222,7 +225,7 @@ func NewChannels(t core.Transport) *Channels {
+ 		Emitter:   *emission.NewEmitter(),
+ 		channels:  make(map[string]ChannelClient, 20),
+ 		transport: t,
+-		buff:      &bytes.Buffer{},
++		buffs:     make(map[string]*bytes.Buffer, 20),
+ 	}
+ 	t.On("channel", c.process)
+ 	return c
+@@ -290,15 +293,21 @@ func (c *Channels) process(channel string, s []byte) {
+ 	flags, _ := core.ReadUInt32LE(r)
+ 	glog.Debugf("channel:%s length: %d, flags: %d", channel, ln, flags)
+ 	if flags&CHANNEL_FLAG_FIRST == 0 || flags&CHANNEL_FLAG_LAST == 0 {
++		buff := c.buffs[channel]
++		if buff == nil {
++			buff = &bytes.Buffer{}
++			c.buffs[channel] = buff
++		}
+ 		if flags&CHANNEL_FLAG_FIRST != 0 {
+-			c.buff.Reset()
++			buff.Reset()
+ 		}
+ 		b, _ := core.ReadBytes(r.Len(), r)
+-		c.buff.Write(b)
++		buff.Write(b)
+ 		if flags&CHANNEL_FLAG_LAST == 0 {
+ 			return
+ 		}
+-		s = c.buff.Bytes()
++		// Copied out: the channel may keep the slice past the next PDU.
++		s = append([]byte(nil), buff.Bytes()...)
+ 	} else {
+ 		s, _ = core.ReadBytes(r.Len(), r)
+ 	}
+diff --git a/vendor/github.com/tomatome/grdp/protocol/pdu/pdu.go b/vendor/github.com/tomatome/grdp/protocol/pdu/pdu.go
+index 4bad445..dfc8f2e 100644
+--- a/vendor/github.com/tomatome/grdp/protocol/pdu/pdu.go
++++ b/vendor/github.com/tomatome/grdp/protocol/pdu/pdu.go
+@@ -104,10 +104,10 @@ func NewPDULayer(t core.Transport) *PDULayer {
+ 					RAIL_LEVEL_DOCKED_LANGBAR_SUPPORTED,
+ 			},
+ 			CAPSETTYPE_LARGE_POINTER: &LargePointerCapability{1},
+-			CAPSETTYPE_SURFACE_COMMANDS: &SurfaceCommandsCapability{
+-				CmdFlags: SURFCMDS_SET_SURFACE_BITS | SURFCMDS_STREAM_SURFACE_BITS | SURFCMDS_FRAME_MARKER,
+-			},
+-			CAPSSETTYPE_FRAME_ACKNOWLEDGE: &FrameAcknowledgeCapability{2},
++			// Surface commands and frame acknowledgement are not announced:
++			// neither is implemented. A server told the client acknowledges
++			// frames holds back after the second unacknowledged one, waiting
++			// for an ack that never comes, and the session updates in fits.
+ 		},
+ 	}
+ 
+@@ -202,9 +202,11 @@ func (c *Client) sendConfirmActivePDU() {
+ 	orderCapa := c.clientCapabilities[CAPSTYPE_ORDER].(*OrderCapability)
+ 	orderCapa.OrderFlags = NEGOTIATEORDERSUPPORT | ZEROBOUNDSDELTASSUPPORT | COLORINDEXSUPPORT | ORDERFLAGS_EXTRA_FLAGS
+ 	orderCapa.OrderSupportExFlags |= ORDERFLAGS_EX_ALTSEC_FRAME_MARKER_SUPPORT
+-	orderCapa.OrderSupport[TS_NEG_DSTBLT_INDEX] = 1
+-	orderCapa.OrderSupport[TS_NEG_PATBLT_INDEX] = 1
+-	orderCapa.OrderSupport[TS_NEG_SCRBLT_INDEX] = 1
++	// No drawing orders are announced. The "orders" event this layer emits
++	// has no consumer in SimpleClient, so any order a server sent instead of a
++	// bitmap (a solid fill, a screen-to-screen scroll, a glyph run) left a hole
++	// in the desktop until something repainted it. With none announced every
++	// server falls back to plain bitmap updates.
+ 	//orderCapa.OrderSupport[TS_NEG_LINETO_INDEX] = 1
+ 	//orderCapa.OrderSupport[TS_NEG_MEMBLT_INDEX] = 1
+ 	//orderCapa.OrderSupport[TS_NEG_MEM3BLT_INDEX] = 1
+@@ -217,7 +219,6 @@ func (c *Client) sendConfirmActivePDU() {
+ 	orderCapa.OrderSupport[TS_NEG_POLYGON_CB_INDEX] = 1
+ 	orderCapa.OrderSupport[TS_NEG_ELLIPSE_SC_INDEX] = 1
+ 	orderCapa.OrderSupport[TS_NEG_ELLIPSE_CB_INDEX] = 1*/
+-	orderCapa.OrderSupport[TS_NEG_FAST_GLYPH_INDEX] = 1
+ 
+ 	inputCapa := c.clientCapabilities[CAPSTYPE_INPUT].(*InputCapability)
+ 	inputCapa.Flags = INPUT_FLAG_SCANCODES | INPUT_FLAG_MOUSEX | INPUT_FLAG_UNICODE
+diff --git a/vendor/github.com/tomatome/grdp/protocol/t125/mcs.go b/vendor/github.com/tomatome/grdp/protocol/t125/mcs.go
+index 25da99e..33c7d71 100644
+--- a/vendor/github.com/tomatome/grdp/protocol/t125/mcs.go
++++ b/vendor/github.com/tomatome/grdp/protocol/t125/mcs.go
+@@ -282,6 +282,28 @@ func (c *MCSClient) SetClientDesktop(width, height uint16) {
+ 	c.clientCoreData.DesktopHeight = height
+ }
+ 
++// AddVirtualChannel announces a static virtual channel in the client network
++// data, so the server creates it and the channel is joined at connect time.
++func (c *MCSClient) AddVirtualChannel(name string, option uint32) {
++	c.clientNetworkData.AddVirtualChannel(name, option)
++}
++
++func (c *MCSClient) SetClientKeyboardLayout(klid uint32) {
++	c.clientCoreData.KbdLayout = gcc.KeyboardLayout(klid)
++}
++
++// SetClientColorDepth asks for a 16- or 24-bit session. 16 bits halves the
++// bitmap stream and uses the cheapest RLE decoder, which is what keeps a slow
++// thin client smooth; 24 bits trades that for gradients without banding.
++func (c *MCSClient) SetClientColorDepth(bits int) {
++	switch bits {
++	case 16:
++		c.clientCoreData.HighColorDepth = gcc.HIGH_COLOR_16BPP
++	case 24:
++		c.clientCoreData.HighColorDepth = gcc.HIGH_COLOR_24BPP
++	}
++}
++
+ func (c *MCSClient) SetClientDynvcProtocol() {
+ 	c.clientCoreData.EarlyCapabilityFlags = gcc.RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL
+ 	c.clientNetworkData.AddVirtualChannel(drdynvc.ChannelName, drdynvc.ChannelOption)

@@ -11,7 +11,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
+	"github.com/diggyen/SimpleClient/internal/audio"
 	"github.com/diggyen/SimpleClient/internal/config"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
@@ -31,6 +33,15 @@ func main() {
 	i18n.Set(lang)
 	inputdev.SetLayout(inputdev.LayoutForLanguage(string(lang)))
 	rdp.Debug = cfg.RDPDebug
+	if cfg.ColorDepth == 16 || cfg.ColorDepth == 24 {
+		rdp.ColorDepth = cfg.ColorDepth
+	}
+
+	// The session decodes and discards megabytes of tiles a second. The heap
+	// it keeps live is small, so letting it grow further between collections
+	// costs a little memory and saves the collector running constantly on a
+	// slow CPU, which is what showed up as stutter.
+	debug.SetGCPercent(400)
 
 	// The framebuffer is the only hard requirement: without it there is nothing
 	// to draw on and no way to tell the user anything.
@@ -40,61 +51,36 @@ func main() {
 	}
 	defer fb.Close()
 
-	kbd, mouse := resolveInputDevices(cfg)
+	// Explicit -kbd/-mouse (kbddev=/mousedev= on the GRUB line) pin the nodes,
+	// for the one machine where autodetection picks the wrong device. Otherwise
+	// every keyboard and pointer is read, including ones plugged in later.
+	var input *inputdev.Reader
+	if cfg.KbdDevice != "" || cfg.MouseDevice != "" {
+		input, err = inputdev.New(cfg.KbdDevice, cfg.MouseDevice, fb.Width(), fb.Height())
+		if err != nil {
+			fatalf("input devices: %v", err)
+		}
+	} else {
+		input = inputdev.NewAuto(fb.Width(), fb.Height())
+	}
+	defer input.Close()
 
 	// Say which nodes were picked. When a kiosk comes up with a working mouse
 	// and a dead keyboard there is nothing on screen to explain it, and this
 	// line on the serial console is the difference between a guess and a
-	// diagnosis. -kbd and -mouse override it.
-	warnf("input: keyboard=%s mouse=%s", orNone(kbd), orNone(mouse))
+	// diagnosis.
+	warnf("input: %v", input.Devices())
 
-	if kbd == "" && mouse == "" {
-		// Not fatal — the discovery screen still renders and reports what it
-		// finds, which is far more useful than a boot loop with no output.
-		warnf("no keyboard or mouse found; the UI will be read-only")
-	}
-
-	input, err := inputdev.New(kbd, mouse, fb.Width(), fb.Height())
-	if err != nil {
-		fatalf("input devices: %v", err)
-	}
-	defer input.Close()
+	// Sound: open every card's mixer and hand sessions a sink. It is set up even
+	// with no card present, so a USB headset plugged in later just works.
+	go audio.InitMixer()
+	rdp.Audio = audio.NewSink(&audio.Selector{})
+	warnf("sound: %d endpoints", len(audio.Scan()))
 
 	scan := scanner.New(cfg.MaxWorkers, cfg.ScanTimeout)
 
 	// Run never returns.
 	ui.Run(fb, input, scan, cfg)
-}
-
-// resolveInputDevices returns the keyboard and mouse evdev paths, auto-detecting
-// whichever was not given explicitly. A device that cannot be found is reported
-// and left empty; inputdev.New simply skips it.
-func resolveInputDevices(cfg config.Config) (kbd, mouse string) {
-	kbd = cfg.KbdDevice
-	if kbd == "" {
-		detected, err := inputdev.DetectKeyboard()
-		if err != nil {
-			warnf("keyboard auto-detect: %v", err)
-		}
-		kbd = detected
-	}
-
-	mouse = cfg.MouseDevice
-	if mouse == "" {
-		detected, err := inputdev.DetectMouse()
-		if err != nil {
-			warnf("mouse auto-detect: %v", err)
-		}
-		mouse = detected
-	}
-	return kbd, mouse
-}
-
-func orNone(s string) string {
-	if s == "" {
-		return "(none)"
-	}
-	return s
 }
 
 func warnf(format string, args ...any) {

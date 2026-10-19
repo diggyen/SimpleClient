@@ -108,12 +108,12 @@ func TestBitmapToImage_16bppBigEndianRGB565(t *testing.T) {
 		BitsPerPixel: 2,
 		Data:         []byte{0xF7, 0x9E, 0x00, 0x1F},
 	}
-	img := bitmapToImage(bm).(*image.NRGBA)
+	img := bitmapToImage(bm).(*image.RGBA)
 
-	if got := img.NRGBAAt(0, 0); got != (color.NRGBA{R: 240, G: 240, B: 240, A: 255}) {
+	if got := img.RGBAAt(0, 0); got != (color.RGBA{R: 247, G: 243, B: 247, A: 255}) {
 		t.Errorf("0xF79E decoded to %v, want the #F0F0F0 desktop grey", got)
 	}
-	if got := img.NRGBAAt(1, 0); got != (color.NRGBA{R: 0, G: 0, B: 248, A: 255}) {
+	if got := img.RGBAAt(1, 0); got != (color.RGBA{R: 0, G: 0, B: 255, A: 255}) {
 		t.Errorf("0x001F decoded to %v, want blue", got)
 	}
 }
@@ -131,12 +131,12 @@ func TestBitmapToImage_RowsAreTopDown(t *testing.T) {
 			0x00, 0xFF, 0x00, 0xFF, // row 1: green
 		},
 	}
-	img := bitmapToImage(bm).(*image.NRGBA)
+	img := bitmapToImage(bm).(*image.RGBA)
 
-	if got := img.NRGBAAt(0, 0); got.R != 255 || got.G != 0 {
+	if got := img.RGBAAt(0, 0); got.R != 255 || got.G != 0 {
 		t.Errorf("top row = %v, want red — rows are being flipped", got)
 	}
-	if got := img.NRGBAAt(0, 1); got.G != 255 || got.R != 0 {
+	if got := img.RGBAAt(0, 1); got.G != 255 || got.R != 0 {
 		t.Errorf("bottom row = %v, want green — rows are being flipped", got)
 	}
 }
@@ -167,13 +167,14 @@ func TestClient_TilesAreNotDropped(t *testing.T) {
 	const n = 200
 	go func() {
 		for i := 0; i < n; i++ {
-			c.push(image.NewNRGBA(image.Rect(i, 0, i+1, 1)))
+			c.push([]image.Image{image.NewRGBA(image.Rect(i, 0, i+1, 1))})
 		}
 	}()
 
 	for i := 0; i < n; i++ {
 		select {
-		case img := <-c.Frames():
+		case update := <-c.Frames():
+			img := update[0]
 			if got := img.Bounds().Min.X; got != i {
 				t.Fatalf("tile %d arrived out of order (Min.X = %d)", i, got)
 			}
@@ -216,18 +217,10 @@ func TestClient_ShutdownIsIdempotent(t *testing.T) {
 func TestClient_PushAfterShutdown(t *testing.T) {
 	c := newTestClient()
 	c.shutdown()
-	c.push(image.NewNRGBA(image.Rect(0, 0, 1, 1)))
+	c.push([]image.Image{image.NewRGBA(image.Rect(0, 0, 1, 1))})
 }
 
 // newTestClient builds a Client with its pump running but no live connection.
 func newTestClient() *Client {
-	c := &Client{
-		frames: make(chan image.Image, 8),
-		raw:    make(chan image.Image, tileBacklog),
-		done:   make(chan struct{}),
-		width:  1024,
-		height: 768,
-	}
-	go c.pump()
-	return c
+	return newClient(1024, 768)
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
+	"github.com/diggyen/SimpleClient/internal/rdp"
 	"github.com/diggyen/SimpleClient/internal/version"
 )
 
@@ -212,12 +213,19 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 // drawLanguageBadge puts the active language in the top-right corner as a cap,
 // so it looks like the F2-toggled control it is rather than stray text.
 func drawLanguageBadge(img *image.RGBA, screen image.Rectangle) {
-	// Layout first, then language, both as caps: F3 changes the left one and F2
-	// the right, in the order they sit in the footer.
-	caps := []string{
+	// Sound output, layout, then language, all as caps: F4, F3 and F2 change
+	// them, in the order they sit in the footer.
+	caps := []string{}
+	// The sound output F4 cycles, when there is any sound hardware at all.
+	if rdp.Audio != nil {
+		if d, ok := rdp.Audio.Sel.Output(); ok {
+			caps = append(caps, d.Label())
+		}
+	}
+	caps = append(caps,
 		inputdev.CurrentLayout().Label(),
 		strings.ToUpper(string(i18n.Current())),
-	}
+	)
 
 	total := 0
 	for _, c := range caps {
@@ -387,7 +395,11 @@ func renderEmptyList(img *image.RGBA, l discoveryLayout, state *UIState) {
 	}
 
 	// Wrap the explanation so it never runs past the card.
-	hint := i18n.T(i18n.NoServersHint)
+	subnet := state.Subnet
+	if subnet == "" {
+		subnet = "?"
+	}
+	hint := fmt.Sprintf(i18n.T(i18n.NoServersHint), subnet)
 	maxChars := (l.List.Dx() - 2*cardPad) / CharW
 	for n, line := range wrapText(hint, maxChars) {
 		DrawText(img, cx-TextWidth(line, false)/2, cy+12+n*(CharH+4), line, ColorDim)
@@ -447,6 +459,7 @@ func keyHints() [][2]string {
 		{"F5", i18n.T(i18n.HintRefresh)},
 		{"F2", i18n.T(i18n.HintLanguage)},
 		{"F3", i18n.T(i18n.HintKeyboard)},
+		{"F4", i18n.T(i18n.HintSound)},
 	}
 }
 

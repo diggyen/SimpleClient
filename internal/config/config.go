@@ -17,6 +17,7 @@ type Config struct {
 	Language    string
 	RDPDebug    bool
 	StaticHost  string
+	ColorDepth  int
 }
 
 // Load parses command-line flags and returns a Config.
@@ -34,6 +35,9 @@ func Load() Config {
 		"IP address to add to the host list without scanning. The kiosk only "+
 			"discovers its own subnet; this is the one way to reach a server "+
 			"beyond it. Set from GRUB with rdphost=<ip>.")
+	flag.IntVar(&cfg.ColorDepth, "bpp", 16,
+		"Session colour depth, 16 or 24. 16 halves the bitmap stream and decodes "+
+			"fastest; 24 avoids banding in gradients. Set from GRUB with bpp=24.")
 	flag.BoolVar(&cfg.RDPDebug, "rdp-debug", false,
 		"Log the full RDP handshake to stderr. Diagnostic only: the RDP library "+
 			"prints the password in clear text at this level.")

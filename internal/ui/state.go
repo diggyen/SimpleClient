@@ -36,6 +36,10 @@ type UIState struct {
 	Dirty bool
 
 	Screen       Screen
+	// Subnet is the network the last scan covered, shown when it found
+	// nothing: "no servers in ?" is what a machine whose NIC never came up
+	// looks like, and saying so saves chasing DHCP on a dead interface.
+	Subnet       string
 	Hosts        []domain.Host
 	SelectedIdx  int
 	ScrollOffset int

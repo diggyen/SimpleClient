@@ -56,6 +56,7 @@ const (
 	HintRefresh
 	HintLanguage
 	HintKeyboard
+	HintSound
 
 	Tagline // sits under the wordmark; keep it short enough to fit at 640px
 	ModalTitle
@@ -88,12 +89,13 @@ var catalogues = map[Lang]*catalogue{
 		ColumnServer:   "SERVER",
 		ColumnAddress:  "ADDRESS",
 		ColumnLatency:  "LATENCY",
-		NoServersHint:  "Nothing is listening on port 3389 in this subnet. Press F5 to scan again.",
+		NoServersHint:  "Nothing is listening on port 3389 in %s. Press F5 to scan again.",
 		HintSelect:     "Select",
 		HintConnect:    "Connect",
 		HintRefresh:    "Refresh",
 		HintLanguage:   "Language",
 		HintKeyboard:   "Keyboard",
+		HintSound:      "Sound",
 		Tagline:        "REMOTE DESKTOP KIOSK",
 		ModalTitle:     "Connection Details",
 		LabelUsername:  "Username:",
@@ -118,12 +120,13 @@ var catalogues = map[Lang]*catalogue{
 		ColumnServer:   "SUNUCU",
 		ColumnAddress:  "ADRES",
 		ColumnLatency:  "GECİKME",
-		NoServersHint:  "Bu ağda 3389 portunu dinleyen bir sunucu yok. Yeniden taramak için F5.",
+		NoServersHint:  "%s ağında 3389 portunu dinleyen bir sunucu yok. Yeniden taramak için F5.",
 		HintSelect:     "Seç",
 		HintConnect:    "Bağlan",
 		HintRefresh:    "Yenile",
 		HintLanguage:   "Dil",
 		HintKeyboard:   "Klavye",
+		HintSound:      "Ses",
 		Tagline:        "UZAK MASAÜSTÜ İSTEMCİSİ",
 		ModalTitle:     "Bağlantı Bilgileri",
 		LabelUsername:  "Kullanıcı:",

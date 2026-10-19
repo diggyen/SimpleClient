@@ -42,3 +42,25 @@ type fbVarScreenInfo struct {
 	Colorspace   uint32
 	Reserved     [4]uint32
 }
+
+// fbFixScreenInfo mirrors the Linux fb_fix_screeninfo struct (80 bytes on
+// 64-bit). Only LineLength is used: the driver's real row pitch, which is not
+// always width*bytesPerPixel.
+type fbFixScreenInfo struct {
+	ID           [16]byte
+	SmemStart    uint64
+	SmemLen      uint32
+	Type         uint32
+	TypeAux      uint32
+	Visual       uint32
+	Xpanstep     uint16
+	Ypanstep     uint16
+	Ywrapstep    uint16
+	_            uint16
+	LineLength   uint32
+	MmioStart    uint64
+	MmioLen      uint32
+	Accel        uint32
+	Capabilities uint16
+	Reserved     [2]uint16
+}

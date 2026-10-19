@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/tomatome/grdp/glog"
+	"github.com/tomatome/grdp/plugin"
 	"github.com/tomatome/grdp/protocol/pdu"
 	"github.com/tomatome/grdp/protocol/rfb"
 )
@@ -81,6 +82,13 @@ func (c *Client) KeyUp(sc int, name string) {
 func (c *Client) KeyDown(sc int, name string) {
 	c.ctl.KeyDown(sc, name)
 }
+// KeyEvent sends a scancode press or release, with the E0 prefix when extended
+// is set. Only the RDP backend can express it.
+func (c *Client) KeyEvent(sc int, extended, down bool) {
+	if r, ok := c.ctl.(*RdpClient); ok {
+		r.KeyEvent(sc, extended, down)
+	}
+}
 func (c *Client) MouseMove(x, y int) {
 	c.ctl.MouseMove(x, y)
 }
@@ -125,12 +133,13 @@ func (c *Client) OnBitmap(f func([]Bitmap)) {
 			for _, v := range br.Rects {
 				b := Bitmap{int(v.Rect.X), int(v.Rect.Y), int(v.Rect.X + v.Rect.Width), int(v.Rect.Y + v.Rect.Height),
 					int(v.Rect.Width), int(v.Rect.Height),
-					Bpp(uint16(br.Pf.BitsPerPixel)), false, v.Data}
+					Bpp(uint16(br.Pf.BitsPerPixel)), false, v.Data, false}
 				bs = append(bs, b)
 			}
 		} else {
 			for _, v := range data.([]pdu.BitmapData) {
 				IsCompress := v.IsCompress()
+				raw := !IsCompress
 				stream := v.BitmapDataStream
 				if IsCompress {
 					stream = bitmapDecompress(&v)
@@ -138,7 +147,7 @@ func (c *Client) OnBitmap(f func([]Bitmap)) {
 				}
 
 				b := Bitmap{int(v.DestLeft), int(v.DestTop), int(v.DestRight), int(v.DestBottom),
-					int(v.Width), int(v.Height), Bpp(v.BitsPerPixel), IsCompress, stream}
+					int(v.Width), int(v.Height), Bpp(v.BitsPerPixel), IsCompress, stream, raw}
 				bs = append(bs, b)
 			}
 		}
@@ -158,6 +167,12 @@ type Bitmap struct {
 	BitsPerPixel int    `json:"bitsPerPixel"`
 	IsCompress   bool   `json:"isCompress"`
 	Data         []byte `json:"data"`
+	// Raw is set when Data is the stream exactly as the server sent it,
+	// uncompressed: rows bottom-up, each padded to four bytes, pixels
+	// little-endian. Decompressed tiles come out of the RLE decoder top-down
+	// with big-endian 16-bit pixels instead, and IsCompress cannot tell the
+	// two apart because it is cleared after decompression.
+	Raw bool `json:"raw"`
 }
 
 func Bpp(bp uint16) int {
@@ -169,6 +184,17 @@ type Setting struct {
 	Height   int
 	Protocol string
 	LogLevel glog.LEVEL
+
+	// KeyboardLayout is the Windows keyboard layout id (KLID) announced to the
+	// server, e.g. 0x41F for Turkish Q. Zero keeps the US default. xrdp picks
+	// its scancode-to-keysym table from it.
+	KeyboardLayout uint32
+	// ColorDepth is the session colour depth in bits, 16 or 24. Zero keeps
+	// the library default (24).
+	ColorDepth int
+	// Channels are static virtual channels to announce and serve: sound,
+	// the dynamic-channel transport, anything implemented outside grdp.
+	Channels []plugin.ChannelTransport
 }
 
 func NewSetting() *Setting {

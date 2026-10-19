@@ -38,6 +38,38 @@ FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS rootfs-builder
 
 RUN apk add --no-cache linux-lts busybox-static kmod cpio gzip
 
+# NIC firmware. Most onboard NICs need none, but these do: bnx2/bnx2x (HP
+# ProLiant and many Dell servers' Broadcom NetXtreme II) do not come up at all
+# without it, and r8169 (the Realtek on most desktops and thin clients) loads
+# per-chip PHY fixes from rtl_nic/ without which some revisions link at 10/100
+# or drop the link under load. The kernel loads firmware straight from
+# /lib/firmware; there is no udev here to be involved.
+RUN apk add --no-cache linux-firmware-bnx2 linux-firmware-bnx2x \
+        linux-firmware-rtl_nic linux-firmware-tigon linux-firmware-e100
+
+# Sound. The kiosk plays and records through ALSA's own tools: their plughw
+# layer converts rate, channels and format to whatever a codec accepts, which
+# hand-rolled PCM ioctls would have to reimplement for every card. They are
+# dynamically linked against musl and alsa-lib, so those come along, as does
+# alsa-lib's configuration — without /usr/share/alsa it cannot open "plughw"
+# at all — and alsactl's init database, which sets sane mixer defaults.
+#
+# Speakers, the headphone jack, a monitor's speakers over HDMI/DisplayPort, USB
+# headsets and microphones: the kernel side is the HD Audio, USB audio and
+# HDMI codec drivers under kernel/sound, copied below.
+RUN apk add --no-cache alsa-utils alsa-lib
+RUN set -e; mkdir -p /rootfs/usr/bin /rootfs/lib /rootfs/usr/lib /rootfs/usr/share; \
+    for b in aplay arecord amixer alsactl; do \
+        cp -a "$(command -v $b)" /rootfs/usr/bin/; \
+        for l in $(ldd "$(command -v $b)" | awk '/=>/ {print $3} /ld-musl/ {print $1}'); do \
+            [ -f "$l" ] || continue; \
+            mkdir -p "/rootfs$(dirname "$l")"; \
+            cp -L "$l" "/rootfs$l"; \
+        done; \
+    done; \
+    cp -a /usr/share/alsa /rootfs/usr/share/; \
+    ls -l /rootfs/usr/bin /rootfs/lib /rootfs/usr/lib
+
 COPY --from=go-builder /out/simpleclient /rootfs/sbin/simpleclient
 COPY build/init /rootfs/init
 COPY build/udhcpc-default.script /rootfs/usr/share/udhcpc/default.script
@@ -77,17 +109,27 @@ RUN cp /bin/busybox.static /rootfs/bin/busybox \
 RUN KVER=$(basename /lib/modules/*) \
  && echo "kernel: $KVER" \
  && mkdir -p "/rootfs/lib/modules/$KVER/kernel/drivers" \
- && for d in net gpu input hid usb virtio char; do \
+ && for d in net gpu input hid usb virtio char i2c cpufreq; do \
         if [ -d "/lib/modules/$KVER/kernel/drivers/$d" ]; then \
             cp -a "/lib/modules/$KVER/kernel/drivers/$d" "/rootfs/lib/modules/$KVER/kernel/drivers/"; \
         fi; \
     done \
  && cp -a "/lib/modules/$KVER/kernel/net" "/rootfs/lib/modules/$KVER/kernel/" \
+ && cp -a "/lib/modules/$KVER/kernel/sound" "/rootfs/lib/modules/$KVER/kernel/" \
  && for f in modules.builtin modules.builtin.modinfo modules.order; do \
         if [ -f "/lib/modules/$KVER/$f" ]; then \
             cp -a "/lib/modules/$KVER/$f" "/rootfs/lib/modules/$KVER/"; \
         fi; \
     done \
+ && rm -rf "/rootfs/lib/modules/$KVER/kernel/drivers/net/wireless" \
+           "/rootfs/lib/modules/$KVER/kernel/net/wireless" \
+           "/rootfs/lib/modules/$KVER/kernel/net/mac80211" \
+           "/rootfs/lib/modules/$KVER/kernel/net/bluetooth" \
+ && mkdir -p /rootfs/lib/firmware \
+ && for d in bnx2 bnx2x rtl_nic tigon e100; do \
+        if [ -d "/lib/firmware/$d" ]; then cp -a "/lib/firmware/$d" /rootfs/lib/firmware/; fi; \
+    done \
+ && du -sh /rootfs/lib/firmware \
  && depmod -b /rootfs "$KVER" \
  && du -sh /rootfs/lib/modules
 

@@ -12,6 +12,10 @@ func DetectCIDR() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("listing interfaces: %w", err)
 	}
+	// A DHCP lease that arrives after boot sits next to the link-local
+	// fallback init assigned meanwhile. The lease is the real network, so a
+	// link-local block is only the answer when there is nothing else.
+	linkLocal := ""
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -42,9 +46,18 @@ func DetectCIDR() (string, error) {
 					IP:   ip4.Mask(ipnet.Mask),
 					Mask: ipnet.Mask,
 				}
+				if ip4.IsLinkLocalUnicast() {
+					if linkLocal == "" {
+						linkLocal = network.String()
+					}
+					continue
+				}
 				return network.String(), nil
 			}
 		}
+	}
+	if linkLocal != "" {
+		return linkLocal, nil
 	}
 	return "", fmt.Errorf("no suitable network interface found")
 }

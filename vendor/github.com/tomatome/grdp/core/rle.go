@@ -470,7 +470,9 @@ func decompress2(output *[]uint8, width, height int, input []uint8, size int) bo
 	}
 	j := 0
 	for _, v := range out {
-		(*output)[j], (*output)[j+1] = PutUint16BE(v)
+		// Written in place: PutUint16BE allocates a 2-byte slice per call, which
+		// was one heap allocation per pixel — 4096 for every 64x64 tile.
+		(*output)[j], (*output)[j+1] = uint8(v>>8), uint8(v)
 		j += 2
 	}
 	return true

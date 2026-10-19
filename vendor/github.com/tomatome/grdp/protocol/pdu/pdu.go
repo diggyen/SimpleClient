@@ -104,10 +104,10 @@ func NewPDULayer(t core.Transport) *PDULayer {
 					RAIL_LEVEL_DOCKED_LANGBAR_SUPPORTED,
 			},
 			CAPSETTYPE_LARGE_POINTER: &LargePointerCapability{1},
-			CAPSETTYPE_SURFACE_COMMANDS: &SurfaceCommandsCapability{
-				CmdFlags: SURFCMDS_SET_SURFACE_BITS | SURFCMDS_STREAM_SURFACE_BITS | SURFCMDS_FRAME_MARKER,
-			},
-			CAPSSETTYPE_FRAME_ACKNOWLEDGE: &FrameAcknowledgeCapability{2},
+			// Surface commands and frame acknowledgement are not announced:
+			// neither is implemented. A server told the client acknowledges
+			// frames holds back after the second unacknowledged one, waiting
+			// for an ack that never comes, and the session updates in fits.
 		},
 	}
 
@@ -202,9 +202,11 @@ func (c *Client) sendConfirmActivePDU() {
 	orderCapa := c.clientCapabilities[CAPSTYPE_ORDER].(*OrderCapability)
 	orderCapa.OrderFlags = NEGOTIATEORDERSUPPORT | ZEROBOUNDSDELTASSUPPORT | COLORINDEXSUPPORT | ORDERFLAGS_EXTRA_FLAGS
 	orderCapa.OrderSupportExFlags |= ORDERFLAGS_EX_ALTSEC_FRAME_MARKER_SUPPORT
-	orderCapa.OrderSupport[TS_NEG_DSTBLT_INDEX] = 1
-	orderCapa.OrderSupport[TS_NEG_PATBLT_INDEX] = 1
-	orderCapa.OrderSupport[TS_NEG_SCRBLT_INDEX] = 1
+	// No drawing orders are announced. The "orders" event this layer emits
+	// has no consumer in SimpleClient, so any order a server sent instead of a
+	// bitmap (a solid fill, a screen-to-screen scroll, a glyph run) left a hole
+	// in the desktop until something repainted it. With none announced every
+	// server falls back to plain bitmap updates.
 	//orderCapa.OrderSupport[TS_NEG_LINETO_INDEX] = 1
 	//orderCapa.OrderSupport[TS_NEG_MEMBLT_INDEX] = 1
 	//orderCapa.OrderSupport[TS_NEG_MEM3BLT_INDEX] = 1
@@ -217,7 +219,6 @@ func (c *Client) sendConfirmActivePDU() {
 	orderCapa.OrderSupport[TS_NEG_POLYGON_CB_INDEX] = 1
 	orderCapa.OrderSupport[TS_NEG_ELLIPSE_SC_INDEX] = 1
 	orderCapa.OrderSupport[TS_NEG_ELLIPSE_CB_INDEX] = 1*/
-	orderCapa.OrderSupport[TS_NEG_FAST_GLYPH_INDEX] = 1
 
 	inputCapa := c.clientCapabilities[CAPSTYPE_INPUT].(*InputCapability)
 	inputCapa.Flags = INPUT_FLAG_SCANCODES | INPUT_FLAG_MOUSEX | INPUT_FLAG_UNICODE
