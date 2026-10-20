@@ -20,6 +20,7 @@ const (
 	KeySpace      = 57
 	KeyCapsLock   = 58
 	KeyRightCtrl  = 97
+	KeyRightAlt   = 100 // AltGr
 	KeyF1         = 59
 	KeyF2         = 60
 	KeyF3         = 61
@@ -296,6 +297,44 @@ var layouts = map[Layout]map[int][2]rune{
 	LayoutUS:  nil,
 	LayoutTRQ: trQOverrides,
 	LayoutTRF: trFOverrides,
+}
+
+// trQAltGr is what Turkish Q types with AltGr held: level 3 of xkeyboard-
+// config's symbols/tr "basic", with the keys it leaves to symbols/latin taken
+// from there, dead keys left out. A Turkish keyboard has @ on AltGr+Q, and
+// without this a password with one in it went to the server with a q.
+var trQAltGr = map[int]rune{
+	41: '<', 2: '>', 3: '£', 4: '#', 5: '$', 6: '½', 7: '¾',
+	8: '{', 9: '[', 10: ']', 11: '}', 12: '\\', 13: '|',
+	16: '@', 18: '€', 19: '¶', 20: '₺', 21: '←', 22: 'û', 23: 'î', 24: 'ô', 27: '~',
+	30: 'â', 31: 'ß', 33: 'ª', 39: '´', 40: '\'', 43: '`',
+	86: '|', 44: '«', 45: '»', 46: '¢', 47: '„', 48: '“', 49: '”', 50: 'µ', 51: '×', 52: '·',
+}
+
+// trFAltGr is level 3 of symbols/tr "f", the same way.
+var trFAltGr = map[int]rune{
+	41: '¬', 2: '¹', 3: '²', 4: '#', 5: '¼', 6: '½', 7: '¾',
+	8: '{', 9: '[', 10: ']', 11: '}', 12: '\\', 13: '|',
+	16: '@', 19: '¶', 20: 'ô', 21: '¥', 22: '®', 24: '°', 25: '£', 27: '~',
+	30: 'û', 31: 'î', 32: '€', 33: 'â', 34: 'û', 35: '₺', 37: 'µ', 39: '´', 40: '#', 43: '`',
+	86: '|', 44: '«', 45: '»', 46: '“', 47: '¢', 48: '”', 50: '§', 51: '×', 52: '÷', 53: '·',
+}
+
+// altGrLayouts resolves a Layout to its AltGr table. US has no third level.
+var altGrLayouts = map[Layout]map[int]rune{
+	LayoutTRQ: trQAltGr,
+	LayoutTRF: trFAltGr,
+}
+
+// KeycodeToRuneAltGr returns what a key types with AltGr held in the active
+// layout, or 0 when it types nothing.
+func KeycodeToRuneAltGr(keycode int) rune {
+	return KeycodeToRuneAltGrIn(CurrentLayout(), keycode)
+}
+
+// KeycodeToRuneAltGrIn is KeycodeToRuneAltGr against a named layout.
+func KeycodeToRuneAltGrIn(layout Layout, keycode int) rune {
+	return altGrLayouts[layout][keycode]
 }
 
 // KeycodeToRune returns the printable rune for a keycode in the active layout,

@@ -99,6 +99,7 @@ type Reader struct {
 	shiftOn int32 // atomic bool (1=shifted)
 	ctrlOn  int32 // atomic bool
 	altOn   int32 // atomic bool
+	altGrOn int32 // atomic bool: right Alt, a layout's third level
 	capsOn  int32 // atomic bool, toggled by Caps Lock presses
 	wg      sync.WaitGroup
 	quit    chan struct{}
@@ -562,6 +563,8 @@ func (r *Reader) handleKey(code int, value int32) bool {
 		storeBool(&r.ctrlOn, down)
 	case KeyAlt:
 		storeBool(&r.altOn, down)
+	case KeyRightAlt:
+		storeBool(&r.altGrOn, down)
 	case KeyCapsLock:
 		// Toggled on the first press only; a held key auto-repeats.
 		if value == keyPress {
@@ -574,7 +577,11 @@ func (r *Reader) handleKey(code int, value int32) bool {
 	// end is stuck repeating it. Local screens ignore releases; see
 	// handleInput.
 	var ch rune
-	if down {
+	switch {
+	case !down:
+	case atomic.LoadInt32(&r.altGrOn) == 1:
+		ch = KeycodeToRuneAltGr(code)
+	default:
 		ch = KeycodeToRuneCaps(code, atomic.LoadInt32(&r.shiftOn) == 1, r.CapsLockOn())
 	}
 	return r.emit(InputEvent{

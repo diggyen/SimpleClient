@@ -309,6 +309,27 @@ func TestKeycodeToRuneIn_TurkishF(t *testing.T) {
 	}
 }
 
+// The characters a password takes from AltGr on a Turkish keyboard, which typed
+// their plain letter instead: AltGr+Q made a q where the @ belonged.
+func TestKeycodeToRuneAltGrIn_Turkish(t *testing.T) {
+	for _, c := range []struct {
+		layout Layout
+		code   int
+		want   rune
+	}{
+		{LayoutTRQ, 16, '@'}, {LayoutTRQ, 4, '#'}, {LayoutTRQ, 5, '$'},
+		{LayoutTRQ, 8, '{'}, {LayoutTRQ, 9, '['}, {LayoutTRQ, 10, ']'}, {LayoutTRQ, 11, '}'},
+		{LayoutTRQ, 12, '\\'}, {LayoutTRQ, 13, '|'}, {LayoutTRQ, 18, '€'}, {LayoutTRQ, 27, '~'},
+		{LayoutTRQ, 41, '<'}, {LayoutTRQ, 2, '>'}, {LayoutTRQ, 17, 0},
+		{LayoutTRF, 16, '@'}, {LayoutTRF, 4, '#'}, {LayoutTRF, 32, '€'}, {LayoutTRF, 12, '\\'},
+		{LayoutUS, 16, 0},
+	} {
+		if got := KeycodeToRuneAltGrIn(c.layout, c.code); got != c.want {
+			t.Errorf("%s AltGr+keycode %d = %q, want %q", c.layout, c.code, got, c.want)
+		}
+	}
+}
+
 // Every layout must still produce something for the keys a credential is made
 // of. A layout that silently drops the digits or the keypad would look like the
 // field refusing input, which is the bug this project has already shipped once.
@@ -482,5 +503,25 @@ func TestReadKeyboard_ReleaseCarriesNoRune(t *testing.T) {
 		if !ev.Pressed && ev.Rune != 0 {
 			t.Errorf("release carried rune %q", ev.Rune)
 		}
+	}
+}
+
+// AltGr held selects the layout's third level, and letting it go returns to the
+// first: AltGr+Q then Q on Turkish Q is "@q".
+func TestReadKeyboard_AltGrTypesTheThirdLevel(t *testing.T) {
+	SetLayout(LayoutTRQ)
+	t.Cleanup(func() { SetLayout(LayoutUS) })
+	const keyQ = 16
+	var typed []rune
+	for _, ev := range drain(t, writeEvents(t,
+		key(KeyRightAlt, keyPress), key(keyQ, keyPress), key(keyQ, keyRelease), key(KeyRightAlt, keyRelease),
+		key(keyQ, keyPress), key(keyQ, keyRelease),
+	)) {
+		if ev.Pressed && ev.Rune != 0 {
+			typed = append(typed, ev.Rune)
+		}
+	}
+	if string(typed) != "@q" {
+		t.Errorf("typed %q, want \"@q\"", string(typed))
 	}
 }
