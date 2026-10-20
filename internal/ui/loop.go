@@ -116,7 +116,11 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 			current := session
 			if !inSession {
 				handleInput(ev, state, scan, cfg, fb, &ctx, &cancelScan, &scanCh, &session, maxRows)
-				state.Dirty = true
+				// Moving the mouse moves only the pointer, which the render
+				// tick does on its own.
+				if ev.Type != inputdev.EvMouseMove {
+					state.Dirty = true
+				}
 			}
 			state.Mu.Unlock()
 
@@ -191,6 +195,9 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 				mx, my := input.MousePos()
 				Render(fb, backBuf, state, mx, my)
 				state.Dirty = false
+			} else if state.Screen != ScreenSession {
+				mx, my := input.MousePos()
+				MovePointer(fb, backBuf, state, mx, my)
 			}
 			state.Mu.Unlock()
 		}

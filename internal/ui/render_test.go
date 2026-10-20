@@ -589,3 +589,56 @@ func TestLayoutDiscovery_RowCountIsIndependentOfWidth(t *testing.T) {
 		}
 	}
 }
+
+// rectFB records what a frame is put on the screen with.
+type rectFB struct {
+	*framebuffer.MockFB
+	blits int
+	rects []image.Rectangle
+}
+
+func (f *rectFB) Blit(img *image.RGBA) { f.blits++; f.MockFB.Blit(img) }
+func (f *rectFB) BlitRect(img *image.RGBA, r image.Rectangle) {
+	f.rects = append(f.rects, r)
+	f.MockFB.BlitRect(img, r)
+}
+
+// Moving the mouse puts back what the pointer covered and draws it at its new
+// place, leaving the screen as a full render there would, and redraws only
+// those two squares.
+func TestMovePointer_RepaintsOnlyThePointer(t *testing.T) {
+	for _, to := range [][2]int{{400, 300}, {104, 103}, {1275, 715}} {
+		fb := &rectFB{MockFB: framebuffer.NewMock(1280, 720)}
+		back := image.NewRGBA(fb.Bounds())
+		state := &UIState{Screen: ScreenDiscovery, Hosts: sampleHosts(20), ScanDone: true}
+		Render(fb, back, state, 100, 100)
+		MovePointer(fb, back, state, to[0], to[1])
+
+		want := framebuffer.NewMock(1280, 720)
+		Render(want, image.NewRGBA(want.Bounds()), &UIState{Screen: ScreenDiscovery, Hosts: sampleHosts(20), ScanDone: true}, to[0], to[1])
+		if !bytes.Equal(fb.Img.Pix, want.Img.Pix) {
+			t.Errorf("pointer moved to %v: the screen differs from a full render there", to)
+		}
+		if fb.blits != 1 {
+			t.Errorf("pointer moved to %v: %d whole-frame blits, want only Render's", to, fb.blits)
+		}
+		for _, r := range fb.rects {
+			if r.Dx() > len(cursorSprite[0]) || r.Dy() > len(cursorSprite) {
+				t.Errorf("pointer moved to %v: blitted %v, larger than the pointer", to, r)
+			}
+		}
+	}
+}
+
+// A tick with the mouse where it was puts nothing on the screen.
+func TestMovePointer_StillMouseDrawsNothing(t *testing.T) {
+	fb := &rectFB{MockFB: framebuffer.NewMock(640, 480)}
+	back := image.NewRGBA(fb.Bounds())
+	state := &UIState{Screen: ScreenDiscovery}
+	MovePointer(fb, back, state, 10, 10) // nothing rendered yet
+	Render(fb, back, state, 50, 50)
+	MovePointer(fb, back, state, 50, 50)
+	if len(fb.rects) != 0 {
+		t.Errorf("blitted %v with nothing to move", fb.rects)
+	}
+}

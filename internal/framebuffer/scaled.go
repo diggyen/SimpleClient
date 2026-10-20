@@ -48,6 +48,11 @@ func (s *Scaled) Close() error            { return s.dev.Close() }
 // also have put it on the screen, is not called: Flush is.
 func (s *Scaled) Blit(img *image.RGBA) {
 	s.BlitRect(img, img.Bounds())
+	s.Flush()
+}
+
+// Flush flushes the device under it, where that needs it.
+func (s *Scaled) Flush() {
 	if f, ok := s.dev.(interface{ Flush() }); ok {
 		f.Flush()
 	}

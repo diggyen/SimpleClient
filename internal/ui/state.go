@@ -130,6 +130,8 @@ type UIState struct {
 
 	MouseX int
 	MouseY int
+	// drawnPointer is the pointer Render last drew into the back buffer.
+	drawnPointer softPointer
 
 	// lastUser remembers, per host address, the username and domain that last
 	// connected successfully. Reconnecting to the same machine is the normal
