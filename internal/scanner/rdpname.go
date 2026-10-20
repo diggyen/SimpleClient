@@ -84,14 +84,15 @@ func rdpName(conn net.Conn) string {
 // certName is the computer name in a certificate's common name: the first
 // label of a host name, "PC01" of "PC01.corp.local", as Windows itself shows
 // it. Nothing for an address, or for localhost, which names no machine in
-// particular.
+// particular, or for a web site: xrdp built from source installs a certificate
+// for www.xrdp.org, the same on every machine.
 func certName(cn string) string {
 	cn = strings.TrimSpace(cn)
 	if cn == "" || net.ParseIP(cn) != nil {
 		return ""
 	}
 	name, _, _ := strings.Cut(cn, ".")
-	if name == "" || strings.EqualFold(name, "localhost") || strings.ContainsAny(name, " *") {
+	if name == "" || strings.EqualFold(name, "localhost") || strings.EqualFold(name, "www") || strings.ContainsAny(name, " *") {
 		return ""
 	}
 	return name

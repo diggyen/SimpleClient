@@ -96,6 +96,7 @@ func TestCertName(t *testing.T) {
 		"10.7.7.101":            "",
 		"":                      "",
 		"*.corp.local":          "",
+		"www.xrdp.org":          "",
 	} {
 		if got := certName(cn); got != want {
 			t.Errorf("certName(%q) = %q, want %q", cn, got, want)
