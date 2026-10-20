@@ -44,7 +44,14 @@ func (s *Scaled) Width() int              { return s.w }
 func (s *Scaled) Height() int             { return s.h }
 func (s *Scaled) Close() error            { return s.dev.Close() }
 
-func (s *Scaled) Blit(img *image.RGBA) { s.BlitRect(img, img.Bounds()) }
+// Blit draws a whole frame row by row, so the device's own Blit, which would
+// also have put it on the screen, is not called: Flush is.
+func (s *Scaled) Blit(img *image.RGBA) {
+	s.BlitRect(img, img.Bounds())
+	if f, ok := s.dev.(interface{ Flush() }); ok {
+		f.Flush()
+	}
+}
 
 func (s *Scaled) BlitRect(img *image.RGBA, r image.Rectangle) {
 	r = r.Intersect(s.Bounds()).Intersect(img.Bounds())

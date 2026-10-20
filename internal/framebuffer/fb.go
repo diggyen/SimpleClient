@@ -134,9 +134,21 @@ func (fb *FB) Width() int { return fb.width }
 // Height returns the vertical resolution.
 func (fb *FB) Height() int { return fb.height }
 
-// Blit copies an RGBA image to the framebuffer, clipped to its bounds.
+// Blit copies an RGBA image to the framebuffer, clipped to its bounds, and
+// puts it on the screen at once.
 func (fb *FB) Blit(img *image.RGBA) {
 	fb.BlitRect(img, img.Bounds())
+	fb.Flush()
+}
+
+// Flush puts what has been written on the screen now. The framebuffer a GPU
+// driver emulates (nouveau, amdgpu and radeon set up drm_fbdev_ttm) is a
+// shadow in system memory that the kernel copies to the screen 50 ms after
+// the first write to it, which held the kiosk's own screens to 20 frames a
+// second while the pointer moved; fsync has it copied at once. A firmware
+// framebuffer has no shadow, and fsync returns straight away.
+func (fb *FB) Flush() {
+	_ = fb.file.Sync()
 }
 
 // BlitRect copies only the sub-rectangle r of img to the framebuffer.
