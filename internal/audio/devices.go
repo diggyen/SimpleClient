@@ -49,8 +49,14 @@ func (d Device) ALSA() string {
 	return fmt.Sprintf("plughw:%d,%d", d.Card, d.Dev)
 }
 
-// Label is a short name for the on-screen indicator.
+// Label is a short name for the on-screen indicator. An HDMI output goes by
+// its PCM's own name, "HDMI 0" and on: a graphics card has one for every
+// port, and "HDMI" for each made stepping through them with F4 look like
+// nothing happened.
 func (d Device) Label() string {
+	if d.Kind == KindHDMI && d.Name != "" && len(d.Name) <= 12 {
+		return d.Name
+	}
 	return d.Kind.String()
 }
 
@@ -272,8 +278,10 @@ func (s *Selector) Input() (Device, bool) {
 	return best, found
 }
 
-// Cycle moves the playback choice to the next endpoint and returns it.
-func (s *Selector) Cycle() (Device, bool) {
+// Cycle moves the playback choice to the next endpoint and returns it, with
+// its place among the outputs counting from 1 and how many there are, which
+// is 0 when there is no sound hardware.
+func (s *Selector) Cycle() (Device, int, int) {
 	cur, ok := s.Output()
 	var outs []Device
 	for _, d := range Scan() {
@@ -282,21 +290,21 @@ func (s *Selector) Cycle() (Device, bool) {
 		}
 	}
 	if len(outs) == 0 {
-		return Device{}, false
+		return Device{}, 0, 0
 	}
-	next := outs[0]
+	next := 0
 	if ok {
 		for i, d := range outs {
 			if key(d) == key(cur) {
-				next = outs[(i+1)%len(outs)]
+				next = (i + 1) % len(outs)
 				break
 			}
 		}
 	}
 	s.mu.Lock()
-	s.override = key(next)
+	s.override = key(outs[next])
 	s.mu.Unlock()
-	return next, true
+	return outs[next], next + 1, len(outs)
 }
 
 func key(d Device) string { return fmt.Sprintf("%s,%d", d.CardID, d.Dev) }

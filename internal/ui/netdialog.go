@@ -244,6 +244,7 @@ func saveNetwork(state *UIState) {
 		}
 		state.Subnet = ""
 		state.ScanDone = false
+		state.ScanProgress = 0
 		state.Dirty = true
 	}()
 }

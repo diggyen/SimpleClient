@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diggyen/SimpleClient/internal/audio"
 	"github.com/diggyen/SimpleClient/internal/autoconnect"
 	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/config"
@@ -137,11 +138,13 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		// network takes seconds to join — leaves the first scan with no
 		// subnet, or with the link-local one /init falls back to. Rather than
 		// waiting for someone to think of F5, scan as soon as an address
-		// appears.
+		// appears. Behind the network dialogs too: saving them asks for a
+		// new scan, and it is done by the time they are closed.
 		case <-netTicker.C:
 			state.Mu.Lock()
 			late := state.Subnet == "" || strings.HasPrefix(state.Subnet, "169.254.")
-			if late && state.Screen == ScreenDiscovery {
+			behind := state.Screen == ScreenDiscovery || state.Screen == ScreenNetwork || state.Screen == ScreenWifi
+			if late && behind {
 				if cidr, _ := network.DetectCIDR(); cidr != "" && cidr != state.Subnet {
 					cancelScan()
 					ctx, cancelScan = context.WithCancel(context.Background())
@@ -241,13 +244,22 @@ func handleInput(
 	// F2 produces no rune, so it never collides with text entry.
 	// F4 moves sound to the next output: speakers or headphones, the monitor,
 	// a USB headset. Automatic choice is right most of the time; this is for
-	// the rest.
+	// the rest. Where it went is said under the list: the badge in the corner
+	// alone was easy to miss, and with no sound hardware there was none.
 	if ev.KeyCode == inputdev.KeyF4 {
+		d, i, n := audio.Device{}, 0, 0
 		if rdp.Audio != nil {
-			rdp.Audio.Sel.Cycle()
+			d, i, n = rdp.Audio.Sel.Cycle()
 			rdp.Audio.Reselect()
 		}
-		state.Dirty = true
+		switch now := time.Now(); n {
+		case 0:
+			state.notice(i18n.T(i18n.SoundNone), true, now)
+		case 1:
+			state.notice(i18n.Tf(i18n.SoundOnly, d.Label()), false, now)
+		default:
+			state.notice(i18n.Tf(i18n.SoundTo, d.Label(), i, n), false, now)
+		}
 		return
 	}
 

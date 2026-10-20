@@ -453,21 +453,29 @@ func (l discoveryLayout) errorBanner() image.Rectangle {
 	return image.Rect(l.Card.Min.X, l.Card.Max.Y+bannerGap, l.Card.Max.X, l.Card.Max.Y+bannerGap+bannerH)
 }
 
-// renderErrorBanner draws the transient message strip under the card.
+// renderErrorBanner draws the transient message strip under the card: the
+// error, or with none a notice in its own colours.
 func renderErrorBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
-	if state.ErrorMsg == "" {
+	msg, edge, fill, mark := state.ErrorMsg, ColorErrorBorder, ColorErrorBG, ColorError
+	if msg == "" {
+		msg, edge, fill, mark = state.Notice, ColorSuccessBorder, ColorSuccessBG, ColorSuccess
+		if state.NoticeWarn {
+			edge, fill, mark = ColorWarningBorder, ColorWarningBG, ColorWarning
+		}
+	}
+	if msg == "" {
 		return
 	}
 	banner := l.errorBanner()
-	FillNotched(img, banner, ColorErrorBorder)
-	FillNotched(img, banner.Inset(1), ColorErrorBG)
+	FillNotched(img, banner, edge)
+	FillNotched(img, banner.Inset(1), fill)
 
 	textY := banner.Min.Y + (banner.Dy()-CharH)/2
 
 	// The leading bar gives the banner the same anatomy as a selected row.
-	FillRect(img, image.Rect(banner.Min.X+2, banner.Min.Y+2, banner.Min.X+5, banner.Max.Y-2), ColorError)
-	FillRect(img, image.Rect(banner.Min.X+cardPad, textY+1, banner.Min.X+cardPad+5, textY+6), ColorError)
-	DrawText(img, banner.Min.X+cardPad+13, textY, state.ErrorMsg, ColorText)
+	FillRect(img, image.Rect(banner.Min.X+2, banner.Min.Y+2, banner.Min.X+5, banner.Max.Y-2), mark)
+	FillRect(img, image.Rect(banner.Min.X+cardPad, textY+1, banner.Min.X+cardPad+5, textY+6), mark)
+	DrawText(img, banner.Min.X+cardPad+13, textY, msg, ColorText)
 }
 
 // keyHints pairs each key with the action it performs, so the footer can set

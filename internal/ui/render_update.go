@@ -144,7 +144,7 @@ func renderUpdateBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
 	lines := wrapText(msg, (l.Card.Max.X-cardPad-textX)/CharW)
 	h := oneLine + (len(lines)-1)*lineH
 	top := l.Card.Max.Y + bannerGap
-	if state.ErrorMsg != "" {
+	if state.ErrorMsg != "" || state.Notice != "" {
 		top += oneLine + 8
 	}
 	if top+h > l.Screen.Max.Y-hintsBottom-8 {

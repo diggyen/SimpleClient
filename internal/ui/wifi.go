@@ -349,6 +349,7 @@ func (w *WifiState) keep(state *UIState, c wifi.Config) {
 		// starts that scan once it sees no subnet, and an address.
 		state.Subnet = ""
 		state.ScanDone = false
+		state.ScanProgress = 0
 		state.Dirty = true
 	}()
 }
