@@ -23,11 +23,6 @@
 # in BIOS and in UEFI mode, so changing the firmware setting later does not
 # strand it. The caller picks GPT on UEFI machines and MBR on BIOS ones.
 #
-# A USB stick that has been updated runs a release from one of its slots (see
-# the ISO's grub.cfg), and that release is the one installed: its kernels,
-# initrds and splash in place of the ISO's. The kiosk names the slot, SC_SLOT,
-# and the partition it is on, SC_SLOTS.
-#
 # Progress goes to stdout for the kiosk UI as "STEP n total name"; a failure as
 # "ERROR text", with a non-zero exit.
 set -u
@@ -37,23 +32,20 @@ TABLE=${2:-}
 LANG_ARG=${3:-tr}
 TOTAL=6
 
-# What is installed, as it is laid out on the medium: the boot loaders, and
-# the system — kernels, initrds and the splash — which goes into slot A.
-LOADERS="boot/efi/grubx64.efi EFI/boot/bootx64.efi EFI/boot/mmx64.efi boot/grub/fonts/unicode.pf2"
-FILES="$LOADERS boot/vmlinuz-new boot/vmlinuz-lts boot/initramfs.cpio.gz boot/firmware.cpio
-       boot/modules-new.cpio.gz boot/modules-lts.cpio.gz boot/grub/splash.png"
+# What is installed, as it is laid out on the medium.
+FILES="boot/vmlinuz-new boot/vmlinuz-lts boot/initramfs.cpio.gz boot/firmware.cpio
+       boot/modules-new.cpio.gz boot/modules-lts.cpio.gz boot/efi/grubx64.efi
+       EFI/boot/bootx64.efi EFI/boot/mmx64.efi boot/grub/fonts/unicode.pf2
+       boot/grub/splash.png"
 # Where it is read from: the medium, or its copy in memory.
 SRC=/mnt/sc-media
 COPY=/tmp/sc-media
-# Where the system is read from: the medium's, or the stick's slot's.
-SYS=$SRC/boot
-SPLASH=$SRC/boot/grub/splash.png
 
 step() { echo "STEP $1 $TOTAL $2"; }
 fail() { echo "ERROR $*"; cleanup; exit 1; }
 cleanup() {
     sync
-    for m in /mnt/sc-slot /mnt/sc-esp /mnt/sc-data /mnt/sc-slots /mnt/sc-media; do
+    for m in /mnt/sc-slot /mnt/sc-esp /mnt/sc-data /mnt/sc-media; do
         umount "$m" 2>/dev/null
     done
     rm -rf "$COPY"
@@ -100,60 +92,28 @@ case $TABLE in gpt|mbr) ;; *) fail "partition table must be gpt or mbr" ;; esac
 
 # ── 1. The installation medium ───────────────────────────────────────────────
 step 1 medium
-mkdir -p /mnt/sc-media /mnt/sc-esp /mnt/sc-slot /mnt/sc-data /mnt/sc-slots
+mkdir -p /mnt/sc-media /mnt/sc-esp /mnt/sc-slot /mnt/sc-data
 MEDIA=$(find_medium) || fail "installation medium not found"
 mount -t "$(fstype "$MEDIA")" -o ro "$MEDIA" /mnt/sc-media 2>/dev/null || fail "cannot mount $MEDIA"
 [ "$(head -c 12 /mnt/sc-media/.disk/info 2>/dev/null)" = SimpleClient ] || fail "$MEDIA is not a SimpleClient medium"
 for f in $FILES; do
     [ -f "/mnt/sc-media/$f" ] || fail "missing on the medium: $f"
 done
-# The stick's slot: next to the ISO's files on a stick Rufus wrote in ISO
-# mode, otherwise on a partition of its own, which the kernel will not mount
-# while the ISO is mounted — the ISO is the whole disk. The boot loaders are
-# then taken into memory, and the ISO let go of, first.
-if [ -n "${SC_SLOT:-}" ]; then
-    case $SC_SLOT in A|B) ;; *) fail "no such slot: $SC_SLOT" ;; esac
-    SYS=/mnt/sc-media/slots/$SC_SLOT
-    if [ -n "${SC_SLOTS:-}" ] && [ "$SC_SLOTS" != "$MEDIA" ]; then
-        for f in $LOADERS; do
-            mkdir -p "$COPY/$(dirname "$f")"
-            cp "/mnt/sc-media/$f" "$COPY/$f" || fail "copying $f into memory failed"
-        done
-        umount /mnt/sc-media || fail "the stick is in use"
-        SRC=$COPY
-        mount -t vfat -o ro "$SC_SLOTS" /mnt/sc-slots 2>/dev/null || fail "cannot mount $SC_SLOTS"
-        SYS=/mnt/sc-slots/slots/$SC_SLOT
-    fi
-    SPLASH=$SYS/splash.png
-    for f in vmlinuz-new vmlinuz-lts initramfs.cpio.gz firmware.cpio modules-new.cpio.gz modules-lts.cpio.gz splash.png; do
-        [ -f "$SYS/$f" ] || fail "missing in slot $SC_SLOT: $f"
-    done
-fi
 
 # Installing onto the stick this runs from, which is about to be wiped: what is
 # installed goes into memory first, if it fits with room to spare for the
 # kiosk, and the stick is let go of.
 case $MEDIA in
     "$DISK" | "$DISK"[0-9]* | "$DISK"p[0-9]*)
-        NEED=$(cd "$SYS" && du -ck vmlinuz-* *.cpio.gz *.cpio | tail -1 | cut -f1)
+        NEED=$(cd /mnt/sc-media && du -ck $FILES | tail -1 | cut -f1)
         FREE=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB/\1/p' /proc/meminfo)
         [ $((NEED + 160 * 1024)) -le "${FREE:-0}" ] \
             || fail "not enough memory to install onto the stick this runs from: $(((NEED + 160 * 1024) / 1024)) MB needed, $((${FREE:-0} / 1024)) MB free"
-        for f in $LOADERS; do
-            [ -f "$COPY/$f" ] && continue
+        for f in $FILES; do
             mkdir -p "$COPY/$(dirname "$f")"
-            cp "$SRC/$f" "$COPY/$f" || fail "copying $f into memory failed"
+            cp "/mnt/sc-media/$f" "$COPY/$f" || fail "copying $f into memory failed"
         done
-        mkdir -p "$COPY/system"
-        for f in "$SYS"/vmlinuz-* "$SYS"/*.cpio.gz "$SYS"/*.cpio "$SPLASH"; do
-            cp "$f" "$COPY/system/" || fail "copying $(basename "$f") into memory failed"
-        done
-        SYS=$COPY/system SPLASH=$COPY/system/splash.png
-        for m in /mnt/sc-slots /mnt/sc-media; do
-            if grep -q " $m " /proc/mounts; then
-                umount "$m" || fail "the stick is in use"
-            fi
-        done
+        umount /mnt/sc-media || fail "the stick is in use"
         SRC=$COPY
         ;;
 esac
@@ -210,12 +170,12 @@ B_UUID=$(uuid "$(part $B)") DATA_UUID=$(uuid "$(part $DATA)")
 # ── 4. The system, into slot A ───────────────────────────────────────────────
 step 4 copy
 mount -t ext4 "$(part $A)" /mnt/sc-slot || fail "cannot mount SC_A"
-for f in "$SYS"/vmlinuz-* "$SYS"/*.cpio.gz "$SYS"/*.cpio; do
+for f in "$SRC"/boot/vmlinuz-* "$SRC"/boot/*.cpio.gz "$SRC"/boot/*.cpio; do
     cp "$f" /mnt/sc-slot/ || fail "copying $(basename "$f") failed (disk full?)"
 done
 # How GRUB boots the slot: grub-disk.cfg reads it from there. See build/slot.cfg.
 cp /usr/share/simpleclient/slot.cfg /mnt/sc-slot/slot.cfg || fail "copying slot.cfg failed"
-cp "$SPLASH" /mnt/sc-slot/splash.png || fail "copying splash.png failed"
+cp "$SRC/boot/grub/splash.png" /mnt/sc-slot/splash.png || fail "copying splash.png failed"
 [ -n "${SC_VERSION:-}" ] && echo "$SC_VERSION" > /mnt/sc-slot/version
 sync
 umount /mnt/sc-slot

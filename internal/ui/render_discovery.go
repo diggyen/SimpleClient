@@ -472,9 +472,8 @@ func renderErrorBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
 
 // keyHints pairs each key with the action it performs, so the footer can set
 // the key as a cap and the action as plain text. f9 is what F9 does, if
-// anything: install to disk, from a USB stick or CD, or update a disk install;
-// f11 what F11 does, update the USB stick the kiosk runs from.
-func keyHints(f9, f11 string) [][2]string {
+// anything: install to disk, from a USB stick or CD, or update a disk install.
+func keyHints(f9 string) [][2]string {
 	h := [][2]string{
 		{"↑↓", i18n.T(i18n.HintSelect)},
 		{"Enter", i18n.T(i18n.HintConnect)},
@@ -488,18 +487,7 @@ func keyHints(f9, f11 string) [][2]string {
 	if f9 != "" {
 		h = append(h, [2]string{"F9", f9})
 	}
-	if f11 != "" {
-		h = append(h, [2]string{"F11", f11})
-	}
 	return h
-}
-
-// f11Hint is what F11 does on this kiosk.
-func f11Hint(state *UIState) string {
-	if state.Boot.Live {
-		return i18n.T(i18n.HintUpdate)
-	}
-	return ""
 }
 
 // f9Hint is what F9 does on this kiosk.
@@ -514,13 +502,12 @@ func f9Hint(state *UIState) string {
 }
 
 // fitKeyHints drops hints until the row fits in width, the ones before F9
-// and F11 first: on a narrow screen, installing or updating is what the
-// person at a fresh kiosk is most likely to be looking for, and the keys
-// still work unlabelled.
+// first: on a narrow screen, installing is what the person at a fresh kiosk
+// is most likely to be looking for, and the keys still work unlabelled.
 func fitKeyHints(hints [][2]string, width int) [][2]string {
 	for len(hints) > 3 && keyHintsWidth(hints) > width {
 		drop := len(hints) - 1
-		for drop > 0 && (hints[drop][0] == "F9" || hints[drop][0] == "F11") {
+		if hints[drop][0] == "F9" {
 			drop--
 		}
 		hints = append(hints[:drop:drop], hints[drop+1:]...)
@@ -530,7 +517,7 @@ func fitKeyHints(hints [][2]string, width int) [][2]string {
 
 // keyHintsWidth measures a hint row so it can be centred.
 func keyHintsWidth(hints [][2]string) int {
-	const capGap, pairGap = 7, 20
+	const capGap, pairGap = 7, 22
 	w := 0
 	for i, h := range hints {
 		if i > 0 {
@@ -543,9 +530,9 @@ func keyHintsWidth(hints [][2]string) int {
 
 // renderKeyHints draws the bottom key legend and the project URL.
 func renderKeyHints(img *image.RGBA, l discoveryLayout, state *UIState) {
-	const capGap, pairGap = 7, 20
+	const capGap, pairGap = 7, 22
 
-	hints := fitKeyHints(keyHints(f9Hint(state), f11Hint(state)), l.Screen.Dx()-2*padding)
+	hints := fitKeyHints(keyHints(f9Hint(state)), l.Screen.Dx()-2*padding)
 	y := l.Screen.Max.Y - hintsBottom
 	x := l.Screen.Min.X + (l.Screen.Dx()-keyHintsWidth(hints))/2
 
@@ -568,7 +555,7 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout, state *UIState) {
 		}
 		ver += buildSep + i18n.T(i18n.BadgeVideo) + ": " + gpu
 	}
-	note := updateNote(&state.Update, state.Boot.Live)
+	note := updateNote(&state.Update)
 	if note != "" {
 		note = buildSep + note
 	}

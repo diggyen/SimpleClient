@@ -377,9 +377,9 @@ func TestUnpackGivesUpOnAStalledDownload(t *testing.T) {
 
 func TestSettleTellsHowATryWent(t *testing.T) {
 	dir := t.TempDir()
-	old := withState
-	withState = func(_ bootenv.Boot, fn func(string) error) error { return fn(dir) }
-	defer func() { withState = old }()
+	oldT, oldF := triedPath, failedPath
+	triedPath, failedPath = filepath.Join(dir, "update-try"), filepath.Join(dir, "update-failed")
+	defer func() { triedPath, failedPath = oldT, oldF }()
 	a, b := bootenv.Boot{Slot: "A"}, bootenv.Boot{Slot: "B"}
 	settle := func(boot bootenv.Boot) string {
 		tag, ok, failed := Settle(boot)
@@ -392,7 +392,7 @@ func TestSettleTellsHowATryWent(t *testing.T) {
 
 	// v0.7.1 went into B, and the machine came back up on A: once it says
 	// so, and it remembers.
-	remember(a, "v0.7.1", "B")
+	remember("v0.7.1", "B")
 	if got := settle(a); got != "v0.7.1 false v0.7.1" {
 		t.Fatalf("got %q", got)
 	}
@@ -402,7 +402,7 @@ func TestSettleTellsHowATryWent(t *testing.T) {
 
 	// v0.7.2 went into B and came up there; until that boot has proven
 	// itself, a boot of A would still find it failed.
-	remember(a, "v0.7.2", "B")
+	remember("v0.7.2", "B")
 	if got := settle(b); got != "v0.7.2 true v0.7.1" {
 		t.Fatalf("got %q", got)
 	}
@@ -416,7 +416,7 @@ func TestSettleTellsHowATryWent(t *testing.T) {
 	}
 
 	// v0.7.3 came up in A, and that boot died before it proved itself.
-	remember(a, "v0.7.3", "A")
+	remember("v0.7.3", "A")
 	if got := settle(a); got != "v0.7.3 true " {
 		t.Fatalf("got %q", got)
 	}

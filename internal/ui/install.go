@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 	"github.com/diggyen/SimpleClient/internal/install"
@@ -106,16 +105,7 @@ func startInstall(state *UIState) {
 	// to write over it.
 	usb.HoldDisk(disk.Name)
 	log.Printf("install: %s (%s), %s", disk.Path(), disk.Label(), opt.Table)
-	boot := state.Boot
 	go func() {
-		if boot.Live && boot.Slot != "" {
-			// An updated stick installs the release it runs, from its slot,
-			// not the one it was written with.
-			opt.Slot = boot.Slot
-			if env, err := bootenv.Read(boot); err == nil {
-				opt.Slots, _ = bootenv.LiveSlots(env)
-			}
-		}
 		err := install.Run(disk, opt, func(step, total int, name string) {
 			log.Printf("install: step %d/%d %s", step, total, name)
 			state.Mu.Lock()

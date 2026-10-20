@@ -92,9 +92,9 @@ var (
 )
 
 // startUpdates settles the last update and starts the daily checks, on a disk
-// install or a USB stick that updates. Callers must hold state.Mu.
+// install. Callers must hold state.Mu.
 func startUpdates(state *UIState) {
-	if !state.Boot.Updatable() {
+	if !state.Boot.Installed() {
 		return
 	}
 	u := &state.Update
@@ -291,8 +291,6 @@ func updateReason(err error) string {
 		return i18n.T(i18n.UpdateErrUnproven)
 	case errors.Is(err, update.ErrInsecure):
 		return i18n.T(i18n.UpdateErrInsecure)
-	case errors.Is(err, update.ErrNoRoom):
-		return i18n.T(i18n.UpdateErrNoRoom)
 	case errors.As(err, &uerr):
 		return i18n.Tf(i18n.UpdateErrNetwork, uerr.Err.Error())
 	}
@@ -312,15 +310,10 @@ func updateBanner(u *UpdateState) (msg string, ok bool) {
 }
 
 // updateNote is what the foot of the server list says about updates: that
-// there is a new release, unless it is one that would not start here, and the
-// key that installs it, F11 on a USB stick.
-func updateNote(u *UpdateState, live bool) string {
+// there is a new release, unless it is one that would not start here.
+func updateNote(u *UpdateState) string {
 	if u.Available() && u.Latest.Tag != u.Failed {
-		key := "F9"
-		if live {
-			key = "F11"
-		}
-		return i18n.Tf(i18n.UpdateNew, u.Latest.Tag, key)
+		return i18n.Tf(i18n.UpdateNew, u.Latest.Tag)
 	}
 	return ""
 }

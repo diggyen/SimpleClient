@@ -97,8 +97,7 @@ LTS kernel, then to the other slot.
 
 On an installed kiosk `F9` is the update (`internal/update`). It asks the release
 server — the project's GitHub releases, or a mirror whose base URL is in
-`/data/simpleclient/update-url`, on a stick `simpleclient/update-url` of its
-FAT partition — which release is the newest: `<base>/latest`
+`/data/simpleclient/update-url` — which release is the newest: `<base>/latest`
 redirects to its tag (GitHub) or holds it (a mirror), and
 `<base>/download/<tag>/SHA256SUMS` has the checksum of `simpleclient-update.tar`,
 the files of one slot. A check also runs two minutes after start-up and daily
@@ -111,20 +110,6 @@ after the kiosk comes up, `bootenv.MarkGood` makes the slot `sc_boot`, and a
 boot that dies before then is followed by one of the old slot. The server list
 says which happened: the update in green, or in amber that the release did not
 start on this machine and the kiosk went back.
-
-A USB stick the kiosk runs from updates itself the same way, with `F11`: `F9`
-there stays the install. The ISO's own files stay as they were; releases go
-into two slots beside them, the directories `slots/A` and `slots/B` of a FAT
-file system — on a stick Rufus wrote in ISO mode its one partition, on a stick
-the ISO was written to as it is (dd, Rufus's DD mode) a partition the first
-update adds in the free space behind the ISO (`internal/gpt`, up to 2 GiB,
-FAT32, `SC_SLOTS`, its volume ID kept in `grubenv` as `sc_slots`). The table is
-written backup first, primary last, and the ISO's partitions and protective MBR
-stay as they were. The ISO's `grub.cfg` picks the slot from the stick's
-`grubenv` as `grub-disk.cfg` does, boots it through its `slot.cfg` with
-`sc.live=1`, and falls back to the ISO's files when the slot will not load; the
-boot menu offers the ISO's release and the previous one by hand. A stick that
-has been updated installs the release it runs.
 
 Everything comes over HTTPS, and a redirect to plain HTTP is refused: over HTTP
 whoever is on the way could replace the update and its checksum alike.

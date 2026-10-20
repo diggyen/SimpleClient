@@ -240,9 +240,6 @@ type Options struct {
 	Lang    string // UI language, "tr" or "en"
 	Kernel  string // the kernel this boot runs, which has just proven itself
 	Version string // written into the system slot
-	// A USB stick that has been updated runs a release from one of its
-	// slots, and installs that one: the slot, and the partition it is on.
-	Slot, Slots string
 }
 
 var installer = "/sbin/sc-install"
@@ -251,8 +248,7 @@ var installer = "/sbin/sc-install"
 // installer has finished; the error carries the installer's own explanation.
 func Run(d Disk, opt Options, progress Progress) error {
 	cmd := exec.Command(installer, d.Path(), opt.Table, opt.Lang)
-	cmd.Env = append(os.Environ(), "SC_KERNEL="+opt.Kernel, "SC_VERSION="+opt.Version,
-		"SC_SLOT="+opt.Slot, "SC_SLOTS="+opt.Slots)
+	cmd.Env = append(os.Environ(), "SC_KERNEL="+opt.Kernel, "SC_VERSION="+opt.Version)
 	cmd.Stderr = os.Stderr
 	out, err := cmd.StdoutPipe()
 	if err != nil {

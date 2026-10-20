@@ -124,16 +124,9 @@ func Modify(path string, fn func(Env)) error {
 // Boot describes how the running kiosk was started, from the kernel command
 // line GRUB built.
 type Boot struct {
-	// Slot is "A" or "B" on a disk install, and on a USB stick that runs an
-	// update (Live); "" when running from the files of the ISO, on a stick or
-	// a CD.
+	// Slot is "A" or "B" on a disk install, "" when running from a USB stick
+	// or a CD.
 	Slot string
-	// Live is a USB stick that the ISO was written to, the kiosk running from
-	// it, and its grubenv where it can keep updates: the boot menu of the ISO
-	// says so whenever it found that grubenv (sc.live=1). Updates go into
-	// directories of the stick (LiveSlots), and settings are where they are
-	// on any stick, LiveDevice.
-	Live bool
 	// Kernel is "new" or "lts", the kernel GRUB chose.
 	Kernel string
 	// GfxSafe is the display adapters to leave on the firmware framebuffer:
@@ -147,14 +140,10 @@ type Boot struct {
 }
 
 // Installed reports whether the kiosk runs from a disk install.
-func (b Boot) Installed() bool { return b.Slot != "" && !b.Live }
+func (b Boot) Installed() bool { return b.Slot != "" }
 
-// Updatable reports whether the kiosk can update itself where it runs from:
-// a disk install, or a USB stick (Live).
-func (b Boot) Updatable() bool { return b.Installed() || b.Live }
-
-// Other is the system slot the kiosk is not running from, the one an update
-// goes into: on a stick running the files of the ISO, slot A.
+// Other is the system slot a disk install is not running from, the one an
+// update goes into.
 func (b Boot) Other() string {
 	if b.Slot == "A" {
 		return "B"
@@ -180,9 +169,6 @@ func Current() Boot {
 		}
 		if v, ok := strings.CutPrefix(f, "sc.esp="); ok {
 			b.ESP = v
-		}
-		if f == "sc.live=1" {
-			b.Live = true
 		}
 	}
 	return b
@@ -263,10 +249,9 @@ func GraphicsOK(b Boot) error {
 }
 
 // MarkGood records that this boot came up: the kernel it runs on is the one
-// to keep using and, on a disk install or a stick that updates, so is the
-// slot — which is what makes a freshly installed update permanent; on a stick
-// that runs the files of the ISO, the slot is none. Booted from a CD there is
-// nothing to write, and nothing is.
+// to keep using and, on a disk install, so is the slot — which is what makes
+// a freshly installed update permanent. Booted from a CD there is nothing to
+// write, and nothing is.
 func MarkGood(b Boot) error {
 	err := withEnv(b, func(env Env) {
 		env["sc_kpending"] = "0"
@@ -277,7 +262,7 @@ func MarkGood(b Boot) error {
 		if b.Kernel == "new" || b.Kernel == "lts" {
 			env["sc_kernel"] = b.Kernel
 		}
-		if b.Updatable() {
+		if b.Installed() {
 			env["sc_boot"] = b.Slot
 		}
 	})
@@ -297,43 +282,12 @@ func Read(b Boot) (Env, error) {
 // TryOther has the next boot, and only that one, start the other slot, which
 // an update has just been written to. GRUB clears the try before the slot's
 // kernel even starts: a boot of it that never gets as far as MarkGood is
-// followed by one of the slot it came from. See build/grub-disk.cfg, and on a
-// stick the ISO's grub.cfg.
+// followed by one of the slot it came from. See build/grub-disk.cfg.
 func TryOther(b Boot) error {
-	if !b.Updatable() {
+	if !b.Installed() {
 		return errNoEnv
 	}
 	return withEnv(b, func(env Env) { env["sc_try"] = b.Other() })
-}
-
-// SlotsLabel is the label of the partition a USB stick the ISO was written to
-// as it is keeps a live kiosk's updates on, which the kiosk adds behind the
-// ISO (install.AddLiveSlots). grubenv records it by its volume ID, sc_slots.
-const SlotsLabel = "SC_SLOTS"
-
-// ErrNoSlots is a stick the ISO was written to as it is that has no partition
-// for updates yet.
-var ErrNoSlots = errors.New("bootenv: the USB stick has no partition for updates yet")
-
-// LiveSlots returns the FAT partition whose slots/A and slots/B directories
-// hold a live kiosk's updates, by the grubenv env of its stick: the one
-// recorded in sc_slots or, on a stick Rufus wrote in ISO mode, the one
-// partition holding everything. A stick the ISO was written to as it is has
-// none until the kiosk has added it: ErrNoSlots.
-func LiveSlots(env Env) (string, error) {
-	if uuid := env["sc_slots"]; uuid != "" {
-		return findfs("UUID=" + uuid)
-	}
-	if _, err := FindLabel("SC_EFI"); err == nil {
-		return "", ErrNoSlots
-	}
-	return FindLabel(RufusLabel)
-}
-
-// SetLiveSlots records the volume ID of the partition for updates the kiosk
-// has added to the stick it runs from, b.
-func SetLiveSlots(b Boot, uuid string) error {
-	return withEnv(b, func(env Env) { env["sc_slots"] = uuid })
 }
 
 // SlotDevice returns the device of a disk install's system slot, "A" or "B",

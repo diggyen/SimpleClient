@@ -314,7 +314,6 @@ BPP_ARG=""
 HOST_ARG=""
 SLOT=""
 DATA_UUID=""
-LIVE=""
 for arg in $(cat /proc/cmdline 2>/dev/null); do
     case "$arg" in
         lang=*)   LANG_ARG="-lang=${arg#lang=}" ;;
@@ -325,7 +324,6 @@ for arg in $(cat /proc/cmdline 2>/dev/null); do
         bpp=*) BPP_ARG="-bpp=${arg#bpp=}" ;;
         sc.slot=*) SLOT=${arg#sc.slot=} ;;
         sc.data=*) DATA_UUID=${arg#sc.data=} ;;
-        sc.live=1) LIVE=1 ;;
         sc.ip=*) NET_IP=${arg#sc.ip=} ;;
         sc.gw=*) NET_GW=${arg#sc.gw=} ;;
         sc.dns=*) NET_DNS=${arg#sc.dns=} ;;
@@ -333,13 +331,9 @@ for arg in $(cat /proc/cmdline 2>/dev/null); do
     esac
 done
 log "kernel: $(uname -r)"
-# A USB stick that has been updated boots a release from one of its slots,
-# with that slot's sc.slot= (see grub.cfg); it is still a stick, with no disk
-# install's data partition, and keeps its settings where every stick does.
-[ "$LIVE" = 1 ] && SLOT=""
 
 # ── Disk install ──────────────────────────────────────────────────────────────
-# Left set, sc.slot= comes from the GRUB of an installed disk. Its data partition
+# sc.slot= is set only by the GRUB of an installed disk. Its data partition
 # holds settings and logs; the disk controller's driver has just been loaded
 # and may still be finding the disk, so wait a little for it. sc.data= is the
 # partition's UUID — another disk in the machine can have SimpleClient on it
@@ -359,21 +353,6 @@ if [ -n "$SLOT" ]; then
         log "disk install: slot $SLOT, data on $DATA_DEV"
     else
         log "disk install: slot $SLOT, data partition not found"
-    fi
-fi
-
-# ── USB stick ─────────────────────────────────────────────────────────────────
-# The update server a stick is pointed at instead of GitHub, and the
-# certificate that vouches for it, if any: on the stick, in the files a disk
-# install keeps on its data partition. The update reads them from there; see
-# internal/update. On a stick /data is in memory.
-if [ "$LIVE" = 1 ] && EFI_DEV=$(live_dev); then
-    mkdir -p /run/sc-efi /data/simpleclient
-    if mount -t vfat -o ro "$EFI_DEV" /run/sc-efi 2>/dev/null; then
-        for f in update-url update-ca.pem; do
-            cp "/run/sc-efi/simpleclient/$f" /data/simpleclient/ 2>/dev/null
-        done
-        umount /run/sc-efi
     fi
 fi
 

@@ -196,7 +196,6 @@ const (
 	UpdateErrStalled
 	UpdateErrUnproven
 	UpdateErrInsecure
-	UpdateErrNoRoom
 	UpdateCancelled
 	UpdateNew          // "%s" is the release; the note at the foot of the server list
 	UpdateNoticeOK     // "%s" is the release; the banner after an update came up
@@ -362,9 +361,8 @@ var catalogues = map[Lang]*catalogue{
 		UpdateErrStalled:        "the download stopped; check the network and try again",
 		UpdateErrUnproven:       "this start-up is still being checked; try again in a minute",
 		UpdateErrInsecure:       "the release server is not on HTTPS; updates come over HTTPS only",
-		UpdateErrNoRoom:         "there is not enough room on the USB stick",
 		UpdateCancelled:         "cancelled",
-		UpdateNew:               "New version %s (%s)",
+		UpdateNew:               "New version %s (F9)",
 		UpdateNoticeOK:          "Updated: %s is installed and running.",
 		UpdateNoticeFailed:      "Update failed: %s did not start on this machine, so the kiosk went back to %s.",
 		ButtonCheck:             "Check",
@@ -521,9 +519,8 @@ var catalogues = map[Lang]*catalogue{
 		UpdateErrStalled:        "indirme durdu; ağı denetleyip yeniden deneyin",
 		UpdateErrUnproven:       "bu açılış henüz doğrulanıyor; bir dakika sonra yeniden deneyin",
 		UpdateErrInsecure:       "sürüm sunucusu HTTPS değil; güncelleme yalnız HTTPS ile alınır",
-		UpdateErrNoRoom:         "USB bellekte yeterli yer yok",
 		UpdateCancelled:         "iptal edildi",
-		UpdateNew:               "Yeni sürüm %s (%s)",
+		UpdateNew:               "Yeni sürüm %s (F9)",
 		UpdateNoticeOK:          "Güncelleme başarılı: %s kuruldu ve çalışıyor.",
 		UpdateNoticeFailed:      "Güncelleme başarısız: %s bu makinede açılamadı, kiosk %s sürümüne geri döndü.",
 		ButtonCheck:             "Denetle",

@@ -31,7 +31,6 @@ const (
 	KeyF8         = 66
 	KeyF9         = 67
 	KeyF10        = 68
-	KeyF11        = 87
 	KeyUp         = 103
 	KeyPageUp     = 104
 	KeyLeft       = 105
