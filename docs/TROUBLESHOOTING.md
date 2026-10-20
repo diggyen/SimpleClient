@@ -282,9 +282,14 @@ The update dialog (`F9` on an installed kiosk) says what stopped it:
   keeps release files, and a DNS server that resolves them; it cannot go
   through a proxy. A network without that can have a mirror instead: the
   release's `SHA256SUMS` and `simpleclient-update.tar` under
-  `download/<tag>/`, and a file `latest` holding the tag, on any web server the
-  kiosks reach, with its address in `simpleclient/update-url` on the kiosk's
-  data partition.
+  `download/<tag>/`, and a file `latest` holding the tag, on any HTTPS server
+  the kiosks reach, with its address in `simpleclient/update-url` on the
+  kiosk's data partition. A mirror whose certificate is from a CA of its own
+  needs that CA, or the certificate itself, in `simpleclient/update-ca.pem`
+  beside it, PEM.
+- **The release server is not on HTTPS** — the address in `update-url` starts
+  `http://`, or the mirror redirects to one. The kiosk runs what it downloads,
+  and takes it over HTTPS only.
 - **certificate ... is not valid** — the machine's clock is far out. A clock
   that is behind is allowed for; one so far ahead that the certificate has
   expired is not. Set the date in the firmware setup.

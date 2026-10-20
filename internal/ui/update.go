@@ -289,6 +289,8 @@ func updateReason(err error) string {
 		return i18n.T(i18n.UpdateErrStalled)
 	case errors.Is(err, update.ErrUnproven):
 		return i18n.T(i18n.UpdateErrUnproven)
+	case errors.Is(err, update.ErrInsecure):
+		return i18n.T(i18n.UpdateErrInsecure)
 	case errors.As(err, &uerr):
 		return i18n.Tf(i18n.UpdateErrNetwork, uerr.Err.Error())
 	}

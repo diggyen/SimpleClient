@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -67,8 +69,22 @@ func server(t *testing.T, tag string, upd []byte, sums string) *httptest.Server 
 		w.Header().Set("Content-Length", strconv.Itoa(len(upd)))
 		w.Write(upd)
 	})
-	s := httptest.NewServer(mux)
-	t.Cleanup(s.Close)
+	return tlsServer(t, mux)
+}
+
+// tlsServer is an HTTPS server the kiosk trusts for the test.
+func tlsServer(t *testing.T, h http.Handler) *httptest.Server {
+	t.Helper()
+	s := httptest.NewTLSServer(h)
+	old := transport.TLSClientConfig.RootCAs
+	pool := x509.NewCertPool()
+	pool.AddCert(s.Certificate())
+	transport.TLSClientConfig.RootCAs = pool
+	t.Cleanup(func() {
+		s.Close()
+		transport.TLSClientConfig.RootCAs = old
+		transport.CloseIdleConnections()
+	})
 	return s
 }
 
@@ -105,8 +121,7 @@ func TestLatestReadsAMirrorsFile(t *testing.T) {
 	mux.HandleFunc("/download/v1.2.3/SHA256SUMS", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(strings.Repeat("ab", 32) + " *" + Asset + "\n"))
 	})
-	s := httptest.NewServer(mux)
-	defer s.Close()
+	s := tlsServer(t, mux)
 	useServer(t, s.URL)
 
 	r, err := Latest(context.Background())
@@ -133,12 +148,86 @@ func TestLatestRejectsWhatIsNotATag(t *testing.T) {
 		mux.HandleFunc("/latest", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, loc, http.StatusFound)
 		})
-		s := httptest.NewServer(mux)
+		s := tlsServer(t, mux)
 		useServer(t, s.URL)
 		if r, err := Latest(context.Background()); err == nil {
 			t.Errorf("redirect to %s: got release %+v", loc, r)
 		}
 		s.Close()
+	}
+}
+
+// The kiosk runs what it downloads: the update, and what it is checked
+// against, come over HTTPS or not at all.
+func TestOnlyHTTPS(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("asked for %s over plain HTTP", r.URL)
+	}))
+	defer plain.Close()
+	useServer(t, plain.URL)
+	if _, err := Latest(context.Background()); !errors.Is(err, ErrInsecure) {
+		t.Fatalf("plain HTTP mirror: got %v, want ErrInsecure", err)
+	}
+	dir := t.TempDir()
+	fill(t, dir)
+	r := Release{Tag: "v0.7.1", Sum: strings.Repeat("0", 64), Base: plain.URL}
+	if err := unpack(context.Background(), r, dir, nil); !errors.Is(err, ErrInsecure) {
+		t.Fatalf("plain HTTP download: got %v, want ErrInsecure", err)
+	}
+	if got := list(t, dir); got != "lost+found slot.cfg version vmlinuz-lts vmlinuz-new" {
+		t.Fatalf("slot holds %s", got)
+	}
+
+	// Nor can an HTTPS server send the kiosk to plain HTTP.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/latest", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("v0.7.1\n")) })
+	mux.HandleFunc("/download/v0.7.1/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusFound)
+	})
+	s := tlsServer(t, mux)
+	useServer(t, s.URL)
+	if _, err := Latest(context.Background()); !errors.Is(err, ErrInsecure) {
+		t.Fatalf("redirect to plain HTTP: got %v, want ErrInsecure", err)
+	}
+	r.Base = s.URL
+	if err := unpack(context.Background(), r, dir, nil); !errors.Is(err, ErrInsecure) {
+		t.Fatalf("download redirected to plain HTTP: got %v, want ErrInsecure", err)
+	}
+}
+
+// A mirror whose certificate is from its own CA is trusted once that CA is in
+// update-ca.pem, and not before.
+func TestRootsTrustTheMirrorsCA(t *testing.T) {
+	s := httptest.NewTLSServer(http.NotFoundHandler())
+	defer s.Close()
+	old := transport.TLSClientConfig.RootCAs
+	defer func() {
+		transport.TLSClientConfig.RootCAs = old
+		transport.CloseIdleConnections()
+	}()
+	path := filepath.Join(t.TempDir(), "update-ca.pem")
+
+	transport.TLSClientConfig.RootCAs = roots(path)
+	if transport.TLSClientConfig.RootCAs != nil {
+		t.Fatal("no update-ca.pem: want the image's bundle alone")
+	}
+	if resp, err := get(context.Background(), client, s.URL+"/x"); err == nil {
+		resp.Body.Close()
+		t.Fatal("a certificate of an unknown CA was trusted")
+	}
+
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Certificate().Raw})
+	if err := os.WriteFile(path, ca, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transport.TLSClientConfig.RootCAs = roots(path)
+	resp, err := get(context.Background(), client, s.URL+"/x")
+	if err != nil {
+		t.Fatalf("with its CA in update-ca.pem: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("got %s", resp.Status)
 	}
 }
 
@@ -273,8 +362,7 @@ func TestUnpackGivesUpOnAStalledDownload(t *testing.T) {
 		case <-r.Context().Done():
 		}
 	})
-	s := httptest.NewServer(mux)
-	defer s.Close()
+	s := tlsServer(t, mux)
 
 	dir := t.TempDir()
 	start := time.Now()
@@ -340,8 +428,7 @@ func TestSettleTellsHowATryWent(t *testing.T) {
 // An update that cannot even start leaves the slot as it was: it holds the
 // version before this one, which the boot menu still offers.
 func TestUnpackKeepsTheSlotWhenTheDownloadDoesNotStart(t *testing.T) {
-	s := httptest.NewServer(http.NotFoundHandler())
-	defer s.Close()
+	s := tlsServer(t, http.NotFoundHandler())
 	dir := t.TempDir()
 	fill(t, dir)
 	if err := unpack(context.Background(), Release{Tag: "v0.7.1", Sum: strings.Repeat("0", 64), Base: s.URL}, dir, nil); err == nil {

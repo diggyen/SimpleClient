@@ -111,7 +111,11 @@ boot that dies before then is followed by one of the old slot. The server list
 says which happened: the update in green, or in amber that the release did not
 start on this machine and the kiosk went back.
 
-Certificates are checked against the image's CA bundle. The kiosk has no time
+Everything comes over HTTPS, and a redirect to plain HTTP is refused: over HTTP
+whoever is on the way could replace the update and its checksum alike.
+Certificates are checked against the image's CA bundle, and against the PEM
+certificates in `/data/simpleclient/update-ca.pem` when there is one, for a
+mirror whose certificate is from a CA of its own. The kiosk has no time
 server, and a clock running behind the build's own date is taken to be wrong:
 the build date stands in for it. The update has no signature yet. What it is
 checked against comes over HTTPS from the same release, so whoever can publish

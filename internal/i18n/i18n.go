@@ -192,6 +192,7 @@ const (
 	UpdateErrDamaged
 	UpdateErrStalled
 	UpdateErrUnproven
+	UpdateErrInsecure
 	UpdateCancelled
 	UpdateNew          // "%s" is the release; the note at the foot of the server list
 	UpdateNoticeOK     // "%s" is the release; the banner after an update came up
@@ -353,6 +354,7 @@ var catalogues = map[Lang]*catalogue{
 		UpdateErrDamaged:        "the download was damaged; try again",
 		UpdateErrStalled:        "the download stopped; check the network and try again",
 		UpdateErrUnproven:       "this start-up is still being checked; try again in a minute",
+		UpdateErrInsecure:       "the release server is not on HTTPS; updates come over HTTPS only",
 		UpdateCancelled:         "cancelled",
 		UpdateNew:               "New version %s (F9)",
 		UpdateNoticeOK:          "Updated: %s is installed and running.",
@@ -507,6 +509,7 @@ var catalogues = map[Lang]*catalogue{
 		UpdateErrDamaged:        "indirilen dosya bozuk; yeniden deneyin",
 		UpdateErrStalled:        "indirme durdu; ağı denetleyip yeniden deneyin",
 		UpdateErrUnproven:       "bu açılış henüz doğrulanıyor; bir dakika sonra yeniden deneyin",
+		UpdateErrInsecure:       "sürüm sunucusu HTTPS değil; güncelleme yalnız HTTPS ile alınır",
 		UpdateCancelled:         "iptal edildi",
 		UpdateNew:               "Yeni sürüm %s (F9)",
 		UpdateNoticeOK:          "Güncelleme başarılı: %s kuruldu ve çalışıyor.",

@@ -125,8 +125,8 @@ restarts into it. Should it not start on that machine, the kiosk comes back on
 the version it had. Either way the server list says what happened, until a key
 is pressed: *Updated* or *Update failed*. Updates come from the
 [releases](https://github.com/diggyen/SimpleClient/releases), checked against
-the release's `SHA256SUMS` over HTTPS; a network without internet access can
-have a mirror, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-update-does-not-install).
+the release's `SHA256SUMS`, over HTTPS only; a network without internet access
+can have a mirror on HTTPS, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-update-does-not-install).
 
 ## USB devices
 

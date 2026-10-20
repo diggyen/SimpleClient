@@ -18,6 +18,12 @@
 // initrds, slot.cfg, which is how GRUB boots them, and version, the release's
 // tag. It has to match its line in SHA256SUMS, which comes over HTTPS from the
 // same release.
+//
+// Nothing comes over anything but HTTPS, from a mirror neither, and a redirect
+// to anything else is refused: the kiosk runs what it downloads, and over
+// plain HTTP whoever is on the way could replace the update and its checksum
+// alike. A mirror whose certificate is from a CA of its own has that CA, or the
+// certificate itself, in /data/simpleclient/update-ca.pem.
 package update
 
 import (
@@ -25,6 +31,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -54,6 +61,10 @@ const Asset = "simpleclient-update.tar"
 // network for instance: a file on the data partition holding its base URL.
 var basePath = "/data/simpleclient/update-url"
 
+// caPath holds certificates the release server's may be signed by besides the
+// image's CA bundle, PEM: a mirror's own CA, or the mirror's certificate.
+var caPath = "/data/simpleclient/update-ca.pem"
+
 // Base is the release server this kiosk updates from.
 func Base() string {
 	b, err := os.ReadFile(basePath)
@@ -81,6 +92,8 @@ var (
 	// ErrUnproven is an update asked for before this boot has proven itself
 	// (bootenv.MarkGood): the other slot is still the way back.
 	ErrUnproven = errors.New("update: this boot has not proven itself yet")
+	// ErrInsecure is a release server, or a redirect, that is not HTTPS.
+	ErrInsecure = errors.New("update: the release server is not HTTPS")
 )
 
 // Latest asks the release server for its newest release. One without an
@@ -148,6 +161,9 @@ func get(ctx context.Context, c *http.Client, u string) (*http.Response, error) 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
+	}
+	if req.URL.Scheme != "https" {
+		return nil, ErrInsecure
 	}
 	req.Header.Set("User-Agent", "SimpleClient/"+version.Version)
 	return c.Do(req)
@@ -229,13 +245,39 @@ var (
 		ResponseHeaderTimeout: 30 * time.Second,
 		IdleConnTimeout:       60 * time.Second,
 		ForceAttemptHTTP2:     true,
-		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, Time: tlsTime},
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, Time: tlsTime, RootCAs: roots(caPath)},
 	}
-	client      = &http.Client{Transport: transport}
+	client = &http.Client{Transport: transport, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return ErrInsecure
+		}
+		if len(via) >= 10 {
+			return errors.New("update: stopped after 10 redirects")
+		}
+		return nil
+	}}
 	noRedirects = &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
 )
+
+// roots is what the release server's certificate is checked against: the
+// image's CA bundle and the certificates in path, when there are any. nil is
+// the bundle alone.
+func roots(path string) *x509.CertPool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(b) {
+		return nil
+	}
+	return pool
+}
 
 // tlsTime is the time certificates are checked against. The kiosk keeps time
 // only in the machine's clock chip, with no time server to correct it, and

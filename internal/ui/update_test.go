@@ -141,6 +141,19 @@ func TestUpdate_CheckFails(t *testing.T) {
 	}
 }
 
+// A server that is not HTTPS is told as that, also when it was a redirect,
+// which the client hands back as a url.Error, and not as one out of reach.
+func TestUpdateReason_Insecure(t *testing.T) {
+	for _, err := range []error{
+		update.ErrInsecure,
+		&url.Error{Op: "Get", URL: "https://mirror/latest", Err: update.ErrInsecure},
+	} {
+		if got, want := updateReason(err), i18n.T(i18n.UpdateErrInsecure); got != want {
+			t.Errorf("%v: got %q, want %q", err, got, want)
+		}
+	}
+}
+
 // Esc while downloading cancels; the dialog stays, saying so, and nothing
 // restarts.
 func TestUpdate_CancelWhileDownloading(t *testing.T) {
