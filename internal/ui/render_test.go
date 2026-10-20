@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"net"
+	"slices"
 	"testing"
 	"time"
 
@@ -376,18 +377,22 @@ func TestRenderDiscovery_HeaderAndHintsFitEveryLanguage(t *testing.T) {
 			back := image.NewRGBA(fb.Bounds())
 			renderDiscovery(back, &UIState{Screen: ScreenDiscovery})
 
-			for _, f9 := range []string{"", i18n.T(i18n.HintInstall), i18n.T(i18n.HintUpdate)} {
-				hints := fitKeyHints(keyHints(f9), w-2*padding)
+			// A disk install, a CD, a USB stick (install, and update).
+			for _, f := range [][2]string{{"", ""}, {i18n.T(i18n.HintInstall), ""}, {i18n.T(i18n.HintUpdate), ""},
+				{i18n.T(i18n.HintInstall), i18n.T(i18n.HintUpdate)}} {
+				f9, f11 := f[0], f[1]
+				all := keyHints(f9, f11)
+				hints := fitKeyHints(all, w-2*padding)
 				if hintsW := keyHintsWidth(hints); hintsW > w-2*padding {
-					t.Errorf("lang=%s w=%d F9=%q: key hints (%dpx) do not fit on screen", lang, w, f9, hintsW)
+					t.Errorf("lang=%s w=%d F9=%q F11=%q: key hints (%dpx) do not fit on screen", lang, w, f9, f11, hintsW)
 				}
 				// Only a screen too narrow for the full row may lose hints,
-				// and never the one for F9.
-				if w >= 1024 && len(hints) != len(keyHints(f9)) {
-					t.Errorf("lang=%s w=%d F9=%q: %d of %d hints shown", lang, w, f9, len(hints), len(keyHints(f9)))
+				// and never the ones for F9 and F11.
+				if w >= 1024 && len(hints) != len(all) {
+					t.Errorf("lang=%s w=%d F9=%q F11=%q: %d of %d hints shown", lang, w, f9, f11, len(hints), len(all))
 				}
-				if f9 != "" && hints[len(hints)-1][0] != "F9" {
-					t.Errorf("lang=%s w=%d: the F9 hint was dropped", lang, w)
+				if countKeys(hints, "F9", "F11") != countKeys(all, "F9", "F11") {
+					t.Errorf("lang=%s w=%d F9=%q F11=%q: the F9 or F11 hint was dropped", lang, w, f9, f11)
 				}
 			}
 
@@ -641,4 +646,15 @@ func TestMovePointer_StillMouseDrawsNothing(t *testing.T) {
 	if len(fb.rects) != 0 {
 		t.Errorf("blitted %v with nothing to move", fb.rects)
 	}
+}
+
+// countKeys counts the hints for any of keys.
+func countKeys(hints [][2]string, keys ...string) int {
+	n := 0
+	for _, h := range hints {
+		if slices.Contains(keys, h[0]) {
+			n++
+		}
+	}
+	return n
 }

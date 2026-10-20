@@ -66,6 +66,7 @@ walks through the causes in order of likelihood.
 | `F8` | Network settings: DHCP or a fixed address, and the wireless network |
 | `F9` | Started from a USB stick or CD: install to a disk, or onto the stick itself. Installed: software update |
 | `F10` | In the credential dialog: what the kiosk does at startup — the server list, this server's dialog, or logging on to it |
+| `F11` | Started from a USB stick: software update of the stick |
 | `Ctrl`+`Alt`+`End` | Disconnect from an active session |
 
 The scan probes TCP port 3389 across the subnet the machine got from DHCP. If

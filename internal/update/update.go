@@ -1,4 +1,5 @@
-// Package update brings a disk install up to the newest release.
+// Package update brings a disk install, or a USB stick the kiosk runs from,
+// up to the newest release.
 //
 // It asks the release server which release is the newest and, when someone at
 // the kiosk chooses to, downloads that release's update into the system slot
@@ -23,7 +24,8 @@
 // to anything else is refused: the kiosk runs what it downloads, and over
 // plain HTTP whoever is on the way could replace the update and its checksum
 // alike. A mirror whose certificate is from a CA of its own has that CA, or the
-// certificate itself, in /data/simpleclient/update-ca.pem.
+// certificate itself, in /data/simpleclient/update-ca.pem; on a USB stick in
+// simpleclient/update-ca.pem of its live partition, which /init copies there.
 package update
 
 import (
@@ -45,9 +47,12 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/diggyen/SimpleClient/internal/bootenv"
+	"github.com/diggyen/SimpleClient/internal/gpt"
+	"github.com/diggyen/SimpleClient/internal/install"
 	"github.com/diggyen/SimpleClient/internal/version"
 )
 
@@ -58,7 +63,9 @@ const DefaultBase = "https://github.com/diggyen/SimpleClient/releases"
 const Asset = "simpleclient-update.tar"
 
 // basePath points a kiosk at another release server, a mirror on the local
-// network for instance: a file on the data partition holding its base URL.
+// network for instance: a file on the data partition holding its base URL; on
+// a USB stick, simpleclient/update-url of its live partition, which /init
+// copies there.
 var basePath = "/data/simpleclient/update-url"
 
 // caPath holds certificates the release server's may be signed by besides the
@@ -94,6 +101,9 @@ var (
 	ErrUnproven = errors.New("update: this boot has not proven itself yet")
 	// ErrInsecure is a release server, or a redirect, that is not HTTPS.
 	ErrInsecure = errors.New("update: the release server is not HTTPS")
+	// ErrNoRoom is an update that does not fit where it goes: a USB stick
+	// too small to hold one beside the ISO.
+	ErrNoRoom = errors.New("update: not enough room for the update")
 )
 
 // Latest asks the release server for its newest release. One without an
@@ -298,9 +308,15 @@ type Progress func(done, total int64)
 
 // Install writes release r into the slot boot is not running from and has the
 // next boot try it. Restarting is left to the caller.
+//
+// A disk install's slots are partitions of their own. A USB stick's are the
+// directories slots/A and slots/B of a FAT partition (bootenv.LiveSlots),
+// which on a stick the ISO was written to as it is the first update adds;
+// what the stick boots from otherwise, the files of the ISO, stays as it was,
+// and the boot menu goes back to them when neither slot comes up.
 func Install(ctx context.Context, r Release, boot bootenv.Boot, progress Progress) error {
-	if !boot.Installed() {
-		return errors.New("update: not running from a disk install")
+	if !boot.Updatable() {
+		return errors.New("update: not running from a disk install or a USB stick")
 	}
 	if r.Sum == "" {
 		return ErrNoUpdate
@@ -313,20 +329,52 @@ func Install(ctx context.Context, r Release, boot bootenv.Boot, progress Progres
 		return ErrUnproven
 	}
 	slot := boot.Other()
-	dev, err := bootenv.SlotDevice(env, slot)
-	if err != nil {
-		return err
+	if boot.Live {
+		err = installLive(ctx, r, boot, env, slot, progress)
+	} else {
+		var dev string
+		if dev, err = bootenv.SlotDevice(env, slot); err == nil {
+			err = bootenv.WithMounted(dev, "ext4", func(dir string) error {
+				return unpack(ctx, r, dir, progress)
+			})
+		}
 	}
-	if err := bootenv.WithMounted(dev, "ext4", func(dir string) error {
-		return unpack(ctx, r, dir, progress)
-	}); err != nil {
+	if errors.Is(err, syscall.ENOSPC) || errors.Is(err, gpt.ErrNoRoom) {
+		err = fmt.Errorf("%w (%v)", ErrNoRoom, err)
+	}
+	if err != nil {
 		return err
 	}
 	if err := bootenv.TryOther(boot); err != nil {
 		return err
 	}
-	remember(r.Tag, slot)
+	remember(boot, r.Tag, slot)
 	return nil
+}
+
+// addLiveSlots adds a stick's partition for updates; tests replace it.
+var addLiveSlots = install.AddLiveSlots
+
+// installLive unpacks r into slot of the USB stick boot runs from, whose
+// grubenv is env.
+func installLive(ctx context.Context, r Release, boot bootenv.Boot, env bootenv.Env, slot string, progress Progress) error {
+	dev, err := bootenv.LiveSlots(env)
+	if errors.Is(err, bootenv.ErrNoSlots) {
+		var uuid string
+		if dev, uuid, err = addLiveSlots(); err == nil {
+			err = bootenv.SetLiveSlots(boot, uuid)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return bootenv.WithMounted(dev, "vfat", func(dir string) error {
+		dir = filepath.Join(dir, "slots", slot)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		return unpack(ctx, r, dir, progress)
+	})
 }
 
 // An update's files: plain names, at most maxFiles of them, none larger than
@@ -535,22 +583,40 @@ func (c *counter) report() {
 	}
 }
 
-// triedPath remembers, across the restart, the release the next boot tries
-// and the slot it is in; failedPath, a release that did not come up here.
-var (
-	triedPath  = "/data/simpleclient/update-try"
-	failedPath = "/data/simpleclient/update-failed"
+// triedName remembers, across the restart, the release the next boot tries
+// and the slot it is in; failedName, a release that did not come up here.
+const (
+	triedName  = "update-try"
+	failedName = "update-failed"
 )
 
-func remember(tag, slot string) {
-	_ = os.MkdirAll(filepath.Dir(triedPath), 0o755)
-	_ = os.WriteFile(triedPath, []byte(tag+" "+slot+"\n"), 0o644)
+// withState runs fn on the directory the update's state is kept in, where
+// the kiosk keeps its settings: the data partition of a disk install, the
+// live partition of a USB stick (bootenv.LiveDevice). Tests replace it.
+var withState = func(boot bootenv.Boot, fn func(dir string) error) error {
+	if !boot.Live {
+		return fn("/data/simpleclient")
+	}
+	dev, err := bootenv.LiveDevice()
+	if err != nil {
+		return err
+	}
+	return bootenv.WithMounted(dev, "vfat", func(dir string) error {
+		return fn(filepath.Join(dir, "simpleclient"))
+	})
 }
 
-// tried reads which release the last update had the next boot try, and in
-// which slot.
-func tried() (tag, slot string) {
-	b, _ := os.ReadFile(triedPath)
+func remember(boot bootenv.Boot, tag, slot string) {
+	_ = withState(boot, func(dir string) error {
+		_ = os.MkdirAll(dir, 0o755)
+		return os.WriteFile(filepath.Join(dir, triedName), []byte(tag+" "+slot+"\n"), 0o644)
+	})
+}
+
+// tried reads, in dir, which release the last update had the next boot try,
+// and in which slot.
+func tried(dir string) (tag, slot string) {
+	b, _ := os.ReadFile(filepath.Join(dir, triedName))
 	if f := strings.Fields(string(b)); len(f) == 2 {
 		return f[0], f[1]
 	}
@@ -568,25 +634,33 @@ func tried() (tag, slot string) {
 // it has proven itself, the next one, from the other slot, finds the try
 // failed.
 func Settle(boot bootenv.Boot) (tag string, ok bool, failed string) {
-	tag, slot := tried()
-	switch {
-	case tag == "":
-	case slot == boot.Slot:
-		ok = true
-	default:
-		os.Remove(triedPath)
-		_ = os.WriteFile(failedPath, []byte(tag+"\n"), 0o644)
-	}
-	b, _ := os.ReadFile(failedPath)
-	return tag, ok, strings.TrimSpace(string(b))
+	_ = withState(boot, func(dir string) error {
+		var slot string
+		tag, slot = tried(dir)
+		switch {
+		case tag == "":
+		case slot == boot.Slot:
+			ok = true
+		default:
+			os.Remove(filepath.Join(dir, triedName))
+			_ = os.WriteFile(filepath.Join(dir, failedName), []byte(tag+"\n"), 0o644)
+		}
+		b, _ := os.ReadFile(filepath.Join(dir, failedName))
+		failed = strings.TrimSpace(string(b))
+		return nil
+	})
+	return tag, ok, failed
 }
 
 // Kept closes the last update's try once this boot has proven itself
 // (bootenv.MarkGood), if it is the boot of the slot that was tried: the
 // release is there to stay, and none is remembered as failed.
 func Kept(boot bootenv.Boot) {
-	if tag, slot := tried(); tag != "" && slot == boot.Slot {
-		os.Remove(triedPath)
-		os.Remove(failedPath)
-	}
+	_ = withState(boot, func(dir string) error {
+		if tag, slot := tried(dir); tag != "" && slot == boot.Slot {
+			os.Remove(filepath.Join(dir, triedName))
+			os.Remove(filepath.Join(dir, failedName))
+		}
+		return nil
+	})
 }

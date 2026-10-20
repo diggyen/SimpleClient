@@ -319,6 +319,11 @@ func handleDiscoveryKey(
 		} else if state.Boot.Installed() {
 			openUpdate(state)
 		}
+	case inputdev.KeyF11:
+		// On a USB stick F9 installs to disk; updating the stick is F11.
+		if state.Boot.Live {
+			openUpdate(state)
+		}
 	case inputdev.KeyF5:
 		(*cancelScan)()
 		newCtx, newCancel := context.WithCancel(context.Background())

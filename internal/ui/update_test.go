@@ -11,6 +11,7 @@ import (
 
 	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/config"
+	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
@@ -88,7 +89,7 @@ func TestUpdate_CheckThenUpdate(t *testing.T) {
 		t.Fatalf("F9 on a disk install opened screen %v", state.Screen)
 	}
 	waitUpdate(t, state, "the check", func(u *UpdateState) bool { return u.Phase == UpdateIdle && u.Checked })
-	if !state.Update.Available() || updateNote(&state.Update) != i18n.Tf(i18n.UpdateNew, "v0.7.1") {
+	if !state.Update.Available() || updateNote(&state.Update, false) != i18n.Tf(i18n.UpdateNew, "v0.7.1", "F9") {
 		t.Fatalf("v0.7.1 over v0.7.0 not offered: %+v", state.Update)
 	}
 
@@ -122,7 +123,7 @@ func TestUpdate_UpToDate(t *testing.T) {
 	}
 	updateKey(state, inputdev.KeyEnter)
 	waitUpdate(t, state, "the second check", func(u *UpdateState) bool { return u.Phase == UpdateIdle })
-	if updateNote(&state.Update) != "" {
+	if updateNote(&state.Update, false) != "" {
 		t.Fatal("a note for no new version")
 	}
 }
@@ -196,7 +197,7 @@ func TestUpdate_ReleaseThatDidNotStart(t *testing.T) {
 
 	updateKey(state, inputdev.KeyF9)
 	waitUpdate(t, state, "the check", func(u *UpdateState) bool { return u.Phase == UpdateIdle && u.Checked })
-	if note := updateNote(&state.Update); note != "" {
+	if note := updateNote(&state.Update, false); note != "" {
 		t.Fatalf("note %q for a release that did not start", note)
 	}
 	if msg, _ := updateStatus(&state.Update); msg != i18n.Tf(i18n.UpdateDidNotStart, "v0.7.1") {
@@ -312,4 +313,39 @@ func TestUpdateBanner(t *testing.T) {
 	if state.Update.Tried != "" {
 		t.Fatal("the banner is still up after a key")
 	}
+}
+
+// On a USB stick F9 still installs to disk, and F11 updates the stick; F11
+// does nothing on a CD, or anywhere the kiosk cannot update itself.
+func TestUpdate_F11OnAStick(t *testing.T) {
+	f := &fakeUpdates{latest: update.Release{Tag: "v0.7.0", Sum: strings.Repeat("a", 64)}}
+	useFakeUpdates(t, f)
+	ctx := context.Background()
+	cancel := context.CancelFunc(func() {})
+	var scanCh <-chan domain.ScanEvent
+	key := func(state *UIState, code int) {
+		state.Mu.Lock()
+		defer state.Mu.Unlock()
+		handleInput(inputdev.InputEvent{Type: inputdev.EvKey, KeyCode: code, Pressed: true},
+			state, &mockScanner{}, config.Config{}, framebuffer.NewMock(1280, 720),
+			&ctx, &cancel, &scanCh, nil, 20)
+	}
+
+	state := &UIState{Screen: ScreenDiscovery, CanInstall: true}
+	key(state, inputdev.KeyF11)
+	if state.Screen != ScreenDiscovery {
+		t.Fatalf("F11 on a CD opened screen %v", state.Screen)
+	}
+
+	state = &UIState{Screen: ScreenDiscovery, CanInstall: true, Boot: bootenv.Boot{Live: true}}
+	key(state, inputdev.KeyF9)
+	if state.Screen != ScreenInstall {
+		t.Fatalf("F9 on a stick opened screen %v, not the install dialog", state.Screen)
+	}
+	key(state, inputdev.KeyEsc)
+	key(state, inputdev.KeyF11)
+	if state.Screen != ScreenUpdate {
+		t.Fatalf("F11 on a stick opened screen %v, not the update dialog", state.Screen)
+	}
+	waitUpdate(t, state, "the check", func(u *UpdateState) bool { return u.Phase == UpdateIdle && u.Checked })
 }
