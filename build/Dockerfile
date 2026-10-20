@@ -518,7 +518,7 @@ COPY --from=grub-builder /opt/grub /opt/grub
 
 COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz \
      /out/firmware.cpio /iso/boot/
-COPY build/grub.cfg /iso/boot/grub/grub.cfg
+COPY build/grub.cfg build/splash.png /iso/boot/grub/
 
 RUN set -e; \
     cp /kernel/new/vmlinuz /iso/boot/vmlinuz-new; \
@@ -565,7 +565,8 @@ RUN set -e; \
     tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 -cf /out/simpleclient-update.tar \
         -C /slot version slot.cfg \
         -C /iso/boot vmlinuz-new vmlinuz-lts initramfs.cpio.gz modules-new.cpio.gz modules-lts.cpio.gz \
-        firmware.cpio; \
+        firmware.cpio \
+        -C /iso/boot/grub splash.png; \
     tar -tvf /out/simpleclient-update.tar; \
     ls -lh /out/simpleclient-update.tar
 

@@ -11,7 +11,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 	"time"
 
 	"github.com/diggyen/SimpleClient/internal/audio"
@@ -30,6 +32,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if cfg.BootGraphics == "splash" {
+		os.Exit(splash(cfg.FBDevice))
+	}
 	if cfg.BootGraphics != "" {
 		os.Exit(bootGraphics(cfg.BootGraphics))
 	}
@@ -158,6 +163,26 @@ func bootGraphics(step string) int {
 		return 0
 	}
 	return 2
+}
+
+// splash shows the boot splash (ui.RunSplash) on the framebuffer at path until
+// it is sent SIGTERM: /init stops it before the GPU's driver takes the screen
+// over, starts it again on that driver's, and stops it before the kiosk.
+func splash(path string) int {
+	dev, err := framebuffer.Open(path)
+	if err != nil {
+		warnf("splash: %v", err)
+		return 1
+	}
+	defer dev.Close()
+	fb := framebuffer.NewScaled(dev, framebuffer.Scale(dev.Width(), dev.Height()))
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
+	stop := make(chan struct{})
+	go func() { <-sig; close(stop) }()
+	ui.RunSplash(fb, stop)
+	return 0
 }
 
 // provenAfter is how long the kiosk has to run before its boot counts as

@@ -35,7 +35,8 @@ TOTAL=6
 # What is installed, as it is laid out on the medium.
 FILES="boot/vmlinuz-new boot/vmlinuz-lts boot/initramfs.cpio.gz boot/firmware.cpio
        boot/modules-new.cpio.gz boot/modules-lts.cpio.gz boot/efi/grubx64.efi
-       EFI/boot/bootx64.efi EFI/boot/mmx64.efi boot/grub/fonts/unicode.pf2"
+       EFI/boot/bootx64.efi EFI/boot/mmx64.efi boot/grub/fonts/unicode.pf2
+       boot/grub/splash.png"
 # Where it is read from: the medium, or its copy in memory.
 SRC=/mnt/sc-media
 COPY=/tmp/sc-media
@@ -174,6 +175,7 @@ for f in "$SRC"/boot/vmlinuz-* "$SRC"/boot/*.cpio.gz "$SRC"/boot/*.cpio; do
 done
 # How GRUB boots the slot: grub-disk.cfg reads it from there. See build/slot.cfg.
 cp /usr/share/simpleclient/slot.cfg /mnt/sc-slot/slot.cfg || fail "copying slot.cfg failed"
+cp "$SRC/boot/grub/splash.png" /mnt/sc-slot/splash.png || fail "copying splash.png failed"
 [ -n "${SC_VERSION:-}" ] && echo "$SC_VERSION" > /mnt/sc-slot/version
 sync
 umount /mnt/sc-slot

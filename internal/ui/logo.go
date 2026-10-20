@@ -129,18 +129,19 @@ func logoHeight(screenW, screenH int) int { return layoutLogo(screenW, screenH, 
 // drawLogo paints the header block: mark, two-tone wordmark, strap.
 func drawLogo(img *image.RGBA, l logoLayout) {
 	drawLogoMark(img, l.Mark.Min.X, l.Mark.Min.Y, l.Scale)
-
-	DrawPixelTextShadowed(img, l.Word.Min.X, l.Word.Min.Y, logoWordA, l.Scale,
-		ColorText, ColorLogoShadow)
-	// +Scale restores the single blank column PixelTextWidth trims from the end
-	// of the first half, so the two halves keep the same rhythm as one word.
-	DrawPixelTextShadowed(img,
-		l.Word.Min.X+PixelTextWidth(logoWordA, l.Scale)+l.Scale,
-		l.Word.Min.Y, logoWordB, l.Scale,
-		ColorAccent, ColorLogoShadow)
+	drawWordmark(img, l.Word.Min.X, l.Word.Min.Y, l.Scale)
 
 	DrawTextTracked(img, l.Tagline.Min.X, l.Tagline.Min.Y,
 		i18n.T(i18n.Tagline), taglineTracking, ColorDim)
+}
+
+// drawWordmark sets the two-tone wordmark with its top-left at (x, y).
+func drawWordmark(img *image.RGBA, x, y, scale int) {
+	DrawPixelTextShadowed(img, x, y, logoWordA, scale, ColorText, ColorLogoShadow)
+	// +scale restores the single blank column PixelTextWidth trims from the end
+	// of the first half, so the two halves keep the same rhythm as one word.
+	DrawPixelTextShadowed(img, x+PixelTextWidth(logoWordA, scale)+scale, y,
+		logoWordB, scale, ColorAccent, ColorLogoShadow)
 }
 
 // drawLogoMark blits the sprite with its top-left at (x, y), one sprite pixel

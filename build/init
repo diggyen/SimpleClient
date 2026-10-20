@@ -37,6 +37,32 @@ echo /bin/modprobe > /proc/sys/kernel/modprobe 2>/dev/null
 # Silence kernel log noise so it does not scribble over the UI.
 echo 0 > /proc/sys/kernel/printk 2>/dev/null
 
+# ── Splash ────────────────────────────────────────────────────────────────────
+# The boot splash (ui.RunSplash): the picture GRUB showed while it loaded all
+# this, now with its spinner turning, until the kiosk draws its first screen.
+# Without it the screen stayed black for the whole boot. It is stopped while
+# the GPU's driver takes the screen over — it draws into the firmware
+# framebuffer, memory that then belongs to the GPU — and started again on the
+# driver's. The console starts out blanked on some firmware, which would hide
+# it. A boot that is not quiet — the debug entries of the boot menu — shows the
+# kernel's log on the screen instead, which the splash would cover.
+SPLASH=""
+SPLASH_ON=0
+grep -qw quiet /proc/cmdline 2>/dev/null && SPLASH_ON=1
+splash_start() {
+    [ "$SPLASH_ON" = 1 ] && [ -z "$SPLASH" ] && [ -e /dev/fb0 ] || return
+    echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null
+    /sbin/simpleclient -boot-graphics=splash 2>/dev/console &
+    SPLASH=$!
+}
+splash_stop() {
+    [ -n "$SPLASH" ] || return
+    kill "$SPLASH" 2>/dev/null
+    wait "$SPLASH" 2>/dev/null
+    SPLASH=""
+}
+splash_start
+
 # How this machine booted. Under Secure Boot the kernel locks itself down and
 # loads signed modules only, which is worth knowing when a driver is missing.
 if [ -d /sys/firmware/efi ]; then
@@ -142,6 +168,8 @@ log "modules: $(wc -l < /proc/modules 2>/dev/null) loaded; cpufreq=$(cat /sys/de
 # with a missing driver gets diagnosed.
 log "loaded: $(cut -d' ' -f1 /proc/modules 2>/dev/null | tr '\n' ' ')"
 log "sound cards: $(sed -n 's/^ *\([0-9]*\) \[\([^] ]*\) *\]: \(.*\)/\1=\2 (\3)/p' /proc/asound/cards 2>/dev/null | tr '\n' ' ')"
+# A firmware framebuffer whose driver is a module has only now appeared.
+splash_start
 
 # ── Display ───────────────────────────────────────────────────────────────────
 # GRUB leaves the screen in a firmware framebuffer — efifb on UEFI, vesafb on
@@ -186,6 +214,7 @@ else
     if [ "$GFX" != safe ] && /sbin/simpleclient -boot-graphics=try 2>/dev/console; then
         MARKED=1
     fi
+    splash_stop
     load_display_drivers
     i=0
     while [ ! -e /dev/fb0 ] && [ "$i" -lt 40 ]; do
@@ -209,6 +238,7 @@ else
     # framebuffer then goes nowhere visible. Unblank before handing over.
     echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null
     log "fb0: $(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null) bpp=$(cat /sys/class/graphics/fb0/bits_per_pixel 2>/dev/null) driver=$(cat /sys/class/graphics/fb0/name 2>/dev/null)"
+    splash_start
 fi
 
 # ── Video decoders ────────────────────────────────────────────────────────────
@@ -462,6 +492,8 @@ chmod 600 /run/sc-autoconnect 2>/dev/null
 
 # ── Kiosk loop ────────────────────────────────────────────────────────────────
 # Restart simpleclient if it exits, so a crash does not leave a blank screen.
+# The splash stays on the screen until the kiosk's first one replaces it.
+splash_stop
 while true; do
     /sbin/simpleclient $LANG_ARG $RDP_ARG $HOST_ARG $KBD_ARG $MOUSE_ARG $BPP_ARG
     log "simpleclient exited ($?); restarting in 2s"
