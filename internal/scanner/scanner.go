@@ -92,8 +92,11 @@ func (s *NetworkScanner) Start(ctx context.Context, cidrs []string) <-chan domai
 					// Time the TCP handshake, and do it before the reverse
 					// lookup so a slow DNS server is not charged to the host.
 					latency := dialLatencyMs(time.Since(start))
-					conn.Close()
 					hostname := reverseLookup(ip)
+					if hostname == "" {
+						hostname = rdpName(conn)
+					}
+					conn.Close()
 					host := domain.Host{
 						IP:           ip,
 						Hostname:     hostname,
