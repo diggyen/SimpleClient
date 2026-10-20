@@ -52,11 +52,15 @@ const (
 	logoWordB = "CLIENT"
 )
 
-// logoScaleFor picks the block size for a screen width. 4× is the design size;
+// logoScaleFor picks the block size for a screen. 4× is the design size;
 // 640×480 kiosks get 3×, where the block still clears the screen edge by more
-// than the card does.
-func logoScaleFor(screenW int) int {
-	if screenW < 900 {
+// than the card does, and a screen under 600 lines 2×, which with the shorter
+// gap under it leaves a 480-line list four rows rather than two.
+func logoScaleFor(screenW, screenH int) int {
+	switch {
+	case screenH < 600:
+		return 2
+	case screenW < 900:
 		return 3
 	}
 	return 4
@@ -75,10 +79,10 @@ type logoLayout struct {
 	Scale   int
 }
 
-// layoutLogo centres the header block on a screen of width screenW, with the
+// layoutLogo centres the header block on a screenW x screenH screen, with the
 // top of the block at y.
-func layoutLogo(screenW, y int) logoLayout {
-	scale := logoScaleFor(screenW)
+func layoutLogo(screenW, screenH, y int) logoLayout {
+	scale := logoScaleFor(screenW, screenH)
 
 	markSide := logoSpriteSize * scale
 	gap := 5 * scale
@@ -103,20 +107,24 @@ func layoutLogo(screenW, y int) logoLayout {
 	totalW := markSide + gap + textW
 	x := (screenW - totalW) / 2
 
-	textY := y + (markSide-textH)/2
+	// At 2× the text is the taller of the two, and the mark is centred on it.
+	blockH := max(markSide, textH)
+	markY := y + (blockH-markSide)/2
+	textY := y + (blockH-textH)/2
 	textX := x + markSide + gap
 
 	return logoLayout{
-		Bounds:  image.Rect(x, y, x+totalW, y+markSide),
-		Mark:    image.Rect(x, y, x+markSide, y+markSide),
+		Bounds:  image.Rect(x, y, x+totalW, y+blockH),
+		Mark:    image.Rect(x, markY, x+markSide, markY+markSide),
 		Word:    image.Rect(textX, textY, textX+wordW, textY+wordH),
 		Tagline: image.Rect(textX, textY+wordH+strapGap, textX+tagW, textY+wordH+strapGap+CharH),
 		Scale:   scale,
 	}
 }
 
-// logoHeight is the vertical space layoutLogo will occupy on a screenW screen.
-func logoHeight(screenW int) int { return logoSpriteSize * logoScaleFor(screenW) }
+// logoHeight is the vertical space layoutLogo will occupy on a screenW x
+// screenH screen.
+func logoHeight(screenW, screenH int) int { return layoutLogo(screenW, screenH, 0).Bounds.Dy() }
 
 // drawLogo paints the header block: mark, two-tone wordmark, strap.
 func drawLogo(img *image.RGBA, l logoLayout) {

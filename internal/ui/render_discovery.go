@@ -45,6 +45,7 @@ const (
 	scrollBarW  = 4
 	logoTop     = 44 // top of the header block
 	logoGap     = 40 // between the header block and the card
+	logoGapLow  = 16 // the same on a screen under 600 lines
 	hintsBottom = 52 // distance from the bottom of the screen to the key hints
 	bannerGap   = 14 // between the card and the message banner under it
 	bannerH     = 32 // a one-line banner
@@ -112,9 +113,13 @@ func layoutDiscoveryRows(screen image.Rectangle, rows int, address bool) discove
 	// that room left the banner nowhere to go but over the key hints.
 	regionTop := logoTop
 	regionBottom := h - hintsBottom - CharH - 20 - bannerGap - bannerH
-	logoH := logoHeight(w)
+	logoH := logoHeight(w, h)
+	gap := logoGap
+	if h < 600 {
+		gap = logoGapLow
+	}
 
-	avail := regionBottom - regionTop - logoH - logoGap
+	avail := regionBottom - regionTop - logoH - gap
 	if avail > cardMaxH {
 		avail = cardMaxH
 	}
@@ -132,15 +137,15 @@ func layoutDiscoveryRows(screen image.Rectangle, rows int, address bool) discove
 	// independently. Pinning the wordmark to the top and centring the card in
 	// what was left over opened a gap between them that grew with the screen,
 	// until the two read as unrelated objects rather than as one page.
-	stackH := logoH + logoGap + cardH
+	stackH := logoH + gap + cardH
 	stackTop := regionTop + (regionBottom-regionTop-stackH)/2
 	if stackTop < regionTop {
 		stackTop = regionTop
 	}
 
-	logo := layoutLogo(w, stackTop)
+	logo := layoutLogo(w, h, stackTop)
 	card := image.Rect(0, 0, cardW, cardH).
-		Add(image.Pt((w-cardW)/2, logo.Bounds.Max.Y+logoGap))
+		Add(image.Pt((w-cardW)/2, logo.Bounds.Max.Y+gap))
 
 	l := discoveryLayout{
 		Screen:  screen,

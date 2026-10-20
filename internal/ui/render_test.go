@@ -66,6 +66,54 @@ func TestLayoutDiscovery_BannerClearsKeyHints(t *testing.T) {
 	}
 }
 
+// After an update on a kiosk whose list fills the screen, the update banner
+// and an error banner have room for one of them under the card. The update
+// banner must still land between the card and the key hints, not over the
+// wordmark at the top of the screen.
+func TestRenderUpdateBanner_StaysBetweenCardAndHints(t *testing.T) {
+	t.Cleanup(func() { i18n.Set(i18n.Default) })
+	for _, lang := range i18n.Available() {
+		i18n.Set(lang)
+		for _, s := range [][2]int{{640, 480}, {800, 600}, {1024, 768}, {1366, 768}, {1920, 1080}} {
+			screen := image.Rect(0, 0, s[0], s[1])
+			state := &UIState{Hosts: sampleHosts(500), ScanDone: true, ErrorMsg: i18n.T(i18n.Disconnected),
+				Update: UpdateState{Tried: "v9.9.9"}}
+			img := image.NewRGBA(screen)
+			FillRect(img, screen, ColorBG)
+			l := layoutDiscoveryFor(screen, state.Hosts)
+			renderUpdateBanner(img, l, state)
+
+			// The banner is the only thing drawn: find the rows it touched.
+			top, bottom := -1, -1
+			for y := 0; y < s[1]; y++ {
+				for x := 0; x < s[0]; x++ {
+					if img.RGBAAt(x, y) != ColorBG {
+						if top < 0 {
+							top = y
+						}
+						bottom = y
+						break
+					}
+				}
+			}
+			if top <= l.Card.Max.Y || bottom >= s[1]-hintsBottom {
+				t.Errorf("lang=%s %dx%d: banner on rows %d-%d, outside the card bottom %d to the hints at %d",
+					lang, s[0], s[1], top, bottom, l.Card.Max.Y, s[1]-hintsBottom)
+			}
+		}
+	}
+}
+
+// A 480-line screen keeps enough of the list to be worth scrolling, and room
+// for the explanation an empty list shows.
+func TestLayoutDiscovery_ShortScreenKeepsFourRows(t *testing.T) {
+	for _, s := range [][2]int{{640, 480}, {800, 480}} {
+		if l := layoutDiscovery(image.Rect(0, 0, s[0], s[1])); l.Rows < cardMinRows {
+			t.Errorf("%dx%d: %d rows, want at least %d", s[0], s[1], l.Rows, cardMinRows)
+		}
+	}
+}
+
 // Every row the layout reports must map back to itself when clicked, otherwise
 // a click selects a different host from the one under the pointer.
 func TestLayoutDiscovery_RowHitTestRoundTrips(t *testing.T) {
@@ -343,7 +391,7 @@ func TestRenderDiscovery_HeaderAndHintsFitEveryLanguage(t *testing.T) {
 				}
 			}
 
-			logo := layoutLogo(w, logoTop)
+			logo := layoutLogo(w, 720, logoTop)
 			if logo.Bounds.Min.X < padding || logo.Bounds.Max.X > w-padding {
 				t.Errorf("lang=%s w=%d: logo block %v runs off screen", lang, w, logo.Bounds)
 			}

@@ -129,9 +129,11 @@ func updateStatus(u *UpdateState) (string, color.RGBA) {
 }
 
 // renderUpdateBanner says under the server list how the last update went,
-// below the error banner if there is one, or at the top of the screen when a
-// long list leaves no room under it: green when the release is up and
-// running, amber when the kiosk went back to this version.
+// below the error banner if there is one, or over it when a long list leaves
+// no room for both: green when the release is up and running, amber when the
+// kiosk went back to this version. Covering the error loses nothing, since the
+// first key clears this banner and the error is back; the top of the screen,
+// where it went before, put it over the wordmark and the badges.
 func renderUpdateBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
 	msg, ok := updateBanner(&state.Update)
 	if msg == "" {
@@ -146,7 +148,7 @@ func renderUpdateBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
 		top += oneLine + 8
 	}
 	if top+h > l.Screen.Max.Y-hintsBottom-8 {
-		top = l.Screen.Min.Y + 16
+		top = l.errorBanner().Min.Y
 	}
 	banner := image.Rect(l.Card.Min.X, top, l.Card.Max.X, top+h)
 
