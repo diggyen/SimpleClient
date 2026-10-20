@@ -92,6 +92,12 @@ func TestScreenshots(t *testing.T) {
 			ScanDone: true, ScanProgress: 1, ErrorMsg: i18n.T(i18n.Disconnected),
 		})
 	})
+	shot("05-error-full", 1366, 768, func(b *image.RGBA) {
+		renderDiscovery(b, &UIState{
+			Screen: ScreenDiscovery, Hosts: sampleHosts(21),
+			ScanDone: true, ScanProgress: 1, ErrorMsg: i18n.T(i18n.Disconnected),
+		})
+	})
 	shot("06-credentials", 1280, 800, func(b *image.RGBA) {
 		st := &UIState{
 			Screen: ScreenModal, Hosts: sampleHosts(5), SelectedIdx: 1,

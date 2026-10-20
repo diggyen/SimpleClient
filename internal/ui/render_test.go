@@ -53,6 +53,19 @@ func TestLayoutDiscovery_CardIsCentredAndFits(t *testing.T) {
 	}
 }
 
+// A list long enough to fill the card must still leave the error banner room
+// above the key hints; it used to land on top of them.
+func TestLayoutDiscovery_BannerClearsKeyHints(t *testing.T) {
+	sizes := [][2]int{{800, 600}, {1024, 768}, {1280, 800}, {1366, 768}, {1920, 1080}, {640, 480}}
+	for _, s := range sizes {
+		screen := image.Rect(0, 0, s[0], s[1])
+		banner := layoutDiscoveryFor(screen, sampleHosts(500)).errorBanner()
+		if hints := screen.Max.Y - hintsBottom; banner.Max.Y > hints {
+			t.Errorf("%dx%d: banner ends at y=%d, past the key hints at y=%d", s[0], s[1], banner.Max.Y, hints)
+		}
+	}
+}
+
 // Every row the layout reports must map back to itself when clicked, otherwise
 // a click selects a different host from the one under the pointer.
 func TestLayoutDiscovery_RowHitTestRoundTrips(t *testing.T) {

@@ -46,6 +46,8 @@ const (
 	logoTop     = 44 // top of the header block
 	logoGap     = 40 // between the header block and the card
 	hintsBottom = 52 // distance from the bottom of the screen to the key hints
+	bannerGap   = 14 // between the card and the message banner under it
+	bannerH     = 32 // a one-line banner
 )
 
 // Column geometry, in character cells from the left edge of the list.
@@ -105,9 +107,11 @@ func layoutDiscoveryRows(screen image.Rectangle, rows int, address bool) discove
 	}
 	cardW := clampInt(w-2*cardMargin, cardMinW, maxW)
 
-	// The band the wordmark and the card share, above the pinned key hints.
+	// The band the wordmark and the card share, above the pinned key hints and
+	// the banner under the card. A list long enough to fill the screen without
+	// that room left the banner nowhere to go but over the key hints.
 	regionTop := logoTop
-	regionBottom := h - hintsBottom - CharH - 20
+	regionBottom := h - hintsBottom - CharH - 20 - bannerGap - bannerH
 	logoH := logoHeight(w)
 
 	avail := regionBottom - regionTop - logoH - logoGap
@@ -434,12 +438,18 @@ func renderCardFooter(img *image.RGBA, l discoveryLayout, state *UIState) {
 	DrawProgressBar(img, bar, state.ScanProgress, ColorAccent, ColorTrack)
 }
 
+// errorBanner is where the transient message strip goes: under the card, in the
+// room layoutDiscoveryRows keeps for it.
+func (l discoveryLayout) errorBanner() image.Rectangle {
+	return image.Rect(l.Card.Min.X, l.Card.Max.Y+bannerGap, l.Card.Max.X, l.Card.Max.Y+bannerGap+bannerH)
+}
+
 // renderErrorBanner draws the transient message strip under the card.
 func renderErrorBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
 	if state.ErrorMsg == "" {
 		return
 	}
-	banner := image.Rect(l.Card.Min.X, l.Card.Max.Y+14, l.Card.Max.X, l.Card.Max.Y+46)
+	banner := l.errorBanner()
 	FillNotched(img, banner, ColorErrorBorder)
 	FillNotched(img, banner.Inset(1), ColorErrorBG)
 

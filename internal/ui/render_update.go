@@ -137,11 +137,11 @@ func renderUpdateBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
 	if msg == "" {
 		return
 	}
-	const lineH, oneLine = CharH + 6, 32
+	const lineH, oneLine = CharH + 6, bannerH
 	textX := l.Card.Min.X + cardPad + 13
 	lines := wrapText(msg, (l.Card.Max.X-cardPad-textX)/CharW)
 	h := oneLine + (len(lines)-1)*lineH
-	top := l.Card.Max.Y + 14
+	top := l.Card.Max.Y + bannerGap
 	if state.ErrorMsg != "" {
 		top += oneLine + 8
 	}
