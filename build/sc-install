@@ -67,6 +67,9 @@ mkext4() { mkfs.ext4 -q -F -O ^metadata_csum_seed,^orphan_file -L "$1" "$2"; }
 # find_medium prints the device holding the ISO this kiosk booted from: by its
 # volume label, or failing that by the label in each device's ISO 9660 primary
 # volume descriptor (sector 16: "CD001" at byte 1, the volume ID at byte 40).
+# A stick Rufus wrote in ISO mode has the ISO's files on one FAT partition
+# instead, labelled with the volume ID cut to FAT's 11 characters, and
+# /.disk/info says whose they are.
 find_medium() {
     findfs LABEL=SIMPLECLIENT 2>/dev/null && return 0
     for d in /dev/sr[0-9]* /dev/sd[a-z] /dev/nvme[0-9]n[0-9] /dev/vd[a-z] /dev/mmcblk[0-9]; do
@@ -77,8 +80,11 @@ find_medium() {
             return 0
         fi
     done
-    return 1
+    findfs LABEL=SIMPLECLIEN 2>/dev/null
 }
+
+# fstype DEV prints the type of the file system on DEV.
+fstype() { blkid "$1" | sed -n 's/.* TYPE="\([^"]*\)".*/\1/p'; }
 
 [ -b "$DISK" ] || fail "not a block device: $DISK"
 case $TABLE in gpt|mbr) ;; *) fail "partition table must be gpt or mbr" ;; esac
@@ -87,7 +93,8 @@ case $TABLE in gpt|mbr) ;; *) fail "partition table must be gpt or mbr" ;; esac
 step 1 medium
 mkdir -p /mnt/sc-media /mnt/sc-esp /mnt/sc-slot /mnt/sc-data
 MEDIA=$(find_medium) || fail "installation medium not found"
-mount -t iso9660 -o ro "$MEDIA" /mnt/sc-media 2>/dev/null || fail "cannot mount $MEDIA"
+mount -t "$(fstype "$MEDIA")" -o ro "$MEDIA" /mnt/sc-media 2>/dev/null || fail "cannot mount $MEDIA"
+[ "$(head -c 12 /mnt/sc-media/.disk/info 2>/dev/null)" = SimpleClient ] || fail "$MEDIA is not a SimpleClient medium"
 for f in $FILES; do
     [ -f "/mnt/sc-media/$f" ] || fail "missing on the medium: $f"
 done

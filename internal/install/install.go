@@ -10,9 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/diggyen/SimpleClient/internal/bootenv"
 )
 
 // MinSize is the smallest disk offered: the layout needs about 1.7 GB, and a
@@ -155,10 +158,30 @@ func readTrim(path string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// IsInstallMedium reports whether dev holds the SimpleClient ISO — the USB
-// stick written with it, booted from right now. Its ISO 9660 primary volume
+// IsInstallMedium reports whether dev, a whole disk, holds the SimpleClient
+// ISO — the USB stick written with it, booted from right now. Written as it
+// is (dd, Rufus's DD mode), the disk is the ISO, whose ISO 9660 primary volume
 // descriptor is sector 16: "CD001" at byte 1, the volume ID at byte 40.
+// Written by Rufus in ISO mode, one partition of it holds the ISO's files,
+// labelled bootenv.RufusLabel.
 func IsInstallMedium(dev string) bool {
+	if isISO(dev) {
+		return true
+	}
+	name := filepath.Base(dev)
+	entries, _ := os.ReadDir(filepath.Join(sysBlock, name))
+	for _, e := range entries {
+		if _, err := os.Stat(filepath.Join(sysBlock, name, e.Name(), "partition")); err != nil {
+			continue
+		}
+		if fsLabel(filepath.Join(devDir, e.Name())) == bootenv.RufusLabel {
+			return true
+		}
+	}
+	return false
+}
+
+func isISO(dev string) bool {
 	f, err := os.Open(dev)
 	if err != nil {
 		return false
@@ -169,6 +192,23 @@ func IsInstallMedium(dev string) bool {
 		return false
 	}
 	return string(pvd[1:6]) == "CD001" && strings.TrimSpace(string(pvd[40:72])) == "SIMPLECLIENT"
+}
+
+var labelField = regexp.MustCompile(`(?:^|\s)LABEL="([^"]*)"`)
+
+// fsLabel is the label of the file system on dev, as blkid reads it: Rufus
+// has Windows label the FAT partitions it makes, which writes the label into
+// the root directory and not always into the boot sector. Tests stand in for
+// it.
+var fsLabel = func(dev string) string {
+	out, err := exec.Command("blkid", dev).Output()
+	if err != nil {
+		return ""
+	}
+	if m := labelField.FindSubmatch(out); m != nil {
+		return string(m[1])
+	}
+	return ""
 }
 
 // Table is the partition table for this machine: GPT when it booted in UEFI

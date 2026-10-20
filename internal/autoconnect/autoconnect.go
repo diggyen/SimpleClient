@@ -27,10 +27,9 @@ import (
 var RunPath = "/run/sc-autoconnect"
 
 // dataPath is where an installed kiosk keeps the setting; efiName is where a
-// kiosk running from a USB stick keeps it, on the stick's EFI partition.
+// kiosk running from a USB stick keeps it, on the stick (bootenv.LiveDevice).
 var (
 	dataPath = "/data/simpleclient/autoconnect"
-	efiLabel = "SC_EFI"
 	efiName  = "simpleclient/autoconnect"
 )
 
@@ -150,7 +149,7 @@ func Save(c Config, installed bool) (persisted bool, err error) {
 	if installed {
 		return keep(dataPath) == nil, nil
 	}
-	dev, err := bootenv.FindLabel(efiLabel)
+	dev, err := bootenv.LiveDevice()
 	if err != nil {
 		return false, nil
 	}

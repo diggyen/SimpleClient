@@ -23,10 +23,9 @@ import (
 var RunPath = "/run/sc-network"
 
 // dataPath is where an installed kiosk keeps its settings; efiName is where a
-// kiosk running from a USB stick keeps them, on the stick's EFI partition.
+// kiosk running from a USB stick keeps them, on the stick (bootenv.LiveDevice).
 const (
 	dataPath = "/data/simpleclient/network"
-	efiLabel = "SC_EFI"
 	efiName  = "simpleclient/network"
 )
 
@@ -182,7 +181,7 @@ func Save(c Config, installed bool) (persisted bool, err error) {
 	if installed {
 		return writeFile(dataPath, b) == nil, nil
 	}
-	dev, err := bootenv.FindLabel(efiLabel)
+	dev, err := bootenv.LiveDevice()
 	if err != nil {
 		return false, nil
 	}

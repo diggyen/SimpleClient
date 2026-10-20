@@ -67,8 +67,19 @@ diskutil list /dev/diskN
 ```
 
 You should see several partitions including an `EFI` one and
-`Apple_HFS SIMPLECLIENT`. A single FAT partition, or nothing, means the write
-went to the wrong place.
+`Apple_HFS SIMPLECLIENT`. After `dd`, a single FAT partition, or nothing, means
+the write went to the wrong place.
+
+Written with Rufus, either mode boots. DD Image mode writes the ISO as `dd`
+does. ISO Image mode makes one FAT32 partition, labelled `SIMPLECLIEN`, with
+the ISO's files on it: keep FAT32, and keep the label — GRUB, the kiosk's
+settings and the installer find the stick by it. Older releases had Rufus ask,
+in ISO Image mode, to download GRUB 2.12 files: *Yes* made a stick that
+restarts the machine as soon as GRUB starts; answer *No* with those.
+
+Some BIOSes offer a USB stick only when its MBR has a partition marked active.
+The ISO has one; a stick written with an older release in DD mode is not
+listed on such a machine at all — write that one in ISO Image mode.
 
 Confirm the file itself first:
 

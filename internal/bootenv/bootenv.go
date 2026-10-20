@@ -300,7 +300,7 @@ func SlotDevice(env Env, slot string) (string, error) {
 var errNoEnv = errors.New("bootenv: no boot environment on this medium")
 
 // withEnv changes the grubenv of the medium this boot came from: on the ESP
-// of a disk install, on the SC_EFI partition of a USB stick.
+// of a disk install, on the live partition of a USB stick.
 func withEnv(b Boot, fn func(Env)) error {
 	var dev, file string
 	var err error
@@ -308,7 +308,7 @@ func withEnv(b Boot, fn func(Env)) error {
 		dev, err = Find(b.ESP, "SC_ESP")
 		file = "boot/grub/grubenv"
 	} else {
-		dev, err = FindLabel("SC_EFI")
+		dev, err = LiveDevice()
 		file = "grubenv"
 	}
 	if err != nil {
@@ -331,6 +331,22 @@ func Find(uuid, label string) (string, error) {
 // FindLabel returns the device holding the file system labelled label.
 func FindLabel(label string) (string, error) {
 	return findfs("LABEL=" + label)
+}
+
+// RufusLabel is the label of the one FAT partition Rufus's ISO mode writes
+// the ISO's files to: the ISO's volume ID, SIMPLECLIENT, cut to the 11
+// characters FAT allows.
+const RufusLabel = "SIMPLECLIEN"
+
+// LiveDevice returns the FAT partition a kiosk running from a USB stick keeps
+// its grubenv and settings on, both in the same places on either: SC_EFI on a
+// stick the ISO was written to as it is (dd, Rufus's DD mode), the partition
+// holding everything on one Rufus wrote in ISO mode.
+func LiveDevice() (string, error) {
+	if dev, err := FindLabel("SC_EFI"); err == nil {
+		return dev, nil
+	}
+	return FindLabel(RufusLabel)
 }
 
 func findfs(what string) (string, error) {

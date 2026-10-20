@@ -37,10 +37,9 @@ import (
 var RunPath = "/run/sc-wifi.conf"
 
 // dataPath is where an installed kiosk keeps the network; efiName is where a
-// kiosk running from a USB stick keeps it, on the stick's EFI partition.
+// kiosk running from a USB stick keeps it, on the stick (bootenv.LiveDevice).
 var (
 	dataPath = "/data/simpleclient/wifi.conf"
-	efiLabel = "SC_EFI"
 	efiName  = "simpleclient/wifi.conf"
 )
 
@@ -423,7 +422,7 @@ func Save(c Config, installed bool) (persisted bool, err error) {
 	if installed {
 		return writeFile(dataPath, b) == nil, nil
 	}
-	dev, err := bootenv.FindLabel(efiLabel)
+	dev, err := bootenv.LiveDevice()
 	if err != nil {
 		return false, nil
 	}

@@ -74,7 +74,7 @@ RUN set -e; \
         > /etc/apt/sources.list.d/backports.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        grub-pc-bin grub-common xorriso mtools dosfstools kmod xz-utils zstd; \
+        grub-common xorriso mtools dosfstools kmod xz-utils zstd; \
     kpkg() { apt-cache "$@" depends linux-image-amd64 \
         | awk '$1 == "Depends:" && $2 ~ /^linux-image-[0-9]/ { print $2; exit }'; }; \
     NEW=$(kpkg -o "APT::Default-Release=${DEBIAN_VERSION}-backports"); \
@@ -116,6 +116,40 @@ RUN set -e; \
     done; \
     test -f /kernel/new/vmlinuz; test -f /kernel/lts/vmlinuz; \
     ls -l /signed/usr/lib/shim /signed/usr/lib/grub/x86_64-efi-signed
+
+# ── GRUB for BIOS ─────────────────────────────────────────────────────────────
+# The ISO's BIOS GRUB is GNU's release, built here for i386-pc alone, and not
+# Debian's. Rufus, writing the ISO in its ISO mode, puts a GRUB core image of
+# its own on the stick, and that core loads the ISO's modules: GRUB 2.14 in
+# Rufus 4.15. When the modules are another version Rufus asks to fetch a core
+# that matches, and the one it fetches for Debian's 2.12 restarts the machine
+# the moment it loads them. With 2.14 on both sides Rufus asks nothing. It
+# reads the version from normal.mod, so a distribution's "2.14-1" would still
+# be asked about.
+#
+# The tarball is checked against the SHA-256 taken when its signature by the
+# GRUB release key (Daniel Kiper, BE5C 2320 9ACD DACE B20D B0A2 8C81 89F1 988C
+# 2166) was verified. The packages are the build dependencies of Debian's
+# grub2 that an i386-pc build uses.
+FROM --platform=linux/amd64 debian:${DEBIAN_VERSION} AS grub-builder
+ARG GRUB_VERSION=2.14
+ARG GRUB_SHA256=bc8d3c73535b8838d8c8e2654d73edc4e6ae8c8acdb45d5df5dc9a1547446d43
+ENV DEBIAN_FRONTEND=noninteractive
+RUN set -e; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gcc gcc-multilib libc6-dev make \
+        bison flex gawk python3 gettext pkgconf curl ca-certificates xz-utils; \
+    cd /tmp; \
+    curl -fsSLo grub.tar.xz "https://ftp.gnu.org/gnu/grub/grub-${GRUB_VERSION}.tar.xz"; \
+    echo "${GRUB_SHA256}  grub.tar.xz" | sha256sum -c -; \
+    tar -xJf grub.tar.xz; cd "grub-${GRUB_VERSION}"; \
+    ./configure --target=i386 --with-platform=pc --prefix=/opt/grub --disable-nls \
+        --disable-werror --disable-grub-mkfont --disable-grub-mount --disable-device-mapper \
+        --disable-libzfs; \
+    make -j"$(nproc)"; make install; \
+    test "$(tr '\0' '\n' < /opt/grub/lib/grub/i386-pc/normal.mod \
+        | grep -A1 'GRUB  version %s$' | tail -1)" = "${GRUB_VERSION}"; \
+    rm -rf /tmp/grub* /var/lib/apt/lists/*
 
 # ── AMD's video decoders ──────────────────────────────────────────────────────
 # A GPU decodes the session's H.264 where it can (engine/hwdec.c), through
@@ -442,11 +476,14 @@ RUN cd /rootfs && find . | cpio -oH newc --quiet | gzip -9 > /out/initramfs.cpio
 # USB stick written with dd. The layout and the xorriso call are grub-mkrescue's,
 # done by hand because grub-mkrescue only knows how to make an unsigned EFI
 # image:
-#   BIOS     GRUB i386-pc as an El Torito image, and boot_hybrid.img as the
-#            MBR boot code when the ISO is a disk. GRUB loads a partition map
-#            only when told to, so the ones a USB stick has are built in, with
-#            FAT: without them the grubenv on SC_EFI is never found, and a
-#            kernel that fails is never swapped for the other.
+#   BIOS     GRUB i386-pc (GNU's, see grub-builder) as an El Torito image, and
+#            boot_hybrid.img as the MBR boot code when the ISO is a disk. GRUB
+#            loads a partition map only when told to, so the ones a USB stick
+#            has are built in, with FAT: without them the grubenv on SC_EFI is
+#            never found, and a kernel that fails is never swapped for the
+#            other. The MBR has a partition marked active, an empty one as
+#            Ubuntu's ISO has (--mbr-force-bootable): a BIOS that wants one
+#            before it boots a disk does not offer the stick at all without.
 #   UEFI     a FAT image holding shim as \EFI\boot\bootx64.efi, with Debian's
 #            signed CD GRUB next to it as grubx64.efi — the name shim loads. It
 #            is both the El Torito EFI image and a GPT partition, for the CD and
@@ -459,9 +496,15 @@ RUN cd /rootfs && find . | cpio -oH newc --quiet | gzip -9 > /out/initramfs.cpio
 # booted from one the kiosk always starts with the new kernel; the boot menu
 # offers the other.
 #
+# Rufus's ISO mode copies the ISO's files onto one FAT partition of the stick
+# instead, which it labels SIMPLECLIEN, and boots it with its own GRUB core
+# for BIOS and with the ISO's EFI files for UEFI. That partition keeps the
+# state: /grubenv is there for it, and on a CD or a dd-written stick unused.
+#
 # boot/efi/grubx64.efi is Debian's GRUB for disks, not CDs; sc-install copies
 # it onto the ESP of a disk install.
 FROM boot-builder AS iso-builder
+COPY --from=grub-builder /opt/grub /opt/grub
 
 COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz \
      /out/firmware.cpio /iso/boot/
@@ -472,9 +515,10 @@ RUN set -e; \
     cp /kernel/lts/vmlinuz /iso/boot/vmlinuz-lts; \
     mkdir -p /iso/.disk /iso/boot/grub/i386-pc /iso/boot/grub/fonts /iso/boot/efi /efi/EFI/boot /out; \
     echo "SimpleClient" > /iso/.disk/info; \
-    cp /usr/lib/grub/i386-pc/*.mod /usr/lib/grub/i386-pc/*.lst /iso/boot/grub/i386-pc/; \
+    cp /opt/grub/lib/grub/i386-pc/*.mod /opt/grub/lib/grub/i386-pc/*.lst /iso/boot/grub/i386-pc/; \
     cp /usr/share/grub/unicode.pf2 /iso/boot/grub/fonts/; \
-    grub-mkimage -O i386-pc-eltorito -p /boot/grub -o /iso/boot/grub/i386-pc/eltorito.img \
+    /opt/grub/bin/grub-mkimage -d /opt/grub/lib/grub/i386-pc -O i386-pc-eltorito -p /boot/grub \
+        -o /iso/boot/grub/i386-pc/eltorito.img \
         biosdisk iso9660 part_gpt part_msdos fat search search_label loadenv; \
     cp /signed/usr/lib/shim/shimx64.efi.signed /efi/EFI/boot/bootx64.efi; \
     cp /signed/usr/lib/shim/mmx64.efi.signed /efi/EFI/boot/mmx64.efi; \
@@ -483,14 +527,15 @@ RUN set -e; \
     cp -r /efi/EFI /iso/; \
     grub-editenv /efi/grubenv create; \
     grub-editenv /efi/grubenv set sc_kernel=new sc_kpending=0; \
+    cp /efi/grubenv /iso/grubenv; \
     mkfs.vfat -n SC_EFI -C /iso/boot/efi.img 8192 >/dev/null; \
     mcopy -s -i /iso/boot/efi.img /efi/EFI /efi/grubenv ::/; \
     xorriso -as mkisofs -r -J -joliet-long -V SIMPLECLIENT -o /out/simpleclient.iso \
         -b boot/grub/i386-pc/eltorito.img -no-emul-boot -boot-load-size 4 -boot-info-table \
-        --grub2-boot-info --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
+        --grub2-boot-info --grub2-mbr /opt/grub/lib/grub/i386-pc/boot_hybrid.img \
         -apm-block-size 2048 \
         --efi-boot boot/efi.img -efi-boot-part --efi-boot-image \
-        --protective-msdos-label \
+        --protective-msdos-label --mbr-force-bootable \
         /iso; \
     ls -lh /out/simpleclient.iso
 

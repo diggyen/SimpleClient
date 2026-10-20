@@ -65,6 +65,42 @@ func TestDisksMarksTheInstallMedium(t *testing.T) {
 	}
 }
 
+// A stick Rufus wrote in ISO mode is no ISO: one FAT partition of it holds
+// the ISO's files, labelled with the ISO's volume ID cut to 11 characters.
+func TestDisksMarksAStickRufusWroteInISOMode(t *testing.T) {
+	const gb = 1 << 30 / 512
+	fakeSys(t, map[string]int64{"sda": 16 * gb, "sdb": 16 * gb})
+	for _, p := range []string{"sda1", "sdb1"} {
+		os.MkdirAll(filepath.Join(sysBlock, p[:3], p), 0o755)
+		os.WriteFile(filepath.Join(sysBlock, p[:3], p, "partition"), []byte("1\n"), 0o644)
+	}
+	f := fsLabel
+	t.Cleanup(func() { fsLabel = f })
+	labels := map[string]string{"sda1": "DATA", "sdb1": "SIMPLECLIEN"}
+	fsLabel = func(dev string) string { return labels[filepath.Base(dev)] }
+
+	disks := Disks()
+	if len(disks) != 2 || disks[0].Self || !disks[1].Self {
+		t.Fatalf("got %+v", disks)
+	}
+}
+
+func TestFsLabelReadsBlkid(t *testing.T) {
+	for out, want := range map[string]string{
+		`/dev/sdb1: LABEL="SIMPLECLIEN" UUID="1A2B-3C4D" TYPE="vfat"`:              "SIMPLECLIEN",
+		`/dev/sdb1: UUID="1A2B-3C4D" TYPE="vfat" PARTLABEL="Microsoft basic data"`: "",
+		`/dev/sdb1: PARTLABEL="x" LABEL="SIMPLECLIEN" TYPE="vfat"`:                 "SIMPLECLIEN",
+	} {
+		got := ""
+		if m := labelField.FindStringSubmatch(out); m != nil {
+			got = m[1]
+		}
+		if got != want {
+			t.Errorf("%s: got %q, want %q", out, got, want)
+		}
+	}
+}
+
 func TestFollowReportsStepsAndFailure(t *testing.T) {
 	out := "STEP 1 6 medium\nnoise\nSTEP 2 6 partition\nERROR partitioning failed\n"
 	var steps []string

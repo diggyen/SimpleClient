@@ -39,6 +39,9 @@ sudo dd if=simpleclient.iso of=/dev/rdiskN bs=4m
 sync
 ```
 
+On Windows, write it with [Rufus](https://rufus.ie). Rufus asks how, and
+both ways work: ISO Image mode (the default; keep FAT32) and DD Image mode.
+
 Verify it first if you like: `shasum -a 256 -c --ignore-missing SHA256SUMS`.
 
 Boots on UEFI and legacy BIOS machines, with Secure Boot on or off: the boot

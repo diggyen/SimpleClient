@@ -8,6 +8,12 @@
 
 log() { echo "[simpleclient-init] $*" > /dev/console 2>/dev/null; }
 
+# live_dev prints the FAT partition a kiosk running from a USB stick keeps its
+# settings on: SC_EFI on a stick the ISO was written to as it is (dd, Rufus's
+# DD mode), the one partition of a stick Rufus wrote in ISO mode, labelled
+# with the ISO's volume ID cut to FAT's 11 characters. See bootenv.LiveDevice.
+live_dev() { findfs LABEL=SC_EFI 2>/dev/null || findfs LABEL=SIMPLECLIEN 2>/dev/null; }
+
 # The kernel starts /init with no PATH at all. Busybox finds its own applets
 # regardless, but everything it starts inherits the empty PATH, and the kiosk
 # could not find aplay/arecord in /usr/bin: sessions negotiated sound and then
@@ -347,8 +353,8 @@ done
 # command line comes first (sc.ip=192.168.1.50/24 sc.gw=192.168.1.1
 # sc.dns=192.168.1.1,1.1.1.1, optionally sc.iface=eth1; sc.ip=dhcp forces
 # DHCP), as the way to set a CD-booted kiosk; then what the network dialog
-# (F8) saved — on the data partition of an installed kiosk, on the EFI
-# partition of the USB stick a live one runs from. sc-net applies them.
+# (F8) saved — on the data partition of an installed kiosk, on the USB stick
+# a live one runs from (live_dev). sc-net applies them.
 #
 # With DHCP, udhcpc stays running in the background on every interface (-b): a
 # lease that is not there at boot — cable plugged in later, DHCP server slow
@@ -371,7 +377,7 @@ if [ -n "$NET_IP" ]; then
     fi
 elif [ -f /data/simpleclient/network ]; then
     cp /data/simpleclient/network "$NETCONF"
-elif EFI_DEV=$(findfs LABEL=SC_EFI 2>/dev/null); then
+elif EFI_DEV=$(live_dev); then
     mkdir -p /run/sc-efi
     if mount -t vfat -o ro "$EFI_DEV" /run/sc-efi 2>/dev/null; then
         cp /run/sc-efi/simpleclient/network "$NETCONF" 2>/dev/null
@@ -389,7 +395,7 @@ fi
 WIFICONF=/run/sc-wifi.conf
 if [ -f /data/simpleclient/wifi.conf ]; then
     cp /data/simpleclient/wifi.conf "$WIFICONF"
-elif [ -z "$SLOT" ] && EFI_DEV=$(findfs LABEL=SC_EFI 2>/dev/null); then
+elif [ -z "$SLOT" ] && EFI_DEV=$(live_dev); then
     mkdir -p /run/sc-efi
     if mount -t vfat -o ro "$EFI_DEV" /run/sc-efi 2>/dev/null; then
         cp /run/sc-efi/simpleclient/wifi.conf "$WIFICONF" 2>/dev/null
@@ -441,11 +447,11 @@ fi
 # ── Startup server ────────────────────────────────────────────────────────────
 # The server the kiosk goes to as it starts (F10 in the connection dialog),
 # kept where the network settings are: the data partition of an installed
-# kiosk, the EFI partition of the USB stick a live one runs from — not that of
+# kiosk, the USB stick a live one runs from (live_dev) — not that of
 # a stick merely plugged into an installed one.
 if [ -f /data/simpleclient/autoconnect ]; then
     cp /data/simpleclient/autoconnect /run/sc-autoconnect
-elif [ -z "$SLOT" ] && EFI_DEV=$(findfs LABEL=SC_EFI 2>/dev/null); then
+elif [ -z "$SLOT" ] && EFI_DEV=$(live_dev); then
     mkdir -p /run/sc-efi
     if mount -t vfat -o ro "$EFI_DEV" /run/sc-efi 2>/dev/null; then
         cp /run/sc-efi/simpleclient/autoconnect /run/sc-autoconnect 2>/dev/null
