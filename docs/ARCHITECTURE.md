@@ -76,6 +76,50 @@ handshake trace. For the same reason the build version is drawn along the bottom
 of the discovery screen: it is the only way to tell which image is running
 without taking the stick out.
 
+## Disk install and updates
+
+`F9` on a kiosk running from a USB stick or CD installs it (`build/sc-install`):
+onto an internal disk, or onto the stick it runs from. The system runs from RAM,
+so for the stick the installer copies what it installs into memory first, then
+wipes it. The layout: an ESP with shim, GRUB, `grub.cfg` and `grubenv`; two
+system slots, `SC_A` and `SC_B`, each holding the kernels, the initrds,
+`slot.cfg` and `version`; and `SC_DATA` for what the kiosk keeps. Every install
+carries the same labels, so `sc-install` records the partitions' UUIDs in
+`grubenv`, and GRUB, `/init` (`sc.data=`) and the kiosk (`sc.esp=`) go by those:
+an installed stick left in a machine with an installed SSD boots its own slots
+and keeps its own settings.
+
+GRUB (`build/grub-disk.cfg`) boots the slot `sc_boot` names, or once the slot
+`sc_try` names, the way that slot's `slot.cfg` says: each release brings its own
+kernel command line and initrds, and an update changes them without touching the
+configuration both slots share. A kernel that will not load falls back to the
+LTS kernel, then to the other slot.
+
+On an installed kiosk `F9` is the update (`internal/update`). It asks the release
+server — the project's GitHub releases, or a mirror whose base URL is in
+`/data/simpleclient/update-url` — which release is the newest: `<base>/latest`
+redirects to its tag (GitHub) or holds it (a mirror), and
+`<base>/download/<tag>/SHA256SUMS` has the checksum of `simpleclient-update.tar`,
+the files of one slot. A check also runs two minutes after start-up and daily
+after that; it only asks, and the foot of the server list says when there is a
+new release. *Update* streams the tar into the slot not running — nothing is
+held in RAM, nothing in the running slot is touched — checks its SHA-256 and
+that its `version` is the release asked for, gives the files their names, sets
+`sc_try` and restarts. GRUB clears the try before the new kernel starts; 20 s
+after the kiosk comes up, `bootenv.MarkGood` makes the slot `sc_boot`, and a
+boot that dies before then is followed by one of the old slot. The server list
+says which happened: the update in green, or in amber that the release did not
+start on this machine and the kiosk went back.
+
+Certificates are checked against the image's CA bundle. The kiosk has no time
+server, and a clock running behind the build's own date is taken to be wrong:
+the build date stands in for it. The update has no signature yet. What it is
+checked against comes over HTTPS from the same release, so whoever can publish
+a release of the repository can publish an update. Signing it would take an
+ed25519 key kept offline, out of the repository and CI: its public half built
+into the kiosk, its private half signing `SHA256SUMS` for each release, and a
+kiosk with a public key refusing a `SHA256SUMS` without a valid signature.
+
 ## Rendering
 
 `internal/ui` owns a back buffer (`*image.RGBA`) and blits it to the framebuffer

@@ -97,7 +97,10 @@ const (
 	InstallStepBootloader
 	InstallStepFirmware
 	InstallDone
-	InstallFailed // "%s" is the reason
+	InstallFailed   // "%s" is the reason
+	InstallSelf     // after the stick the kiosk runs from, in the list
+	InstallSelfWarn // what installing onto it does
+	InstallDoneSelf // installed onto it
 
 	// Network settings (F8).
 	HintNetwork
@@ -169,6 +172,34 @@ const (
 	HintForget
 	HintBack
 
+	// Updating a disk install, F9 there.
+	HintUpdate
+	UpdateTitle
+	UpdateThis   // the label of the version running
+	UpdateLatest // the label of the newest release
+	UpdateNotChecked
+	UpdateChecking
+	UpdateUpToDate
+	UpdateReady             // "%s" is the release
+	UpdateNoDisk            // "%s" is a release without an update for disk installs
+	UpdateDidNotStart       // "%s" is the release
+	UpdateDownloading       // "%s" is the release, then MB done and MB in all
+	UpdateDownloadingNoSize // "%s" is the release, then MB done
+	UpdateRestarting        // "%s" is the release
+	UpdateFailed            // "%s" is the reason
+	UpdateCheckFailed       // "%s" is the reason
+	UpdateErrNetwork        // "%s" is what the network said
+	UpdateErrDamaged
+	UpdateErrStalled
+	UpdateErrUnproven
+	UpdateCancelled
+	UpdateNew          // "%s" is the release; the note at the foot of the server list
+	UpdateNoticeOK     // "%s" is the release; the banner after an update came up
+	UpdateNoticeFailed // "%s" is the release, then the version gone back to
+	ButtonCheck
+	ButtonUpdate
+	ButtonClose
+
 	numKeys // must stay last
 )
 
@@ -219,7 +250,7 @@ var catalogues = map[Lang]*catalogue{
 		HintInstall:           "Install",
 		InstallTitle:          "Install to disk",
 		InstallPick:           "Choose the disk to install on:",
-		InstallNoDisk:         "No disk to install on (at least 4 GB, not the stick this runs from).",
+		InstallNoDisk:         "No disk to install on (at least 4 GB).",
 		InstallErase:          "Everything on %s will be erased.",
 		InstallTable:          "Partition table: %s",
 		InstallKeys:           "Press %s to install, Esc to go back.",
@@ -232,6 +263,9 @@ var catalogues = map[Lang]*catalogue{
 		InstallStepFirmware:   "Adding the UEFI boot entry...",
 		InstallDone:           "Installed. Remove the USB stick or CD and press Enter to restart.",
 		InstallFailed:         "Installation failed: %s",
+		InstallSelf:           "(this stick)",
+		InstallSelfWarn:       "The kiosk runs from this stick: what it installs is copied into memory first. Do not unplug the stick until it is done.",
+		InstallDoneSelf:       "Installed onto this stick. Press Enter to restart from it.",
 
 		HintNetwork:    "Network",
 		NetTitle:       "Network settings",
@@ -299,6 +333,33 @@ var catalogues = map[Lang]*catalogue{
 		WifiErrWEP:        "WEP networks are not supported",
 		HintForget:        "Forget",
 		HintBack:          "Back",
+
+		HintUpdate:              "Update",
+		UpdateTitle:             "Software update",
+		UpdateThis:              "This version:",
+		UpdateLatest:            "Latest:",
+		UpdateNotChecked:        "not checked yet",
+		UpdateChecking:          "checking...",
+		UpdateUpToDate:          "This is the latest version.",
+		UpdateReady:             "%s is out. Update downloads it and restarts into it; should it not start on this machine, the kiosk comes back on this version.",
+		UpdateNoDisk:            "%s has no update for installed kiosks; it installs from a USB stick.",
+		UpdateDidNotStart:       "%s did not start on this machine, so the kiosk went back to this version.",
+		UpdateDownloading:       "Downloading %s: %d of %d MB",
+		UpdateDownloadingNoSize: "Downloading %s: %d MB",
+		UpdateRestarting:        "%s is installed. Restarting...",
+		UpdateFailed:            "Update failed: %s",
+		UpdateCheckFailed:       "Could not check: %s",
+		UpdateErrNetwork:        "the release server cannot be reached (%s)",
+		UpdateErrDamaged:        "the download was damaged; try again",
+		UpdateErrStalled:        "the download stopped; check the network and try again",
+		UpdateErrUnproven:       "this start-up is still being checked; try again in a minute",
+		UpdateCancelled:         "cancelled",
+		UpdateNew:               "New version %s (F9)",
+		UpdateNoticeOK:          "Updated: %s is installed and running.",
+		UpdateNoticeFailed:      "Update failed: %s did not start on this machine, so the kiosk went back to %s.",
+		ButtonCheck:             "Check",
+		ButtonUpdate:            "Update",
+		ButtonClose:             "Close",
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
@@ -343,7 +404,7 @@ var catalogues = map[Lang]*catalogue{
 		HintInstall:           "Diske kur",
 		InstallTitle:          "Diske kurulum",
 		InstallPick:           "Kurulacak diski seçin:",
-		InstallNoDisk:         "Kurulabilecek disk yok (en az 4 GB, çalışılan bellek hariç).",
+		InstallNoDisk:         "Kurulabilecek disk yok (en az 4 GB).",
 		InstallErase:          "%s üzerindeki HER ŞEY silinecek.",
 		InstallTable:          "Bölüm tablosu: %s",
 		InstallKeys:           "Kurmak için %s, geri dönmek için Esc.",
@@ -356,6 +417,9 @@ var catalogues = map[Lang]*catalogue{
 		InstallStepFirmware:   "UEFI önyükleme kaydı ekleniyor...",
 		InstallDone:           "Kurulum tamam. USB belleği veya CD'yi çıkarıp Enter'a basın.",
 		InstallFailed:         "Kurulum başarısız: %s",
+		InstallSelf:           "(çalışan bellek)",
+		InstallSelfWarn:       "Kiosk bu bellekten çalışıyor: kurulacaklar önce RAM'e kopyalanır. Kurulum bitene kadar belleği çıkarmayın.",
+		InstallDoneSelf:       "Bu belleğe kuruldu. Ondan yeniden başlatmak için Enter'a basın.",
 
 		HintNetwork:    "Ağ",
 		NetTitle:       "Ağ ayarları",
@@ -423,6 +487,33 @@ var catalogues = map[Lang]*catalogue{
 		WifiErrWEP:        "WEP ağları desteklenmiyor",
 		HintForget:        "Unut",
 		HintBack:          "Geri",
+
+		HintUpdate:              "Güncelleme",
+		UpdateTitle:             "Yazılım güncellemesi",
+		UpdateThis:              "Bu sürüm:",
+		UpdateLatest:            "Son sürüm:",
+		UpdateNotChecked:        "henüz denetlenmedi",
+		UpdateChecking:          "denetleniyor...",
+		UpdateUpToDate:          "En son sürüm bu.",
+		UpdateReady:             "%s çıktı. Güncelle onu indirir ve kiosk onunla yeniden başlar; bu makinede açılmazsa kiosk bu sürüme geri döner.",
+		UpdateNoDisk:            "%s için diske kurulu kiosk güncellemesi yok; USB bellekten kurulur.",
+		UpdateDidNotStart:       "%s bu makinede açılamadı; kiosk bu sürüme geri döndü.",
+		UpdateDownloading:       "%s indiriliyor: %d / %d MB",
+		UpdateDownloadingNoSize: "%s indiriliyor: %d MB",
+		UpdateRestarting:        "%s kuruldu. Yeniden başlatılıyor...",
+		UpdateFailed:            "Güncelleme başarısız: %s",
+		UpdateCheckFailed:       "Denetlenemedi: %s",
+		UpdateErrNetwork:        "sürüm sunucusuna ulaşılamıyor (%s)",
+		UpdateErrDamaged:        "indirilen dosya bozuk; yeniden deneyin",
+		UpdateErrStalled:        "indirme durdu; ağı denetleyip yeniden deneyin",
+		UpdateErrUnproven:       "bu açılış henüz doğrulanıyor; bir dakika sonra yeniden deneyin",
+		UpdateCancelled:         "iptal edildi",
+		UpdateNew:               "Yeni sürüm %s (F9)",
+		UpdateNoticeOK:          "Güncelleme başarılı: %s kuruldu ve çalışıyor.",
+		UpdateNoticeFailed:      "Güncelleme başarısız: %s bu makinede açılamadı, kiosk %s sürümüne geri döndü.",
+		ButtonCheck:             "Denetle",
+		ButtonUpdate:            "Güncelle",
+		ButtonClose:             "Kapat",
 	},
 }
 

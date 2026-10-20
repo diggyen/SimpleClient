@@ -1,6 +1,8 @@
 #!/bin/sh
 # sc-install DISK gpt|mbr [LANG] — install SimpleClient from the medium this
-# kiosk booted from onto DISK, wiping it.
+# kiosk booted from onto DISK, wiping it. DISK can be that medium itself, the
+# USB stick the kiosk runs from: the system runs from memory, and what it
+# installs is copied into memory first.
 #
 # Layout, the same in both partition tables:
 #   ESP      FAT32, 128 MiB: shim, GRUB for UEFI and for BIOS, grub.cfg and
@@ -8,7 +10,12 @@
 #   SC_A     ext4, 768 MiB: kernel + initramfs, the system the install boots
 #   SC_B     ext4, 768 MiB: the other system slot; updates are written to the
 #            slot not running, so a failed one never touches the working one
-#   SC_DATA  ext4, the rest: settings, logs, update downloads
+#   SC_DATA  ext4, the rest: settings and logs
+#
+# The labels are the same on every install, so GRUB, /init and the kiosk find
+# the partitions by the UUIDs recorded in grubenv instead: a machine can have
+# two disks with SimpleClient on them, an installed USB stick left in one with
+# an installed SSD, and each boots its own.
 #
 # GPT carries a 1 MiB BIOS boot partition first, for GRUB's BIOS core image; on
 # MBR that image sits in the gap after the MBR and the ESP is marked active,
@@ -25,6 +32,14 @@ TABLE=${2:-}
 LANG_ARG=${3:-tr}
 TOTAL=6
 
+# What is installed, as it is laid out on the medium.
+FILES="boot/vmlinuz-new boot/vmlinuz-lts boot/initramfs.cpio.gz boot/firmware.cpio
+       boot/modules-new.cpio.gz boot/modules-lts.cpio.gz boot/efi/grubx64.efi
+       EFI/boot/bootx64.efi EFI/boot/mmx64.efi boot/grub/fonts/unicode.pf2"
+# Where it is read from: the medium, or its copy in memory.
+SRC=/mnt/sc-media
+COPY=/tmp/sc-media
+
 step() { echo "STEP $1 $TOTAL $2"; }
 fail() { echo "ERROR $*"; cleanup; exit 1; }
 cleanup() {
@@ -32,6 +47,7 @@ cleanup() {
     for m in /mnt/sc-slot /mnt/sc-esp /mnt/sc-data /mnt/sc-media; do
         umount "$m" 2>/dev/null
     done
+    rm -rf "$COPY"
 }
 
 # part N names partition N of DISK: nvme0n1 → nvme0n1p1, sda → sda1.
@@ -41,6 +57,9 @@ part() {
         *) echo "${DISK}$1" ;;
     esac
 }
+
+# uuid DEV prints the UUID of the file system on DEV.
+uuid() { blkid "$1" | sed -n 's/.* UUID="\([^"]*\)".*/\1/p'; }
 
 # GRUB reads ext4 but not every feature e2fsprogs turns on by default.
 mkext4() { mkfs.ext4 -q -F -O ^metadata_csum_seed,^orphan_file -L "$1" "$2"; }
@@ -69,11 +88,27 @@ step 1 medium
 mkdir -p /mnt/sc-media /mnt/sc-esp /mnt/sc-slot /mnt/sc-data
 MEDIA=$(find_medium) || fail "installation medium not found"
 mount -t iso9660 -o ro "$MEDIA" /mnt/sc-media 2>/dev/null || fail "cannot mount $MEDIA"
-for f in boot/vmlinuz-new boot/vmlinuz-lts boot/initramfs.cpio.gz boot/firmware.cpio \
-         boot/modules-new.cpio.gz boot/modules-lts.cpio.gz boot/efi/grubx64.efi \
-         EFI/boot/bootx64.efi EFI/boot/mmx64.efi boot/grub/fonts/unicode.pf2; do
+for f in $FILES; do
     [ -f "/mnt/sc-media/$f" ] || fail "missing on the medium: $f"
 done
+
+# Installing onto the stick this runs from, which is about to be wiped: what is
+# installed goes into memory first, if it fits with room to spare for the
+# kiosk, and the stick is let go of.
+case $MEDIA in
+    "$DISK" | "$DISK"[0-9]* | "$DISK"p[0-9]*)
+        NEED=$(cd /mnt/sc-media && du -ck $FILES | tail -1 | cut -f1)
+        FREE=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB/\1/p' /proc/meminfo)
+        [ $((NEED + 160 * 1024)) -le "${FREE:-0}" ] \
+            || fail "not enough memory to install onto the stick this runs from: $(((NEED + 160 * 1024) / 1024)) MB needed, $((${FREE:-0} / 1024)) MB free"
+        for f in $FILES; do
+            mkdir -p "$COPY/$(dirname "$f")"
+            cp "/mnt/sc-media/$f" "$COPY/$f" || fail "copying $f into memory failed"
+        done
+        umount /mnt/sc-media || fail "the stick is in use"
+        SRC=$COPY
+        ;;
+esac
 
 # ── 2. Partitions ────────────────────────────────────────────────────────────
 step 2 partition
@@ -119,19 +154,25 @@ mkfs.fat -F 32 -n SC_ESP "$(part $ESP)" >/dev/null || fail "formatting the ESP f
 mkext4 SC_A "$(part $A)" || fail "formatting SC_A failed"
 mkext4 SC_B "$(part $B)" || fail "formatting SC_B failed"
 mkext4 SC_DATA "$(part $DATA)" || fail "formatting SC_DATA failed"
+ESP_UUID=$(uuid "$(part $ESP)") A_UUID=$(uuid "$(part $A)")
+B_UUID=$(uuid "$(part $B)") DATA_UUID=$(uuid "$(part $DATA)")
+[ -n "$ESP_UUID" ] && [ -n "$A_UUID" ] && [ -n "$B_UUID" ] && [ -n "$DATA_UUID" ] \
+    || fail "the new file systems have no UUIDs"
 
 # ── 4. The system, into slot A ───────────────────────────────────────────────
 step 4 copy
 mount -t ext4 "$(part $A)" /mnt/sc-slot || fail "cannot mount SC_A"
-for f in /mnt/sc-media/boot/vmlinuz-* /mnt/sc-media/boot/*.cpio.gz /mnt/sc-media/boot/*.cpio; do
+for f in "$SRC"/boot/vmlinuz-* "$SRC"/boot/*.cpio.gz "$SRC"/boot/*.cpio; do
     cp "$f" /mnt/sc-slot/ || fail "copying $(basename "$f") failed (disk full?)"
 done
+# How GRUB boots the slot: grub-disk.cfg reads it from there. See build/slot.cfg.
+cp /usr/share/simpleclient/slot.cfg /mnt/sc-slot/slot.cfg || fail "copying slot.cfg failed"
 [ -n "${SC_VERSION:-}" ] && echo "$SC_VERSION" > /mnt/sc-slot/version
 sync
 umount /mnt/sc-slot
 
 mount -t ext4 "$(part $DATA)" /mnt/sc-data || fail "cannot mount SC_DATA"
-mkdir -p /mnt/sc-data/log /mnt/sc-data/update
+mkdir -p /mnt/sc-data/log
 sync
 umount /mnt/sc-data
 
@@ -143,22 +184,22 @@ mkdir -p /mnt/sc-esp/EFI/BOOT /mnt/sc-esp/boot/grub/fonts
 # a boot entry. It is shim, which loads grubx64.efi from its own directory;
 # that GRUB reads grub.cfg from the same directory, a stub pointing at the main
 # configuration on this ESP by its unique volume ID.
-cp /mnt/sc-media/EFI/boot/bootx64.efi /mnt/sc-esp/EFI/BOOT/BOOTX64.EFI || fail "copying shim failed"
-cp /mnt/sc-media/EFI/boot/mmx64.efi /mnt/sc-esp/EFI/BOOT/mmx64.efi
-cp /mnt/sc-media/boot/efi/grubx64.efi /mnt/sc-esp/EFI/BOOT/grubx64.efi || fail "copying GRUB failed"
-UUID=$(blkid "$(part $ESP)" | sed -n 's/.* UUID="\([^"]*\)".*/\1/p')
-[ -n "$UUID" ] || fail "the ESP has no volume ID"
+cp "$SRC/EFI/boot/bootx64.efi" /mnt/sc-esp/EFI/BOOT/BOOTX64.EFI || fail "copying shim failed"
+cp "$SRC/EFI/boot/mmx64.efi" /mnt/sc-esp/EFI/BOOT/mmx64.efi
+cp "$SRC/boot/efi/grubx64.efi" /mnt/sc-esp/EFI/BOOT/grubx64.efi || fail "copying GRUB failed"
 cat > /mnt/sc-esp/EFI/BOOT/grub.cfg <<EOF
-search --no-floppy --fs-uuid --set=root $UUID
+search --no-floppy --fs-uuid --set=root $ESP_UUID
 set prefix=(\$root)/boot/grub
 configfile \$prefix/grub.cfg
 EOF
 cp /usr/share/simpleclient/grub-disk.cfg /mnt/sc-esp/boot/grub/grub.cfg || fail "copying grub.cfg failed"
-cp /mnt/sc-media/boot/grub/fonts/unicode.pf2 /mnt/sc-esp/boot/grub/fonts/
+cp "$SRC/boot/grub/fonts/unicode.pf2" /mnt/sc-esp/boot/grub/fonts/
 grub-editenv /mnt/sc-esp/boot/grub/grubenv create || fail "creating grubenv failed"
 # The kernel this installer runs on has just proven itself on this machine.
 grub-editenv /mnt/sc-esp/boot/grub/grubenv set sc_boot=A sc_try= "sc_lang=$LANG_ARG" \
-    "sc_kernel=${SC_KERNEL:-new}" sc_kpending=0
+    "sc_kernel=${SC_KERNEL:-new}" sc_kpending=0 \
+    "sc_esp=$ESP_UUID" "sc_a=$A_UUID" "sc_b=$B_UUID" "sc_data=$DATA_UUID" \
+    || fail "writing grubenv failed"
 
 # BIOS: GRUB's core image goes into the BIOS boot partition (GPT) or the gap
 # after the MBR, the boot code into the MBR, the modules onto the ESP.

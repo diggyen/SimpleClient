@@ -25,6 +25,11 @@ type Disk struct {
 	Model string
 	Size  int64  // bytes
 	Bus   string // NVMe, SATA, eMMC, SD, SCSI, Virtio, USB
+	// Self is the USB stick the kiosk runs from. It can be installed on
+	// too, the way live systems install onto their own stick: the kiosk
+	// runs from memory, and the installer copies what it installs into
+	// memory before it wipes the stick.
+	Self bool
 }
 
 // Path is the disk's device node.
@@ -62,8 +67,7 @@ var (
 var busOrder = map[string]int{"NVMe": 0, "SATA": 1, "eMMC": 2, "SCSI": 3, "Virtio": 4, "SD": 5, "USB": 6}
 
 // Disks lists the disks the kiosk can be installed on, NVMe first: every whole
-// disk that is writable and at least MinSize, except the medium the kiosk is
-// running from.
+// disk that is writable and at least MinSize, the stick it runs from included.
 func Disks() []Disk {
 	entries, err := os.ReadDir(sysBlock)
 	if err != nil {
@@ -84,10 +88,8 @@ func Disks() []Disk {
 		if size < MinSize {
 			continue
 		}
-		if IsInstallMedium(filepath.Join(devDir, name)) {
-			continue
-		}
-		disks = append(disks, Disk{Name: name, Model: model(dir, name), Size: size, Bus: bus(dir, name)})
+		disks = append(disks, Disk{Name: name, Model: model(dir, name), Size: size, Bus: bus(dir, name),
+			Self: IsInstallMedium(filepath.Join(devDir, name))})
 	}
 	sort.SliceStable(disks, func(i, j int) bool {
 		if busOrder[disks[i].Bus] != busOrder[disks[j].Bus] {

@@ -75,13 +75,13 @@ func TestUpdateRewritesInPlace(t *testing.T) {
 
 func TestCurrentReadsTheCommandLine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cmdline")
-	os.WriteFile(path, []byte("quiet lang=tr sc.slot=B sc.kernel=lts\n"), 0o644)
+	os.WriteFile(path, []byte("quiet lang=tr sc.slot=B sc.kernel=lts sc.esp=1A2B-3C4D sc.data=0f6e\n"), 0o644)
 	old := cmdlinePath
 	cmdlinePath = path
 	defer func() { cmdlinePath = old }()
 
 	b := Current()
-	if b.Slot != "B" || b.Kernel != "lts" || !b.Installed() {
+	if b.Slot != "B" || b.Kernel != "lts" || b.ESP != "1A2B-3C4D" || !b.Installed() || b.Other() != "A" {
 		t.Fatalf("got %+v", b)
 	}
 

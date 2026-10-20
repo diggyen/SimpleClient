@@ -133,10 +133,23 @@ type Boot struct {
 	// a comma-separated list of GPU sets (see GPUs) whose own driver once
 	// took a boot down, or "once" from the boot menu's safe-graphics entry.
 	GfxSafe string
+	// ESP is the UUID of a disk install's ESP, where its grubenv is. Every
+	// install has the same labels, and a machine can have two disks with one
+	// on; GRUB knows which it booted from. Empty on an install without UUIDs.
+	ESP string
 }
 
 // Installed reports whether the kiosk runs from a disk install.
 func (b Boot) Installed() bool { return b.Slot != "" }
+
+// Other is the system slot a disk install is not running from, the one an
+// update goes into.
+func (b Boot) Other() string {
+	if b.Slot == "A" {
+		return "B"
+	}
+	return "A"
+}
 
 var cmdlinePath = "/proc/cmdline"
 
@@ -153,6 +166,9 @@ func Current() Boot {
 		}
 		if v, ok := strings.CutPrefix(f, "sc.gfxsafe="); ok {
 			b.GfxSafe = v
+		}
+		if v, ok := strings.CutPrefix(f, "sc.esp="); ok {
+			b.ESP = v
 		}
 	}
 	return b
@@ -256,16 +272,45 @@ func MarkGood(b Boot) error {
 	return err
 }
 
+// Read returns the variables of the grubenv of the medium this boot came from.
+func Read(b Boot) (Env, error) {
+	var env Env
+	err := withEnv(b, func(e Env) { env = maps.Clone(e) })
+	return env, err
+}
+
+// TryOther has the next boot, and only that one, start the other slot, which
+// an update has just been written to. GRUB clears the try before the slot's
+// kernel even starts: a boot of it that never gets as far as MarkGood is
+// followed by one of the slot it came from. See build/grub-disk.cfg.
+func TryOther(b Boot) error {
+	if !b.Installed() {
+		return errNoEnv
+	}
+	return withEnv(b, func(env Env) { env["sc_try"] = b.Other() })
+}
+
+// SlotDevice returns the device of a disk install's system slot, "A" or "B",
+// by the UUID recorded in its grubenv env, or by its label on an install
+// without UUIDs.
+func SlotDevice(env Env, slot string) (string, error) {
+	return Find(env["sc_"+strings.ToLower(slot)], "SC_"+slot)
+}
+
 var errNoEnv = errors.New("bootenv: no boot environment on this medium")
 
 // withEnv changes the grubenv of the medium this boot came from: on the ESP
 // of a disk install, on the SC_EFI partition of a USB stick.
 func withEnv(b Boot, fn func(Env)) error {
-	label, file := "SC_EFI", "grubenv"
+	var dev, file string
+	var err error
 	if b.Installed() {
-		label, file = "SC_ESP", "boot/grub/grubenv"
+		dev, err = Find(b.ESP, "SC_ESP")
+		file = "boot/grub/grubenv"
+	} else {
+		dev, err = FindLabel("SC_EFI")
+		file = "grubenv"
 	}
-	dev, err := FindLabel(label)
 	if err != nil {
 		return errNoEnv
 	}
@@ -274,12 +319,25 @@ func withEnv(b Boot, fn func(Env)) error {
 	})
 }
 
+// Find returns the device holding the file system whose UUID is uuid or,
+// when uuid is empty, the one labelled label.
+func Find(uuid, label string) (string, error) {
+	if uuid == "" {
+		return FindLabel(label)
+	}
+	return findfs("UUID=" + uuid)
+}
+
 // FindLabel returns the device holding the file system labelled label.
 func FindLabel(label string) (string, error) {
-	out, err := exec.Command("findfs", "LABEL="+label).Output()
+	return findfs("LABEL=" + label)
+}
+
+func findfs(what string) (string, error) {
+	out, err := exec.Command("findfs", what).Output()
 	dev := strings.TrimSpace(string(out))
 	if err != nil || dev == "" {
-		return "", fmt.Errorf("bootenv: no file system labelled %s", label)
+		return "", fmt.Errorf("bootenv: no file system with %s", what)
 	}
 	return dev, nil
 }

@@ -20,8 +20,11 @@ ARG DEBIAN_VERSION=trixie
 FROM --platform=linux/amd64 golang:1.23-alpine AS go-builder
 
 # Passed in rather than derived here: .git is not in the build context, so the
-# tag can only be known on the host.
+# tag can only be known on the host. BUILD_TIME is the commit's time in Unix
+# seconds; the update checks certificates against it when the machine's clock
+# is behind it (see internal/update).
 ARG VERSION=dev
+ARG BUILD_TIME=0
 
 WORKDIR /src
 
@@ -33,7 +36,7 @@ COPY internal/ ./internal/
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -mod=vendor \
-      -ldflags "-s -w -X github.com/diggyen/SimpleClient/internal/version.Version=${VERSION}" \
+      -ldflags "-s -w -X github.com/diggyen/SimpleClient/internal/version.Version=${VERSION} -X github.com/diggyen/SimpleClient/internal/version.BuildTime=${BUILD_TIME}" \
       -o /out/simpleclient ./cmd/simpleclient
 
 # ── Kernel and the Secure Boot chain ──────────────────────────────────────────
@@ -397,7 +400,7 @@ COPY build/udhcpc-default.script /rootfs/usr/share/udhcpc/default.script
 COPY build/sc-install /rootfs/sbin/sc-install
 COPY build/sc-net /rootfs/sbin/sc-net
 COPY build/sc-wifi-event /rootfs/sbin/sc-wifi-event
-COPY build/grub-disk.cfg /rootfs/usr/share/simpleclient/grub-disk.cfg
+COPY build/grub-disk.cfg build/slot.cfg /rootfs/usr/share/simpleclient/
 
 # /media is where USB drives are mounted for sessions to offer the server.
 # FreeRDP looks there, and under /media/<user>, by the name of the user it runs
@@ -491,10 +494,30 @@ RUN set -e; \
         /iso; \
     ls -lh /out/simpleclient.iso
 
+# ── Update ────────────────────────────────────────────────────────────────────
+# What a disk install updates itself from (internal/update): the files of one
+# system slot in a tar — the kernels and the initrds, slot.cfg, and version,
+# the release they are. The release publishes it next to the ISO, with its
+# checksum in SHA256SUMS. The GRUB scripts are checked here too: a syntax error
+# in one would stop every kiosk at the boot loader.
+ARG VERSION=dev
+COPY build/slot.cfg build/grub-disk.cfg /slot/
+RUN set -e; \
+    grub-script-check /iso/boot/grub/grub.cfg; \
+    grub-script-check /slot/grub-disk.cfg; \
+    grub-script-check /slot/slot.cfg; \
+    echo "$VERSION" > /slot/version; \
+    tar --format=ustar --owner=0 --group=0 --numeric-owner --mtime=@0 -cf /out/simpleclient-update.tar \
+        -C /slot version slot.cfg \
+        -C /iso/boot vmlinuz-new vmlinuz-lts initramfs.cpio.gz modules-new.cpio.gz modules-lts.cpio.gz \
+        firmware.cpio; \
+    tar -tvf /out/simpleclient-update.tar; \
+    ls -lh /out/simpleclient-update.tar
+
 # ── Export ────────────────────────────────────────────────────────────────────
 FROM scratch AS export
 COPY --from=go-builder /out/simpleclient /
 COPY --from=rootfs-builder /out/initramfs.cpio.gz /out/modules-new.cpio.gz /out/modules-lts.cpio.gz \
      /out/firmware.cpio /
 COPY --from=iso-builder /iso/boot/vmlinuz-new /iso/boot/vmlinuz-lts /
-COPY --from=iso-builder /out/simpleclient.iso /
+COPY --from=iso-builder /out/simpleclient.iso /out/simpleclient-update.tar /

@@ -207,7 +207,8 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 
 	renderCardFooter(img, l, state)
 	renderErrorBanner(img, l, state)
-	renderKeyHints(img, l, state.CanInstall)
+	renderUpdateBanner(img, l, state)
+	renderKeyHints(img, l, state)
 }
 
 // drawLanguageBadge puts the active language in the top-right corner as a cap,
@@ -451,9 +452,9 @@ func renderErrorBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
 }
 
 // keyHints pairs each key with the action it performs, so the footer can set
-// the key as a cap and the action as plain text. install adds F9, offered when
-// the kiosk runs from a USB stick or CD.
-func keyHints(install bool) [][2]string {
+// the key as a cap and the action as plain text. f9 is what F9 does, if
+// anything: install to disk, from a USB stick or CD, or update a disk install.
+func keyHints(f9 string) [][2]string {
 	h := [][2]string{
 		{"↑↓", i18n.T(i18n.HintSelect)},
 		{"Enter", i18n.T(i18n.HintConnect)},
@@ -464,10 +465,21 @@ func keyHints(install bool) [][2]string {
 		{"F3", i18n.T(i18n.HintKeyboard)},
 		{"F4", i18n.T(i18n.HintSound)},
 	}
-	if install {
-		h = append(h, [2]string{"F9", i18n.T(i18n.HintInstall)})
+	if f9 != "" {
+		h = append(h, [2]string{"F9", f9})
 	}
 	return h
+}
+
+// f9Hint is what F9 does on this kiosk.
+func f9Hint(state *UIState) string {
+	switch {
+	case state.CanInstall:
+		return i18n.T(i18n.HintInstall)
+	case state.Boot.Installed():
+		return i18n.T(i18n.HintUpdate)
+	}
+	return ""
 }
 
 // fitKeyHints drops hints until the row fits in width, the ones before F9
@@ -498,10 +510,10 @@ func keyHintsWidth(hints [][2]string) int {
 }
 
 // renderKeyHints draws the bottom key legend and the project URL.
-func renderKeyHints(img *image.RGBA, l discoveryLayout, install bool) {
+func renderKeyHints(img *image.RGBA, l discoveryLayout, state *UIState) {
 	const capGap, pairGap = 7, 22
 
-	hints := fitKeyHints(keyHints(install), l.Screen.Dx()-2*padding)
+	hints := fitKeyHints(keyHints(f9Hint(state)), l.Screen.Dx()-2*padding)
 	y := l.Screen.Max.Y - hintsBottom
 	x := l.Screen.Min.X + (l.Screen.Dx()-keyHintsWidth(hints))/2
 
@@ -515,7 +527,8 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout, install bool) {
 	// than the URL: it is the one thing on this screen someone reporting a fault
 	// has to be able to read back, and the kiosk offers no other way to ask.
 	// What decodes the sessions' video goes with it, the GPU or the CPU, once
-	// the engine has found out.
+	// the engine has found out, and on a disk install a newer release, once a
+	// check has found one.
 	ver := version.Version
 	if gpu, known := rdp.Decoder(); known {
 		if gpu == "" {
@@ -523,7 +536,11 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout, install bool) {
 		}
 		ver += buildSep + i18n.T(i18n.BadgeVideo) + ": " + gpu
 	}
-	x = l.Screen.Min.X + (l.Screen.Dx()-TextWidth(gitURL+buildSep+ver, false))/2
+	note := updateNote(&state.Update)
+	if note != "" {
+		note = buildSep + note
+	}
+	x = l.Screen.Min.X + (l.Screen.Dx()-TextWidth(gitURL+buildSep+ver+note, false))/2
 	urlY := y + CharH + 18
 
 	DrawText(img, x, urlY, gitURL, ColorFaint)
@@ -531,6 +548,8 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout, install bool) {
 	DrawText(img, x, urlY, buildSep, ColorFaint)
 	x += TextWidth(buildSep, false)
 	DrawText(img, x, urlY, ver, ColorDim)
+	x += TextWidth(ver, false)
+	DrawText(img, x, urlY, note, ColorSuccess)
 }
 
 // drawScrollBar shows the visible portion of a list too long for the card.

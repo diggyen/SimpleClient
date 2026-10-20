@@ -24,6 +24,7 @@ import (
 	"github.com/diggyen/SimpleClient/internal/rdp"
 	"github.com/diggyen/SimpleClient/internal/scanner"
 	"github.com/diggyen/SimpleClient/internal/ui"
+	"github.com/diggyen/SimpleClient/internal/update"
 	"github.com/diggyen/SimpleClient/internal/usb"
 )
 
@@ -105,13 +106,24 @@ func main() {
 
 	// GRUB marks every boot pending. Once the kiosk has been up a while this
 	// boot has proven itself on this machine, and its kernel — and on a disk
-	// install its system slot — are the ones to keep booting.
+	// install its system slot, an update that is in it included — are the
+	// ones to keep booting. Installing to disk holds the stick for a minute,
+	// and recording it then fails, so it is tried again for a while.
 	boot := bootenv.Current()
 	warnf("boot: slot=%q kernel=%q", boot.Slot, boot.Kernel)
 	go func() {
 		time.Sleep(provenAfter)
-		if err := bootenv.MarkGood(boot); err != nil {
+		for try := 1; ; try++ {
+			err := bootenv.MarkGood(boot)
+			if err == nil {
+				update.Kept(boot)
+				return
+			}
 			warnf("boot: recording a good boot failed: %v", err)
+			if try == 10 {
+				return
+			}
+			time.Sleep(30 * time.Second)
 		}
 	}()
 

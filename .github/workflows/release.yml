@@ -34,21 +34,26 @@ jobs:
         run: |
           docker buildx build \
             --build-arg VERSION=${{ github.ref_name }} \
+            --build-arg BUILD_TIME="$(git log -1 --format=%ct)" \
             --target export \
             --output type=local,dest=dist \
             -f build/Dockerfile .
           ls -lh dist/
 
+      # The update is what every disk install in the field will boot next:
+      # it has to be this release, and hold what GRUB boots it by.
       - name: Verify artifacts
         run: |
           test -s dist/simpleclient.iso
           file dist/simpleclient.iso | grep -qi 'ISO 9660'
           file dist/simpleclient | grep -q 'statically linked'
+          test "$(tar -xOf dist/simpleclient-update.tar version)" = "${{ github.ref_name }}"
+          tar -tf dist/simpleclient-update.tar | grep -qx slot.cfg
 
       - name: Checksums
         working-directory: dist
         run: |
-          sha256sum simpleclient.iso > SHA256SUMS
+          sha256sum simpleclient.iso simpleclient-update.tar > SHA256SUMS
           cat SHA256SUMS
 
       - name: Publish release
@@ -57,6 +62,7 @@ jobs:
           name: SimpleClient ${{ github.ref_name }}
           files: |
             dist/simpleclient.iso
+            dist/simpleclient-update.tar
             dist/SHA256SUMS
           body: |
             ## SimpleClient ${{ github.ref_name }}
@@ -65,6 +71,11 @@ jobs:
             RDP hosts, then connects to the one you pick — full screen, with no
             desktop environment underneath. It runs from the USB stick, or
             installs to the machine's disk with **F9**.
+
+            A kiosk installed to disk checks for a new release daily and updates
+            itself when **F9 → Update** is chosen, from
+            `simpleclient-update.tar`; a release that does not start on the
+            machine sends it back to the version it had.
 
             The boot menu offers **English** and **Türkçe**; press **F2** at any
             time to switch language while it is running.
@@ -83,7 +94,7 @@ jobs:
 
             ### Verify the download
             ```
-            sha256sum -c SHA256SUMS
+            sha256sum -c --ignore-missing SHA256SUMS
             ```
 
             Boots on UEFI and legacy BIOS machines, with Secure Boot on or off.

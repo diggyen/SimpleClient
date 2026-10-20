@@ -49,7 +49,8 @@ func TestDisksOrdersNVMeFirstAndSkipsWhatIsNotADisk(t *testing.T) {
 	}
 }
 
-func TestDisksLeavesOutTheInstallMedium(t *testing.T) {
+// The stick the kiosk runs from is offered too, marked as itself.
+func TestDisksMarksTheInstallMedium(t *testing.T) {
 	const gb = 1 << 30 / 512
 	fakeSys(t, map[string]int64{"sda": 16 * gb, "sdb": 16 * gb})
 	// sdb carries the ISO: an ISO 9660 primary volume descriptor at sector 16.
@@ -59,7 +60,7 @@ func TestDisksLeavesOutTheInstallMedium(t *testing.T) {
 	os.WriteFile(filepath.Join(devDir, "sdb"), pvd, 0o644)
 
 	disks := Disks()
-	if len(disks) != 1 || disks[0].Name != "sda" {
+	if len(disks) != 2 || disks[0].Name != "sda" || disks[0].Self || disks[1].Name != "sdb" || !disks[1].Self {
 		t.Fatalf("got %+v", disks)
 	}
 }

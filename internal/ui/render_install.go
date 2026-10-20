@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/diggyen/SimpleClient/internal/i18n"
+	"github.com/diggyen/SimpleClient/internal/install"
 )
 
 const (
@@ -64,7 +65,7 @@ func renderInstall(img *image.RGBA, state *UIState) {
 				FillNotched(img, row, ColorSelected)
 				FillRect(img, image.Rect(row.Min.X+2, row.Min.Y+2, row.Min.X+5, row.Max.Y-2), ColorAccent)
 			}
-			DrawText(img, row.Min.X+14, row.Min.Y+(row.Dy()-CharH)/2, in.Disks[i].Label(), ColorText)
+			DrawText(img, row.Min.X+14, row.Min.Y+(row.Dy()-CharH)/2, diskLabel(in.Disks[i]), ColorText)
 			y += installRowH
 		}
 		drawInstallKeys(img, x, footY, [][2]string{
@@ -75,7 +76,10 @@ func renderInstall(img *image.RGBA, state *UIState) {
 
 	case InstallConfirm:
 		d := in.Disks[in.Sel]
-		y = drawWrapped(img, x, y, w, fmt.Sprintf(i18n.T(i18n.InstallErase), d.Label()), ColorError)
+		y = drawWrapped(img, x, y, w, fmt.Sprintf(i18n.T(i18n.InstallErase), diskLabel(d)), ColorError)
+		if d.Self {
+			y = drawWrapped(img, x, y+6, w, i18n.T(i18n.InstallSelfWarn), ColorWarning)
+		}
 		y += 12
 		DrawText(img, x, y, fmt.Sprintf(i18n.T(i18n.InstallTable), strings.ToUpper(in.Table)), ColorMuted)
 		y += CharH + 28
@@ -91,7 +95,11 @@ func renderInstall(img *image.RGBA, state *UIState) {
 		DrawProgressBar(img, image.Rect(x, y, x+w, y+10), done, ColorAccent, ColorTrack)
 
 	case InstallDone:
-		drawWrapped(img, x, y, w, i18n.T(i18n.InstallDone), ColorSuccess)
+		done := i18n.T(i18n.InstallDone)
+		if in.Disks[in.Sel].Self {
+			done = i18n.T(i18n.InstallDoneSelf)
+		}
+		drawWrapped(img, x, y, w, done, ColorSuccess)
 		drawInstallKeys(img, x, footY, [][2]string{{"Enter", ""}})
 
 	case InstallFailed:
@@ -100,9 +108,18 @@ func renderInstall(img *image.RGBA, state *UIState) {
 	}
 }
 
-// drawWrapped draws text wrapped to width and returns the y below it.
+// diskLabel describes a disk in the dialog, saying which is the stick the
+// kiosk runs from.
+func diskLabel(d install.Disk) string {
+	if d.Self {
+		return d.Label() + "  " + i18n.T(i18n.InstallSelf)
+	}
+	return d.Label()
+}
+
+// drawWrapped draws text wrapped to width pixels and returns the y below it.
 func drawWrapped(img *image.RGBA, x, y, width int, text string, c color.RGBA) int {
-	for _, line := range wrapText(text, width) {
+	for _, line := range wrapText(text, width/CharW) {
 		DrawText(img, x, y, line, c)
 		y += CharH + 6
 	}

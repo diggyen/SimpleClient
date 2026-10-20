@@ -21,6 +21,7 @@ const (
 	ScreenNetwork                  // Network settings dialog
 	ScreenAuto                     // Counting down to logging on to the startup server
 	ScreenWifi                     // Wireless networks, from the network settings
+	ScreenUpdate                   // Software update, on a disk install
 )
 
 // ModalState holds the state of the connection dialog.
@@ -118,10 +119,11 @@ type UIState struct {
 	// Boot is how this kiosk was started. Installing to disk is offered
 	// (CanInstall) only when it runs from a USB stick or CD: a kiosk booted
 	// from its installed disk has nothing to install, and F9 there would only
-	// wipe the disk it runs from.
+	// wipe the disk it runs from. There F9 updates it instead.
 	Boot       bootenv.Boot
 	CanInstall bool
 	Install    InstallState
+	Update     UpdateState
 
 	Net  NetState
 	Wifi WifiState
@@ -251,7 +253,7 @@ func (s *UIState) Transition(to Screen) {
 	// or the startup server's dialog or countdown. One that drops is
 	// reconnected, with the connecting screen up meanwhile.
 	allowed := map[Screen][]Screen{
-		ScreenDiscovery:  {ScreenModal, ScreenInstall, ScreenNetwork, ScreenAuto},
+		ScreenDiscovery:  {ScreenModal, ScreenInstall, ScreenUpdate, ScreenNetwork, ScreenAuto},
 		ScreenModal:      {ScreenDiscovery, ScreenConnecting},
 		ScreenConnecting: {ScreenSession, ScreenModal, ScreenAuto},
 		ScreenSession:    {ScreenDiscovery, ScreenConnecting, ScreenModal, ScreenAuto},

@@ -277,6 +277,7 @@ MOUSE_ARG=""
 BPP_ARG=""
 HOST_ARG=""
 SLOT=""
+DATA_UUID=""
 for arg in $(cat /proc/cmdline 2>/dev/null); do
     case "$arg" in
         lang=*)   LANG_ARG="-lang=${arg#lang=}" ;;
@@ -286,6 +287,7 @@ for arg in $(cat /proc/cmdline 2>/dev/null); do
         mousedev=*) MOUSE_ARG="-mouse=${arg#mousedev=}" ;;
         bpp=*) BPP_ARG="-bpp=${arg#bpp=}" ;;
         sc.slot=*) SLOT=${arg#sc.slot=} ;;
+        sc.data=*) DATA_UUID=${arg#sc.data=} ;;
         sc.ip=*) NET_IP=${arg#sc.ip=} ;;
         sc.gw=*) NET_GW=${arg#sc.gw=} ;;
         sc.dns=*) NET_DNS=${arg#sc.dns=} ;;
@@ -296,14 +298,18 @@ log "kernel: $(uname -r)"
 
 # ── Disk install ──────────────────────────────────────────────────────────────
 # sc.slot= is set only by the GRUB of an installed disk. Its data partition
-# holds settings, logs and update downloads; the disk controller's driver has
-# just been loaded and may still be finding the disk, so wait a little for it.
+# holds settings and logs; the disk controller's driver has just been loaded
+# and may still be finding the disk, so wait a little for it. sc.data= is the
+# partition's UUID — another disk in the machine can have SimpleClient on it
+# too, with the same labels — and an install without UUIDs goes by the label.
 if [ -n "$SLOT" ]; then
     mkdir -p /data
     DATA_DEV=""
+    DATA_KEY=LABEL=SC_DATA
+    [ -n "$DATA_UUID" ] && DATA_KEY=UUID=$DATA_UUID
     i=0
     while [ "$i" -lt 40 ]; do
-        DATA_DEV=$(findfs LABEL=SC_DATA 2>/dev/null) && break
+        DATA_DEV=$(findfs "$DATA_KEY" 2>/dev/null) && break
         i=$((i + 1))
         sleep 0.25
     done

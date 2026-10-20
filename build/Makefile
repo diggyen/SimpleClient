@@ -20,8 +20,9 @@ GOFLAGS     := -mod=vendor
 # shell, so reading it off the screen is the only way to tell which build is in
 # front of you. A working tree that is not exactly a tag says so.
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+BUILD_TIME  ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
 VERSION_PKG := github.com/diggyen/SimpleClient/internal/version
-LDFLAGS     := -s -w -X $(VERSION_PKG).Version=$(VERSION)
+LDFLAGS     := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //'
@@ -52,6 +53,7 @@ docker-build:
 	@mkdir -p $(OUT_DIR)
 	docker build \
 	    --build-arg VERSION=$(VERSION) \
+	    --build-arg BUILD_TIME=$(BUILD_TIME) \
 	    --target export \
 	    --output type=local,dest=$(OUT_DIR) \
 	    -f build/Dockerfile .

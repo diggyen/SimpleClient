@@ -315,18 +315,18 @@ func TestRenderDiscovery_HeaderAndHintsFitEveryLanguage(t *testing.T) {
 			back := image.NewRGBA(fb.Bounds())
 			renderDiscovery(back, &UIState{Screen: ScreenDiscovery})
 
-			for _, install := range []bool{false, true} {
-				hints := fitKeyHints(keyHints(install), w-2*padding)
+			for _, f9 := range []string{"", i18n.T(i18n.HintInstall), i18n.T(i18n.HintUpdate)} {
+				hints := fitKeyHints(keyHints(f9), w-2*padding)
 				if hintsW := keyHintsWidth(hints); hintsW > w-2*padding {
-					t.Errorf("lang=%s w=%d install=%v: key hints (%dpx) do not fit on screen", lang, w, install, hintsW)
+					t.Errorf("lang=%s w=%d F9=%q: key hints (%dpx) do not fit on screen", lang, w, f9, hintsW)
 				}
 				// Only a screen too narrow for the full row may lose hints,
-				// and never the install one.
-				if w >= 1024 && len(hints) != len(keyHints(install)) {
-					t.Errorf("lang=%s w=%d install=%v: %d of %d hints shown", lang, w, install, len(hints), len(keyHints(install)))
+				// and never the one for F9.
+				if w >= 1024 && len(hints) != len(keyHints(f9)) {
+					t.Errorf("lang=%s w=%d F9=%q: %d of %d hints shown", lang, w, f9, len(hints), len(keyHints(f9)))
 				}
-				if install && hints[len(hints)-1][0] != "F9" {
-					t.Errorf("lang=%s w=%d: the install hint was dropped", lang, w)
+				if f9 != "" && hints[len(hints)-1][0] != "F9" {
+					t.Errorf("lang=%s w=%d: the F9 hint was dropped", lang, w)
 				}
 			}
 

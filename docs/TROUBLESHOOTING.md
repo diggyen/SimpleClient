@@ -273,6 +273,35 @@ an NVIDIA always says *CPU*; see [the README](../README.md#linux-servers).
 
 ---
 
+## The update does not install
+
+The update dialog (`F9` on an installed kiosk) says what stopped it:
+
+- **The release server cannot be reached** — the kiosk needs HTTPS (port 443)
+  to `github.com` and to `release-assets.githubusercontent.com`, where GitHub
+  keeps release files, and a DNS server that resolves them; it cannot go
+  through a proxy. A network without that can have a mirror instead: the
+  release's `SHA256SUMS` and `simpleclient-update.tar` under
+  `download/<tag>/`, and a file `latest` holding the tag, on any web server the
+  kiosks reach, with its address in `simpleclient/update-url` on the kiosk's
+  data partition.
+- **certificate ... is not valid** — the machine's clock is far out. A clock
+  that is behind is allowed for; one so far ahead that the certificate has
+  expired is not. Set the date in the firmware setup.
+- **This start-up is still being checked** — the boot has to prove itself
+  first, 20 seconds after the kiosk is up; until then the other slot is the
+  way back, and it is not written over.
+- **The download was damaged / stopped** — try again; a download that sends
+  nothing for a minute is given up.
+
+When the update installs but the new version does not start, the machine comes
+back on the version it had, and the server list says so in amber. The release
+stays on offer, but is not announced again. The serial console of the boot that
+failed is what tells why (see the top of this page). The GRUB menu's
+*SimpleClient (previous version)* boots the other slot by hand.
+
+---
+
 ## Reporting something not covered here
 
 Open an issue with:

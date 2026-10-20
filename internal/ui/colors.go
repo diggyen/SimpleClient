@@ -44,6 +44,12 @@ var (
 	// which is where the operator still has to act.
 	ColorErrorBG     = color.RGBA{R: 56, G: 25, B: 38, A: 255}
 	ColorErrorBorder = color.RGBA{R: 122, G: 44, B: 58, A: 255}
+	// The same for the banner that says how an update went: green when it
+	// is up and running, amber when the kiosk went back to the old version.
+	ColorSuccessBG     = color.RGBA{R: 20, G: 46, B: 44, A: 255}
+	ColorSuccessBorder = color.RGBA{R: 40, G: 104, B: 76, A: 255}
+	ColorWarningBG     = color.RGBA{R: 52, G: 42, B: 30, A: 255}
+	ColorWarningBorder = color.RGBA{R: 122, G: 94, B: 40, A: 255}
 
 	// Logo sprite. Four fixed shades: the mark must look identical whatever the
 	// rest of the screen is doing, so it does not borrow the surface colours.

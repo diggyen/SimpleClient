@@ -79,6 +79,7 @@ jobs:
         run: |
           docker buildx build \
             --build-arg VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)" \
+            --build-arg BUILD_TIME="$(git log -1 --format=%ct)" \
             --target export \
             --output type=local,dest=dist \
             -f build/Dockerfile .

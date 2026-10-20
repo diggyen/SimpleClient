@@ -58,6 +58,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		state.SavePath = savedPath
 		state.loadSaved(savedPath)
 	}
+	startUpdates(state)
 	backBuf := image.NewRGBA(fb.Bounds())
 
 	// The reader starts the pointer at the centre of the screen; mirror that so
@@ -253,11 +254,16 @@ func handleInput(
 
 	switch state.Screen {
 	case ScreenDiscovery:
+		// What an update did is said until the first key on the list: the
+		// person who meets it at the kiosk has seen it by then.
+		state.Update.Tried = ""
 		handleDiscoveryKey(ev, state, scan, ctx, cancelScan, scanCh, maxRows)
 	case ScreenModal:
 		handleModalKey(ev, state, fb, session)
 	case ScreenInstall:
 		handleInstallKey(ev, state)
+	case ScreenUpdate:
+		handleUpdateKey(ev, state)
 	case ScreenNetwork:
 		handleNetKey(ev, state)
 	case ScreenWifi:
@@ -301,6 +307,8 @@ func handleDiscoveryKey(
 	case inputdev.KeyF9:
 		if state.CanInstall {
 			openInstall(state)
+		} else if state.Boot.Installed() {
+			openUpdate(state)
 		}
 	case inputdev.KeyF5:
 		(*cancelScan)()
@@ -414,6 +422,7 @@ func handleMouseClick(
 ) {
 	switch state.Screen {
 	case ScreenDiscovery:
+		state.Update.Tried = ""
 		// Hit-testing goes through the same layout the renderer used, so a
 		// click always lands on the row the user actually sees.
 		rowIdx := layoutDiscoveryFor(fb.Bounds(), state.Hosts).rowAt(mx, my)
@@ -482,6 +491,9 @@ func handleMouseClick(
 
 	case ScreenWifi:
 		handleWifiClick(state, fb.Bounds(), image.Pt(mx, my))
+
+	case ScreenUpdate:
+		handleUpdateClick(state, fb.Bounds(), image.Pt(mx, my))
 	}
 }
 

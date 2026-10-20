@@ -39,7 +39,7 @@ sudo dd if=simpleclient.iso of=/dev/rdiskN bs=4m
 sync
 ```
 
-Verify it first if you like: `shasum -a 256 -c SHA256SUMS`.
+Verify it first if you like: `shasum -a 256 -c --ignore-missing SHA256SUMS`.
 
 Boots on UEFI and legacy BIOS machines, with Secure Boot on or off: the boot
 chain is the one Debian's own install media use — shim signed by Microsoft,
@@ -61,7 +61,7 @@ walks through the causes in order of likelihood.
 | `F6` | In the credential dialog: show or hide the domain field |
 | `F7` | Connect to a server by address (`10.0.0.5`, `rdp.example.com:53389`) |
 | `F8` | Network settings: DHCP or a fixed address, and the wireless network |
-| `F9` | Install to the machine's disk (when started from a USB stick or CD) |
+| `F9` | Started from a USB stick or CD: install to a disk, or onto the stick itself. Installed: software update |
 | `F10` | In the credential dialog: what the kiosk does at startup — the server list, this server's dialog, or logging on to it |
 | `Ctrl`+`Alt`+`End` | Disconnect from an active session |
 
@@ -106,6 +106,27 @@ network settings are, and joined at every boot; a password the network refuses
 leaves the kiosk on the network it had. `Del` forgets it. What is kept is the
 key the password makes — the NT hash on an enterprise network — and not the
 password itself, except on a WPA3-only network, whose handshake needs it.
+
+## Install it, update it
+
+`F9` on a kiosk started from the USB stick or a CD installs it: onto the
+machine's disk (NVMe, SATA, eMMC, at least 4 GB), or onto the stick it is
+running from — marked *(this stick)* in the list — which then boots as an
+installed kiosk wherever it is plugged in. Installing wipes the disk. An
+installed kiosk keeps its settings and the servers it has used, and carries two
+copies of the system, so that an update never touches the one running.
+
+An installed kiosk checks for a new release a couple of minutes after it starts
+and daily after that, and says *New version …* at the foot of the server list
+when there is one. Nothing is installed without being asked: `F9` opens the
+update, which shows this version and the latest, checks again with *Check*, and
+with *Update* downloads the new one — about 250 MB — into the other copy and
+restarts into it. Should it not start on that machine, the kiosk comes back on
+the version it had. Either way the server list says what happened, until a key
+is pressed: *Updated* or *Update failed*. Updates come from the
+[releases](https://github.com/diggyen/SimpleClient/releases), checked against
+the release's `SHA256SUMS` over HTTPS; a network without internet access can
+have a mirror, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#the-update-does-not-install).
 
 ## USB devices
 
