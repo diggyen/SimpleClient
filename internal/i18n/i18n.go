@@ -77,6 +77,7 @@ const (
 	ErrTimeout
 	ErrRefused
 	ErrAuthFailed
+	ErrRejected // the server ended the session without logging the user on
 	ErrBadAddress
 	LanguageName // Native name of the active language, e.g. "Türkçe"
 
@@ -244,6 +245,7 @@ var catalogues = map[Lang]*catalogue{
 		ErrTimeout:     "Timeout: server unreachable",
 		ErrRefused:     "Connection refused",
 		ErrAuthFailed:  "Authentication failed",
+		ErrRejected:    "Logon failed: wrong user name or password",
 		ErrBadAddress:  "Server address not found",
 		LanguageName:   "English",
 
@@ -399,6 +401,7 @@ var catalogues = map[Lang]*catalogue{
 		ErrTimeout:     "Zaman aşımı: sunucuya ulaşılamıyor",
 		ErrRefused:     "Bağlantı reddedildi",
 		ErrAuthFailed:  "Kimlik doğrulama başarısız",
+		ErrRejected:    "Oturum açılamadı: kullanıcı adı veya parola yanlış",
 		ErrBadAddress:  "Sunucu adresi bulunamadı",
 		LanguageName:   "Türkçe",
 

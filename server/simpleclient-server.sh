@@ -566,6 +566,13 @@ configure_xrdp() {
     set_key "$ini" rfx_frame_interval 8
     set_key "$ini" max_bpp 32
 
+    # The account the kiosk sends is taken or the connection is ended:
+    # without this, a wrong password got xrdp's own login screen in the
+    # session, a second form after the kiosk's. The kiosk tells that hang-up
+    # from a logoff (the session never started) and says the password was
+    # wrong. An RDP client with no password saved is turned away as well.
+    set_key "$ini" require_credentials true
+
     # RemoteFX before H.264. It encodes only the 64x64 tiles that changed,
     # where x264 takes every frame whole, on one core. Measured on a 4-vCPU
     # VM, a window dragged across a 1920x1080 kiosk: 105 fps against 47,

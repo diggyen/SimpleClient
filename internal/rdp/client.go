@@ -115,6 +115,11 @@ var Audio *audio.Sink
 // close from either side.
 func (c *Client) Failed() bool { return c.failed.Load() }
 
+// Rejected is always false: the built-in client cannot tell a server that
+// turned the password down from one that logged the user off (see
+// Engine.Rejected).
+func (c *Client) Rejected() bool { return false }
+
 // Debug turns on the RDP library's full handshake logging. It is a diagnostic
 // switch only: grdp prints the password in clear text at this level, which is
 // why the default stays at WARN.

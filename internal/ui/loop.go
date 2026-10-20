@@ -6,6 +6,7 @@ import (
 	"image"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diggyen/SimpleClient/internal/autoconnect"
@@ -176,6 +177,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		// ── Render tick ──────────────────────────────────────────────────────
 		case <-ticker.C:
 			state.Mu.Lock()
+			state.expireBanner(time.Now())
 			// The countdown to the startup server, over: log on. The screen
 			// changes here, under the lock, so the next tick cannot start a
 			// second connection before this one has begun.
@@ -520,6 +522,8 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	state.unattended = false
 	state.Transition(ScreenConnecting)
 	state.Modal.Error = ""
+	// The last session's "Disconnected" is not this one's.
+	state.ErrorMsg = ""
 	state.Mu.Unlock()
 
 	// A typed name is looked up here, outside the lock: DNS can take seconds.
@@ -566,19 +570,27 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 		return
 	}
 
-	state.Mu.Lock()
-	// Only now, with the session up: an account that was rejected is not one to
-	// offer back the next time, nor a server to start at.
-	state.saveConnection(selected, creds.Username, creds.Domain)
-	auto, changed := state.keepAuto(server, creds, mode)
-	installed := state.Boot.Installed()
-	state.Mu.Unlock()
-	if changed {
-		// On a USB stick this mounts its EFI partition: not under the lock.
-		if _, err := saveAuto(auto, installed); err != nil {
-			log.Printf("ui: startup server: %v", err)
-		}
+	// Only once the session has stood: an account that was rejected is not
+	// one to offer back the next time, nor a server to start at. xrdp turns a
+	// password down only after the session has come up (Rejected), so that is
+	// when the session has lasted rdp.RejectWithin, or has ended otherwise.
+	var kept sync.Once
+	keep := func() {
+		kept.Do(func() {
+			state.Mu.Lock()
+			state.saveConnection(selected, creds.Username, creds.Domain)
+			auto, changed := state.keepAuto(server, creds, mode)
+			installed := state.Boot.Installed()
+			state.Mu.Unlock()
+			if changed {
+				// On a USB stick this mounts its EFI partition: not under the lock.
+				if _, err := saveAuto(auto, installed); err != nil {
+					log.Printf("ui: startup server: %v", err)
+				}
+			}
+		})
 	}
+	stood := time.AfterFunc(rdp.RejectWithin, keep)
 
 	for {
 		runSession(state, fb, session, selected, client)
@@ -595,6 +607,21 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 			break
 		}
 	}
+	stood.Stop()
+
+	// The server hung up without logging the user on: the password was turned
+	// down, the same as a server that refuses it before the session comes up.
+	// Back to the dialog to type it again — not round again on our own, which
+	// would only get the same answer.
+	if client != nil && client.Rejected() {
+		state.Mu.Lock()
+		*session = nil
+		state.Modal.Error = i18n.T(i18n.ErrRejected)
+		state.Transition(ScreenModal)
+		state.Mu.Unlock()
+		return
+	}
+	keep()
 
 	// Connection closed: back to where the kiosk starts — the startup
 	// server's dialog or countdown, if this was it, else the list.
@@ -603,7 +630,7 @@ func connect(state *UIState, fb framebuffer.Device, session **SessionState) {
 	if !state.isAutoServer(server, selected) || !state.startAuto(time.Now()) {
 		state.Transition(ScreenDiscovery)
 	}
-	state.ErrorMsg = i18n.T(i18n.Disconnected)
+	state.flash(i18n.T(i18n.Disconnected), time.Now())
 	state.Mu.Unlock()
 }
 
@@ -699,7 +726,7 @@ func disconnect(state *UIState, session *SessionState) {
 	}
 	state.Mu.Lock()
 	state.Transition(ScreenDiscovery)
-	state.ErrorMsg = i18n.T(i18n.Disconnected)
+	state.flash(i18n.T(i18n.Disconnected), time.Now())
 	state.Mu.Unlock()
 }
 

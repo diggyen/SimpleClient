@@ -25,6 +25,8 @@
  *                                           their names
  *             CONNECTED <w> <h>             the session's desktop is showing
  *             POINTER <x> <y>               the server moved the pointer
+ *             SESSION                       the server has logged the user
+ *                                           on (see sc_session)
  *             ERROR <class> <name> <text>   could not connect; class is one
  *                                           of auth, unreachable, refused,
  *                                           tls, display, other
@@ -38,6 +40,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +49,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <freerdp/channels/channels.h>
 #include <freerdp/client.h>
 #include <freerdp/client/cmdline.h>
 #include <freerdp/codec/color.h>
@@ -55,6 +59,7 @@
 #include <freerdp/graphics.h>
 #include <freerdp/input.h>
 #include <freerdp/scancode.h>
+#include <freerdp/session.h>
 #include <freerdp/settings.h>
 #include <winpr/synch.h>
 
@@ -396,6 +401,40 @@ static BOOL sc_gateway_message(freerdp* instance, UINT32 type, BOOL display, BOO
 	return TRUE;
 }
 
+/* sc_session says SESSION once the server has logged the user on. Windows
+ * tells (Save Session Info). xrdp does not, and with require_credentials it
+ * turns a wrong password down by hanging up a moment after the session came
+ * up, the same hang-up as a logoff. But its channel server (chansrv) runs only
+ * in a session someone has logged on to, and opens the clipboard and sound
+ * channels as it starts: a word from the server on either is the session's. */
+static atomic_bool session_said;
+static pReceiveChannelData channel_data;
+
+static void sc_session(void)
+{
+	if (!atomic_exchange(&session_said, true))
+		say("SESSION");
+}
+
+static BOOL sc_session_info(rdpContext* context, UINT32 type, const void* data)
+{
+	(void)context;
+	(void)data;
+	/* The extended one carries an auto-reconnect cookie or a logon error. */
+	if (type != INFO_TYPE_LOGON_EXTENDED_INF)
+		sc_session();
+	return TRUE;
+}
+
+static BOOL sc_channel_data(freerdp* instance, UINT16 id, const BYTE* data, size_t size,
+                            UINT32 flags, size_t total)
+{
+	const char* name = freerdp_channels_get_name_by_id(instance, id);
+	if (name && (strcmp(name, "cliprdr") == 0 || strcmp(name, "rdpsnd") == 0))
+		sc_session();
+	return channel_data(instance, id, data, size, flags, total);
+}
+
 static int sc_logon_error(freerdp* instance, UINT32 data, UINT32 type)
 {
 	(void)instance;
@@ -422,6 +461,9 @@ static BOOL sc_client_new(freerdp* instance, rdpContext* context)
 	instance->ChooseSmartcard = sc_choose_smartcard;
 	instance->PresentGatewayMessage = sc_gateway_message;
 	instance->LogonErrorInfo = sc_logon_error;
+	context->update->SaveSessionInfo = sc_session_info;
+	channel_data = instance->ReceiveChannelData;
+	instance->ReceiveChannelData = sc_channel_data;
 	return TRUE;
 }
 

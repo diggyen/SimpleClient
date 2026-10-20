@@ -643,3 +643,27 @@ func TestAddStaticHost(t *testing.T) {
 		t.Errorf("static host dials %q", got)
 	}
 }
+
+// "Disconnected" is a passing message: it goes away by itself, and a message
+// set without a time — a bad rdphost= — stays.
+func TestFlash_Expires(t *testing.T) {
+	now := time.Now()
+	state := &UIState{}
+	state.flash(i18n.T(i18n.Disconnected), now)
+	state.Dirty = false
+
+	state.expireBanner(now.Add(bannerFor - time.Millisecond))
+	if state.ErrorMsg == "" || state.Dirty {
+		t.Fatal("the banner went before its time")
+	}
+	state.expireBanner(now.Add(bannerFor))
+	if state.ErrorMsg != "" || !state.Dirty {
+		t.Fatalf("the banner is still up (%q), or the screen was not redrawn", state.ErrorMsg)
+	}
+
+	state = &UIState{ErrorMsg: "rdphost: x?"}
+	state.expireBanner(now.Add(time.Hour))
+	if state.ErrorMsg == "" {
+		t.Error("a banner with no time was taken down")
+	}
+}

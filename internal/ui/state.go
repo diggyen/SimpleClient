@@ -115,6 +115,9 @@ type UIState struct {
 	ScanDone     bool
 	Modal        ModalState
 	ErrorMsg     string // Transient info/error banner
+	// ErrorUntil is when ErrorMsg goes away by itself (see flash); zero
+	// keeps it up.
+	ErrorUntil time.Time
 
 	// Boot is how this kiosk was started. Installing to disk is offered
 	// (CanInstall) only when it runs from a USB stick or CD: a kiosk booted
@@ -244,6 +247,27 @@ func (s *UIState) OpenModalFor() {
 // hand, cursor in the server field.
 func (s *UIState) OpenModalManual() {
 	s.Modal = ModalState{FocusIdx: fieldServer}
+}
+
+// bannerFor is how long a passing message such as "Disconnected" stays up:
+// long enough to be read by whoever is at the screen, not so long that it is
+// still there for the next person to sit down.
+const bannerFor = 5 * time.Second
+
+// flash puts msg in the banner for bannerFor.
+func (s *UIState) flash(msg string, now time.Time) {
+	s.ErrorMsg = msg
+	s.ErrorUntil = now.Add(bannerFor)
+	s.Dirty = true
+}
+
+// expireBanner takes a flashed message down once its time is up.
+func (s *UIState) expireBanner(now time.Time) {
+	if s.ErrorMsg != "" && !s.ErrorUntil.IsZero() && !now.Before(s.ErrorUntil) {
+		s.ErrorMsg = ""
+		s.ErrorUntil = time.Time{}
+		s.Dirty = true
+	}
 }
 
 // Transition moves the UI to a new screen.

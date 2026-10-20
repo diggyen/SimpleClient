@@ -24,7 +24,11 @@ esac
 echo "MODE 1920 1080 144 card0:HDMI-A-1" >&4
 echo "CONNECTED 1920 1080" >&4
 echo "POINTER 10 20" >&4
-if [ "$SC_FAKE_MODE" = lost ]; then echo "END lost" >&4; exit 0; fi
+case "$SC_FAKE_MODE" in
+lost)     echo "END lost" >&4; exit 0 ;;
+rejected) echo "END logoff" >&4; exit 0 ;;
+logoff)   echo "SESSION" >&4; echo "END logoff" >&4; exit 0 ;;
+esac
 while read -r line <&3; do
 	echo "$line" >> "$SC_FAKE_LOG"
 	if [ "$line" = q ]; then echo "END quit" >&4; exit 0; fi
@@ -139,5 +143,25 @@ func TestEngine_Lost(t *testing.T) {
 	waitDone(t, e)
 	if !e.Failed() {
 		t.Fatal("a lost connection did not count as failed")
+	}
+}
+
+// A server that hangs up before it has logged the user on turned the password
+// down, as xrdp does with require_credentials; one that logs the user off had
+// logged them on first, and a lost connection is no answer at all.
+func TestEngine_Rejected(t *testing.T) {
+	for _, c := range []struct {
+		mode string
+		want bool
+	}{{"rejected", true}, {"logoff", false}, {"lost", false}} {
+		useFakeEngine(t, c.mode)
+		e, err := StartEngine("10.0.0.5:3389", Credentials{Username: "u", Password: "p"}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitDone(t, e)
+		if e.Rejected() != c.want {
+			t.Errorf("%s: Rejected() = %v, want %v", c.mode, e.Rejected(), c.want)
+		}
 	}
 }

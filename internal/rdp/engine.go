@@ -28,6 +28,7 @@ type Session interface {
 	Close() error
 	Done() <-chan struct{}
 	Failed() bool
+	Rejected() bool
 }
 
 // EnginePath is the session engine, sc-rdp: FreeRDP drawing straight to the
@@ -120,6 +121,9 @@ type Engine struct {
 	done   chan struct{}
 	failed atomic.Bool
 	closed atomic.Bool
+
+	session  atomic.Bool // the server has logged the user on (SESSION)
+	rejected atomic.Bool
 
 	// The display mode the engine drives: the pointer has to span it, and
 	// it need not be the console's.
@@ -259,6 +263,7 @@ func (e *Engine) watch(r io.ReadCloser, up chan<- error, onPointer func(x, y int
 		}
 	}
 
+	var connected time.Time
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		line := sc.Text()
@@ -277,7 +282,10 @@ func (e *Engine) watch(r io.ReadCloser, up chan<- error, onPointer func(x, y int
 				e.Display = f[4]
 			}
 		case "CONNECTED":
+			connected = time.Now()
 			report(nil)
+		case "SESSION":
+			e.session.Store(true)
 		case "POINTER":
 			if len(f) >= 3 && onPointer != nil {
 				x, _ := strconv.Atoi(f[1])
@@ -302,6 +310,8 @@ func (e *Engine) watch(r io.ReadCloser, up chan<- error, onPointer func(x, y int
 			report(ee)
 		case "END": // END logoff|lost|quit
 			e.failed.Store(len(f) >= 2 && f[1] == "lost")
+			e.rejected.Store(len(f) >= 2 && f[1] == "logoff" && !e.session.Load() &&
+				!connected.IsZero() && time.Since(connected) < RejectWithin)
 		}
 	}
 	r.Close()
@@ -387,3 +397,16 @@ func (e *Engine) Done() <-chan struct{} { return e.done }
 // Failed reports whether the session ended because the connection died, as
 // opposed to a logoff or a disconnect from either side.
 func (e *Engine) Failed() bool { return e.failed.Load() }
+
+// RejectWithin is how soon after it came up a session the server ends
+// without having logged the user on counts as Rejected. The server's word is
+// what tells (SESSION); this only keeps a server that has no way of saying it
+// — no clipboard, no sound, not Windows — from having every logoff taken for a
+// rejection. xrdp hangs up on a wrong password about 2 s in.
+const RejectWithin = 30 * time.Second
+
+// Rejected reports whether the server ended the session without ever logging
+// the user on: xrdp turning the password down, with require_credentials set
+// (server/simpleclient-server.sh). Windows turns one down before the session
+// comes up, which StartEngine returns as an "auth" EngineError.
+func (e *Engine) Rejected() bool { return e.rejected.Load() }
