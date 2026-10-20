@@ -58,6 +58,7 @@
 #include <freerdp/settings.h>
 #include <winpr/synch.h>
 
+#include "hwdec.h"
 #include "kms.h"
 #include "yuv.h"
 
@@ -670,8 +671,19 @@ static bool set_monitors(rdpSettings* s, const struct kms* kms)
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
-int main(void)
+int main(int nargs, char** args)
 {
+	/* sc-rdp --hwdec runs the GPU trial (hwdec.c) on its own: the kiosk
+	 * runs it at start, to show its answer, which sessions then find. */
+	if (nargs > 1 && strcmp(args[1], "--hwdec") == 0) {
+		char node[300], name[200];
+		if (sc_hwdec(node, sizeof(node), name, sizeof(name)))
+			printf("gpu %s %s\n", node, name);
+		else
+			printf("cpu\n");
+		return 0;
+	}
+
 	signal(SIGPIPE, SIG_IGN);
 	/* The kiosk's end of a pipe may be non-blocking, and the flag would
 	 * otherwise come along: a read with nothing to read yet is not the end. */
@@ -712,6 +724,11 @@ int main(void)
 		return 3;
 	}
 	say("MODE %d %d %d %s", kms_width(kms), kms_height(kms), kms_refresh(kms), kms_name(kms));
+
+	/* Whether the GPU decodes H.264, found by a trial in a child process:
+	 * so before FreeRDP, while this process has only the one thread. */
+	char node[300], gpu[200];
+	bool hwdec = sc_hwdec(node, sizeof(node), gpu, sizeof(gpu));
 
 	/* The display's own resolution, the graphics pipeline with H.264, and
 	 * every visual nicety a LAN has room for. They go first, so an argument
@@ -767,6 +784,13 @@ int main(void)
 		freerdp_client_context_free(context);
 		kms_close(kms);
 		return 2;
+	}
+
+	/* FreeRDP has the GPU decode only when its GDI is not the software one,
+	 * which is all that setting still changes. */
+	if (hwdec) {
+		setenv("FREERDP_HWCTX_DEVICE", node, 1);
+		freerdp_settings_set_bool(context->settings, FreeRDP_SoftwareGdi, FALSE);
 	}
 
 	sc_yuv_install();

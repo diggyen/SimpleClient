@@ -36,6 +36,56 @@ type Session interface {
 // drive, sessions run on the built-in client.
 var EnginePath = "/usr/bin/sc-rdp"
 
+// hwdecPath is the engine's answer to whether the GPU decodes the sessions'
+// H.264 (engine/hwdec.c): "cpu", or "gpu <render node> <kernel driver>
+// <VA-API driver>".
+var hwdecPath = "/run/sc-hwdec"
+
+// ProbeDecoder has the engine find out, ahead of the first session, whether
+// the GPU decodes H.264: sessions then start without the trial, and the kiosk
+// can show its answer (Decoder). It returns once the trial is over.
+func ProbeDecoder() {
+	if _, err := os.Stat(EnginePath); err != nil {
+		return
+	}
+	cmd := exec.Command(EnginePath, "--hwdec")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "HOME=/tmp")
+	_ = cmd.Run()
+}
+
+var decoder struct {
+	sync.Mutex
+	known bool
+	gpu   string
+}
+
+// Decoder says what decodes the sessions' H.264: the GPU's maker ("Intel",
+// "AMD"), or "" for the CPU. known is false until the engine has found out.
+func Decoder() (gpu string, known bool) {
+	decoder.Lock()
+	defer decoder.Unlock()
+	if !decoder.known {
+		b, err := os.ReadFile(hwdecPath)
+		if err != nil {
+			return "", false
+		}
+		decoder.known = true
+		if f := strings.Fields(string(b)); len(f) >= 3 && f[0] == "gpu" {
+			switch f[2] {
+			case "i915", "xe":
+				decoder.gpu = "Intel"
+			case "amdgpu", "radeon":
+				decoder.gpu = "AMD"
+			default:
+				decoder.gpu = f[2]
+			}
+		}
+	}
+	return decoder.gpu, true
+}
+
 // ErrNoEngine reports that the engine cannot run this session, and the
 // built-in client should.
 var ErrNoEngine = errors.New("session engine unavailable")

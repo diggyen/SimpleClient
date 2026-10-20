@@ -1,0 +1,23 @@
+--- a/libfreerdp/codec/h264_ffmpeg.c
++++ b/libfreerdp/codec/h264_ffmpeg.c
+@@ -732,6 +732,20 @@
+ 				target->width = sys->hwVideoFrame->width;
+ 				target->height = sys->hwVideoFrame->height;
+ 				status = av_hwframe_transfer_data(target, sys->hwVideoFrame, 0);
++
++				/* A driver may list YUV420P and still not give it: the GPU's
++				 * own format then, and swscale, for this frame and the rest. */
++				if ((status < 0) && (target == sys->videoFrame))
++				{
++					WLog_Print(h264->log, WLOG_WARN,
++					           "Hardware copy to %s failed (%s), using swscale conversion",
++					           av_format_str(target->format), av_err2str(status));
++					sys->hwFrameSupportsNativeFormat = 0;
++					target = sys->cpuVideoFrame;
++					target->width = sys->hwVideoFrame->width;
++					target->height = sys->hwVideoFrame->height;
++					status = av_hwframe_transfer_data(target, sys->hwVideoFrame, 0);
++				}
+ 			}
+ 			else
+ 				status = av_frame_copy(target, sys->hwVideoFrame);

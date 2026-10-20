@@ -60,6 +60,8 @@ const (
 	BadgeSound
 	BadgeKeyboard
 	BadgeLanguage
+	BadgeVideo // what decodes the sessions' video, after the version
+	VideoCPU
 
 	Tagline // sits under the wordmark; keep it short enough to fit at 640px
 	ModalTitle
@@ -194,6 +196,8 @@ var catalogues = map[Lang]*catalogue{
 		BadgeSound:     "Sound",
 		BadgeKeyboard:  "Keyboard",
 		BadgeLanguage:  "Language",
+		BadgeVideo:     "Video",
+		VideoCPU:       "CPU",
 		Tagline:        "REMOTE DESKTOP KIOSK",
 		ModalTitle:     "Connection Details",
 		LabelServer:    "Server:",
@@ -316,6 +320,8 @@ var catalogues = map[Lang]*catalogue{
 		BadgeSound:     "Ses",
 		BadgeKeyboard:  "Klavye",
 		BadgeLanguage:  "Dil",
+		BadgeVideo:     "Video",
+		VideoCPU:       "İşlemci",
 		Tagline:        "UZAK MASAÜSTÜ İSTEMCİSİ",
 		ModalTitle:     "Bağlantı Bilgileri",
 		LabelServer:    "Sunucu:",

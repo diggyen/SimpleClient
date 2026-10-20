@@ -9,7 +9,7 @@ environment underneath.
 It draws straight to the Linux framebuffer (`/dev/fb0`) and reads raw evdev
 input. There is no X11 and no Wayland: the whole system is a kernel and an
 initramfs — busybox, the Go binary that draws the UI, FreeRDP for the session.
-The ISO is about 250 MB, most of it the kernel's drivers and the firmware
+The ISO is about 265 MB, most of it the kernel's drivers and the firmware
 graphics and wireless chips load. Every pixel above —
 the mark, the lettering, the signal bars — is drawn by the binary itself; there
 is no toolkit and no image asset in the ISO.
@@ -178,6 +178,17 @@ Over RemoteFX the kiosk spent 1.0 core on it (of a 2 GHz Xeon) and the network
 old CPUs and slow links, while RemoteFX stays the smoother for dragging windows
 about. Of a 60 fps film Chrome draws 50 frames a second on that VM, and the
 kiosk gets 47 to 50 of them, over either.
+
+The kiosk decodes H.264 on its GPU where it can: Intel's (iHD for Broadwell and
+later, i965 for the GPUs before) and AMD's (Mesa's radeonsi, and r600 for the
+Radeons before the HD 7000 series), on a machine with 1.5 GB of memory or more,
+as what the GPU decodes into takes memory of its own. It finds out at start by
+having the GPU decode a test stream. Elsewhere it decodes on the CPU, as it
+does RemoteFX on every machine, since no GPU has a RemoteFX decoder. NVIDIA's
+decoder works only through NVIDIA's own driver, which is built for glibc and,
+unsigned, does not load under Secure Boot: a machine with an NVIDIA card
+decodes on its CPU, or on its Intel GPU where that is enabled as well. The line
+under the keys says which: *Video: Intel*, *Video: AMD* or *Video: CPU*.
 
 ## Build it
 

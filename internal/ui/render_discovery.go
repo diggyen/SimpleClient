@@ -514,7 +514,15 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout, install bool) {
 	// Project and build, on one centred line. The version is a shade brighter
 	// than the URL: it is the one thing on this screen someone reporting a fault
 	// has to be able to read back, and the kiosk offers no other way to ask.
+	// What decodes the sessions' video goes with it, the GPU or the CPU, once
+	// the engine has found out.
 	ver := version.Version
+	if gpu, known := rdp.Decoder(); known {
+		if gpu == "" {
+			gpu = i18n.T(i18n.VideoCPU)
+		}
+		ver += buildSep + i18n.T(i18n.BadgeVideo) + ": " + gpu
+	}
 	x = l.Screen.Min.X + (l.Screen.Dx()-TextWidth(gitURL+buildSep+ver, false))/2
 	urlY := y + CharH + 18
 

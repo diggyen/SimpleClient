@@ -260,6 +260,19 @@ start. On a Linux server it is usually one of these:
 
 ---
 
+## The bottom line says *Video: CPU* on a machine with an Intel or AMD GPU
+
+The kiosk tried the GPU's video decoder at start, and it did not decode the
+test stream; or it never tried, as the machine has less than 1.5 GB of memory,
+or the boot menu's safe graphics left the GPU's driver unloaded. The serial
+console says which: `video:` gives the GPU drivers, the memory and the decoders
+kept at boot, and a line for each GPU tried starts with its render node,
+`sc-rdp: /dev/dri/renderD128 (i915): ...`, with what went wrong.
+Sessions still work: the CPU decodes their video. A machine whose only GPU is
+an NVIDIA always says *CPU*; see [the README](../README.md#linux-servers).
+
+---
+
 ## Reporting something not covered here
 
 Open an issue with:

@@ -192,6 +192,10 @@ It draws straight to the display through KMS — page flips at the display's own
 refresh rate, a hardware cursor where the display has one, up to four displays
 side by side as one desktop — and decodes RemoteFX and H.264 (AVC420 and
 AVC444, with an FFmpeg built for nothing else) through the graphics pipeline.
+H.264 goes to the GPU's decoder where the machine has one that works
+(`hwdec.c`): Intel's through iHD or i965, AMD's through Mesa's radeonsi or r600,
+over VA-API, as found by having each GPU decode a test stream in a child
+process at start. Elsewhere, NVIDIA included, the CPU decodes it.
 Sound, the microphone, drives, USB devices and smart cards go through
 FreeRDP's own channels. The kiosk starts one per session and talks to it over
 two pipes, described at the top of `sc-rdp.c`; the password never goes on its
@@ -207,6 +211,7 @@ measured on a 1080p session (the Dockerfile has the numbers):
 | `0003` | progressive tiles went to the thread pool one at a time |
 | `0004` | H.264 was decoded on one thread; a frame's slices now go side by side |
 | `0005` | progressive tiles took their scratch buffers from one pool, locked from every thread |
+| `0006` | a GPU driver that offered its pictures as YUV420P and then failed to give them lost every frame; they now come in its own format, and swscale converts them |
 
 Where the engine cannot run — it is missing, or finds no display at all —
 `internal/rdp` falls back to a built-in client, `github.com/tomatome/grdp`,

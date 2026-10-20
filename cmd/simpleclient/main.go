@@ -92,6 +92,10 @@ func main() {
 		warnf("sound: %s", d)
 	}
 
+	// Whether the GPU decodes the sessions' video: found out now rather than
+	// at the first session, which would wait for it, and shown on screen.
+	go rdp.ProbeDecoder()
+
 	// USB drives are mounted as they are plugged in, for sessions to offer the
 	// server; the stick the kiosk boots from is not one of them.
 	usb.SetMediumCheck(install.IsInstallMedium)

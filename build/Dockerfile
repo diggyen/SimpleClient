@@ -114,16 +114,50 @@ RUN set -e; \
     test -f /kernel/new/vmlinuz; test -f /kernel/lts/vmlinuz; \
     ls -l /signed/usr/lib/shim /signed/usr/lib/grub/x86_64-efi-signed
 
+# ── AMD's video decoders ──────────────────────────────────────────────────────
+# A GPU decodes the session's H.264 where it can (engine/hwdec.c), through
+# VA-API. Intel's VA-API drivers are Alpine's (see the engine below); AMD's is
+# Mesa's, built here with only what a video decoder takes: radeonsi (the HD
+# 7000 series and later) and r600 (the Radeons before them), H.264, and no
+# LLVM, which radeonsi does without as it compiles with ACO. Alpine's Mesa
+# would bring LLVM, OpenGL and X11 along, over 220 MB the initramfs would carry
+# for this one driver; this one is 20 MB. The tarball's SHA-512 matched
+# Alpine's own record of it when the sum below was taken.
+FROM --platform=linux/amd64 alpine:${ALPINE_VERSION} AS mesa-builder
+ARG MESA_VERSION=26.1.6
+ARG MESA_SHA256=5296b88a0f1e012e2cb9ada150a2bbadf728ca81e5a4fb2ab43c83a4d2158606
+RUN set -e; \
+    apk add --no-cache build-base meson samurai python3 py3-mako py3-yaml py3-packaging bison \
+        flex glslang pkgconf curl linux-headers libdrm-dev libva-dev zlib-dev elfutils-dev; \
+    mkdir -p /src; cd /src; \
+    curl -fsSLo mesa.tar.xz "https://mesa.freedesktop.org/archive/mesa-${MESA_VERSION}.tar.xz"; \
+    echo "${MESA_SHA256}  mesa.tar.xz" | sha256sum -c -; \
+    tar -xJf mesa.tar.xz; \
+    meson setup mesa-build "mesa-${MESA_VERSION}" --prefix=/usr --libdir=lib --buildtype=release \
+        -Db_ndebug=true -Dplatforms= -Dgallium-drivers=radeonsi,r600 -Dvulkan-drivers= \
+        -Dgallium-va=enabled -Dvideo-codecs=h264dec -Dllvm=disabled \
+        -Dopengl=false -Dglx=disabled -Degl=disabled -Dgbm=disabled -Dgles1=disabled \
+        -Dgles2=disabled -Dglvnd=disabled -Dxmlconfig=disabled -Dexpat=disabled -Dzstd=disabled \
+        -Dshader-cache=disabled -Dvalgrind=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
+        -Dmicrosoft-clc=disabled -Dgallium-d3d12-video=disabled -Dgallium-d3d12-graphics=disabled \
+        -Dintel-rt=disabled -Ddisplay-info=disabled -Dspirv-tools=disabled -Dbuild-tests=false \
+        -Dtools=; \
+    meson compile -C mesa-build; \
+    DESTDIR=/mesa meson install -C mesa-build; \
+    strip --strip-unneeded /mesa/usr/lib/dri/libgallium_drv_video.so; \
+    ls -l /mesa/usr/lib/dri
+
 # ── Session engine ────────────────────────────────────────────────────────────
 # sc-rdp (engine/): FreeRDP drawing straight to the display through KMS, with
 # the graphics pipeline's H.264 for frame rates the bitmap protocol cannot
 # reach, and FreeRDP's own channels for sound, microphone, USB devices and
 # smart cards. The kiosk falls back to its built-in client where it cannot run.
 #
-# FFmpeg is built with the H.264 decoder and swscale and nothing else: Alpine's
-# ffmpeg-libs would bring every codec there is, tens of megabytes the initramfs
-# would carry for nothing. FreeRDP is built without its X11, Wayland and SDL
-# clients, its server side and everything that would want a desktop.
+# FFmpeg is built with the H.264 decoder, its VA-API path to the GPU, and
+# swscale, and nothing else: Alpine's ffmpeg-libs would bring every codec there
+# is, tens of megabytes the initramfs would carry for nothing. FreeRDP is built
+# without its X11, Wayland and SDL clients, its server side and everything that
+# would want a desktop.
 #
 # The sources are checked against their published SHA-256 (FreeRDP's release
 # .sha256; FFmpeg's tarball, whose signature by the FFmpeg release key was
@@ -135,7 +169,7 @@ ARG FREERDP_VERSION=3.32.2
 ARG FREERDP_SHA256=e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c
 
 RUN apk add --no-cache build-base cmake samurai nasm pkgconf curl linux-headers \
-        openssl-dev zlib-dev alsa-lib-dev libusb-dev pcsc-lite-dev libdrm-dev
+        openssl-dev zlib-dev alsa-lib-dev libusb-dev pcsc-lite-dev libdrm-dev libva-dev
 
 RUN set -e; mkdir -p /src; cd /src; \
     curl -fsSLo ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
@@ -144,8 +178,11 @@ RUN set -e; mkdir -p /src; cd /src; \
     ./configure --prefix=/usr --libdir=/usr/lib --enable-shared --disable-static \
         --disable-programs --disable-doc --disable-network --disable-autodetect \
         --disable-everything --enable-decoder=h264 --enable-parser=h264 \
+        --enable-vaapi --enable-libdrm --enable-hwaccel=h264_vaapi \
         --disable-avformat --disable-avdevice --disable-avfilter --disable-swresample \
         --enable-swscale --enable-pthreads --disable-debug; \
+    grep -q "define CONFIG_H264_VAAPI_HWACCEL 1" config_components.h; \
+    grep -q "define HAVE_VAAPI_DRM 1" config.h; \
     make -j"$(nproc)"; make install
 
 # build/patches/freerdp/: what a session costs.
@@ -160,6 +197,9 @@ RUN set -e; mkdir -p /src; cd /src; \
 #         pool's lock and wakeups for every tile had cost more than the DWT.
 #         And H.264 decodes a frame's slices side by side, as many as the
 #         server cuts it into, where FreeRDP left libavcodec on one thread.
+#   0006  H.264 on the GPU: a driver that lists YUV420P among the formats it
+#         hands pictures back in, and then fails to, hands them back in its
+#         own and swscale converts them, where FreeRDP lost every frame.
 COPY build/patches/freerdp/ /src/freerdp-patches/
 RUN set -e; cd /src; \
     curl -fsSLo freerdp.tar.gz \
@@ -175,6 +215,7 @@ RUN set -e; cd /src; \
         -DWITH_SERVER=OFF -DWITH_SERVER_CHANNELS=OFF -DWITH_SHADOW=OFF -DWITH_PROXY=OFF \
         -DWITH_PLATFORM_SERVER=OFF -DWITH_RDTK=OFF -DWITH_WINPR_TOOLS=OFF \
         -DWITH_FFMPEG=ON -DWITH_VIDEO_FFMPEG=ON -DWITH_DSP_FFMPEG=OFF -DWITH_SWSCALE=ON \
+        -DWITH_FFMPEG_HWACCEL=ON \
         -DWITH_OPENH264=OFF -DWITH_GFX_AV1=OFF \
         -DWITH_ALSA=ON -DWITH_PULSE=OFF -DWITH_OSS=OFF -DWITH_SNDIO=OFF \
         -DWITH_OPUS=OFF -DWITH_FDK_AAC=OFF -DWITH_SOXR=OFF \
@@ -211,14 +252,32 @@ RUN set -e; apk add --no-cache meson flex perl ccid; cd /src; \
 
 COPY engine/ /src/engine/
 COPY build/copy-bins.sh /usr/local/bin/copy-bins
+COPY --from=mesa-builder /mesa/usr/lib/dri/ /usr/lib/dri/
 # yuv_test checks the engine's own YUV conversion against FreeRDP's, byte for
-# byte; a difference stops the build.
+# byte; hwdec_test that the test stream a GPU is tried with decodes, on the CPU,
+# to the pictures a GPU's are checked against. Either failing stops the build.
+#
+# The GPUs' VA-API drivers come along: Alpine's for Intel, iHD (Broadwell and
+# later) and i965 (the GPUs before), and Mesa's for AMD, from above, one file
+# that each of its drivers' names links to. They are 70 MB, and stay
+# compressed with xz in 12, as a machine needs one maker's at most: /init
+# unpacks those of the GPUs it runs.
 RUN set -e; chmod +x /usr/local/bin/copy-bins; \
-    FLAGS="$(pkg-config --cflags --libs freerdp-client3 freerdp3 winpr3 libdrm) -lpthread"; \
+    apk add --no-cache x264 python3 xz intel-media-driver libva-intel-driver libelf libstdc++; \
+    python3 /src/engine/probe264.py > /src/engine/probe264.h; \
+    FLAGS="$(pkg-config --cflags --libs freerdp-client3 freerdp3 winpr3 libdrm libavcodec libavutil libva) -lpthread"; \
     cc -O2 -Wall -o /tmp/yuv_test /src/engine/yuv_test.c /src/engine/yuv.c $FLAGS; \
     /tmp/yuv_test; \
-    cc -O2 -Wall -o /usr/bin/sc-rdp /src/engine/sc-rdp.c /src/engine/kms.c /src/engine/yuv.c $FLAGS; \
+    cc -O2 -Wall -o /tmp/hwdec_test /src/engine/hwdec_test.c /src/engine/hwdec.c $FLAGS; \
+    /tmp/hwdec_test; \
+    cc -O2 -Wall -o /usr/bin/sc-rdp /src/engine/sc-rdp.c /src/engine/kms.c /src/engine/yuv.c \
+        /src/engine/hwdec.c $FLAGS; \
     copy-bins /out sc-rdp; \
+    copy-bins /out /usr/lib/dri/iHD_drv_video.so /usr/lib/dri/i965_drv_video.so \
+        /usr/lib/dri/libgallium_drv_video.so; \
+    for d in radeonsi r600; do ln -s libgallium_drv_video.so "/out/usr/lib/dri/${d}_drv_video.so"; done; \
+    xz -9e -T1 /out/usr/lib/dri/iHD_drv_video.so /out/usr/lib/dri/i965_drv_video.so \
+        /out/usr/lib/dri/libgallium_drv_video.so; \
     if [ -d /usr/lib/freerdp3 ]; then mkdir -p /out/usr/lib; cp -a /usr/lib/freerdp3 /out/usr/lib/; fi; \
     CCID=/usr/lib/pcsc/drivers/ifd-ccid.bundle; \
     copy-bins /out pcscd /usr/lib/libpcsclite.so.1 /usr/lib/libpcsclite_real.so.1 "$CCID/Contents/Linux/libccid.so"; \
@@ -262,7 +321,8 @@ RUN apk add --no-cache linux-firmware-bnx2 linux-firmware-bnx2x \
 #   NVIDIA's GSP firmware, 100 MB. nouveau needs it only on Ada and later,
 #                 which /init therefore leaves on the firmware framebuffer;
 #                 older GeForces run without it.
-#   i915's HuC and GSC firmware, for video decoding and content protection.
+#   i915's HuC and GSC firmware, for the encoders' rate control and content
+#                 protection: the GPU decodes video without them.
 #   AMD's data-centre accelerators (Instinct MI100-MI355), which have no
 #                 display.
 RUN set -e; \
@@ -362,7 +422,8 @@ RUN cp /bin/busybox.static /rootfs/bin/busybox \
         ln -sf /bin/busybox "/rootfs/bin/$applet"; \
     done \
  && test -L /rootfs/bin/sh \
- && test "$(readlink /rootfs/bin/sh)" = "/bin/busybox"
+ && test "$(readlink /rootfs/bin/sh)" = "/bin/busybox" \
+ && test -L /rootfs/bin/unxz
 
 RUN mkdir -p /rootfs/lib/firmware \
  && for d in bnx2 bnx2x rtl_nic tigon e100; do \
