@@ -176,8 +176,8 @@ all 30 frames a second; it took the server about 1.8 cores, for each viewer.
 Over RemoteFX the kiosk spent 1.0 core on it (of a 2 GHz Xeon) and the network
 21 Mbit/s; over H.264, 0.6 core and 5.5 Mbit/s. So `--h264` suits kiosks with
 old CPUs and slow links, while RemoteFX stays the smoother for dragging windows
-about. A 60 fps film reaches the kiosk at 30 to 35, and Chrome drops a sixth of
-its frames on the way.
+about. Of a 60 fps film Chrome draws 50 frames a second on that VM, and the
+kiosk gets 47 to 50 of them, over either.
 
 ## Build it
 

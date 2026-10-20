@@ -8,6 +8,8 @@
 # builds xrdp 0.10 with x264 (OpenH264 where x264 is not packaged) and its
 # Xorg backend from source, and sets them up for the kiosks:
 #   - H.264 frames up to every 8 ms (120 fps) instead of every 16
+#   - a frame captured while the last is encoded, which xrdp does not do: a
+#     video at 60 fps reaches the kiosk at 47-50 fps rather than 32-42
 #   - the Turkish Q and F keyboard layouts, which xrdp does not map: without
 #     them a Turkish keyboard types as a US one
 #   - sound both ways, through PipeWire or PulseAudio, whichever the desktop
@@ -119,14 +121,14 @@ install_build_deps() {
         export DEBIAN_FRONTEND=noninteractive
         apt-get update
         apt-get install -y --no-install-recommends \
-            build-essential pkg-config autoconf automake libtool nasm curl ca-certificates \
+            build-essential pkg-config autoconf automake libtool nasm patch curl ca-certificates \
             openssl xz-utils libssl-dev libpam0g-dev libx11-dev libxfixes-dev libxrandr-dev \
             libfuse3-dev fuse3 libx264-dev libpixman-1-dev libopus-dev \
             xserver-xorg-core xserver-xorg-dev libepoxy-dev libgbm-dev libdrm-dev \
             xauth dbus-x11 x11-xserver-utils
         ;;
     dnf)
-        dnf install -y gcc gcc-c++ make autoconf automake libtool nasm pkgconf-pkg-config curl \
+        dnf install -y gcc gcc-c++ make autoconf automake libtool nasm patch pkgconf-pkg-config curl \
             openssl xz openssl-devel pam-devel libX11-devel libXfixes-devel libXrandr-devel \
             fuse3-devel fuse3 pixman-devel opus-devel \
             xorg-x11-server-devel xorg-x11-server-Xorg libepoxy-devel mesa-libgbm-devel \
@@ -140,7 +142,7 @@ install_build_deps() {
         ;;
     zypper)
         zypper -n in -t pattern devel_basis || true
-        zypper -n in gcc gcc-c++ make autoconf automake libtool nasm pkg-config curl openssl xz \
+        zypper -n in gcc gcc-c++ make autoconf automake libtool nasm patch pkg-config curl openssl xz \
             libopenssl-devel pam-devel libX11-devel libXfixes-devel libXrandr-devel \
             fuse3-devel fuse3 libpixman-1-0-devel libopus-devel \
             xorg-x11-server xorg-x11-server-sdk libepoxy-devel libgbm-devel libdrm-devel xauth
@@ -176,6 +178,353 @@ unpack() {
 }
 
 # ── xrdp and xorgxrdp ────────────────────────────────────────────────────────
+# The X server captures a frame only once xrdp has acknowledged the last, and
+# xrdp acknowledged it when the frame was encoded and sent: capturing and
+# encoding took turns. This encodes a copy and lets the X server go on, with
+# four frames in flight to the kiosk instead of two. A 1920x1080 video at
+# 60 fps in Chrome, which draws 50 of them, reaches the kiosk at 47-50 fps
+# over RemoteFX, where it got 32-34, and at 49-50 over H.264, where 40-42.
+# A window dragged about, quick to encode, is not copied: it went at 107 fps
+# and cost xrdp the same 42% of a core as before.
+xrdp_patch() {
+    cat <<'PATCH'
+--- a/xrdp/xrdp_encoder.c
++++ b/xrdp/xrdp_encoder.c
+@@ -42,7 +42,11 @@
+ #include "xrdp_encoder_openh264.h"
+ #endif
+ 
+-#define DEFAULT_XRDP_GFX_FRAMES_IN_FLIGHT 2
++/* Four. With two, a 1920x1080 video at 60 fps in Chrome, which draws 50 of
++   its frames, still reached the client at 26-34 fps over RemoteFX and 41-46
++   over H.264, the X server capturing while frames were encoded (see
++   server_egfx_cmd); with four, at 47-50 and 49-50. Eight did no better. */
++#define DEFAULT_XRDP_GFX_FRAMES_IN_FLIGHT 4
+ /* limits used for validate env var XRDP_GFX_FRAMES_IN_FLIGHT */
+ #define MIN_XRDP_GFX_FRAMES_IN_FLIGHT 1
+ #define MAX_XRDP_GFX_FRAMES_IN_FLIGHT 16
+@@ -434,6 +438,10 @@
+     fifo_delete(self->fifo_to_proc, NULL);
+     fifo_delete(self->fifo_processed, NULL);
+     tc_mutex_delete(self->mutex);
++    for (index = 0; index < 4; index++)
++    {
++        g_free(self->copies[index]);
++    }
+     g_free(self);
+ }
+ 
+@@ -1497,6 +1505,7 @@
+     int wobjs_count;
+     int cont;
+     int timeout;
++    int start;
+     tbus robjs[32];
+     tbus wobjs[32];
+     struct xrdp_encoder *self;
+@@ -1557,7 +1566,9 @@
+             while (enc != 0)
+             {
+                 /* do work */
++                start = g_time3();
+                 self->process_enc(self, enc);
++                self->encode_ms = g_time3() - start;
+                 /* get next msg */
+                 tc_mutex_lock(mutex);
+                 enc = (XRDP_ENC_DATA *) fifo_remove_item(fifo_to_proc);
+--- a/xrdp/xrdp_encoder.h
++++ b/xrdp/xrdp_encoder.h
+@@ -60,6 +60,12 @@
+     xrdp_encoder_h264_create_proc xrdp_encoder_h264_create;
+     xrdp_encoder_h264_delete_proc xrdp_encoder_h264_delete;
+     xrdp_encoder_h264_encode_proc xrdp_encoder_h264_encode;
++    /* buffers frames were copied to, kept for the next ones: allocated
++       afresh, a buffer the size of the screen cost more in page faults than
++       the copy itself */
++    char *copies[4];
++    int copies_bytes;
++    int encode_ms; /* what the last item took the encoder thread, set by it */
+ };
+ 
+ /* cmd_id = 0 */
+@@ -112,6 +118,9 @@
+ };
+ 
+ #define ENC_FLAGS_GFX_BIT   0
++/* the frame was copied out of the X server's shared memory, and the X server
++   told it may capture the next one: u.gfx.data is ours to free */
++#define ENC_FLAGS_COPY_BIT  1
+ 
+ /* used when scheduling tasks in xrdp_encoder.c */
+ struct xrdp_enc_data
+--- a/xrdp/xrdp_mm.c
++++ b/xrdp/xrdp_mm.c
+@@ -3699,6 +3699,56 @@
+ }
+ 
+ /*****************************************************************************/
++/* A buffer for a frame's copy, one kept from an earlier frame if there is */
++static char *
++xrdp_mm_copy_take(struct xrdp_encoder *encoder, int bytes)
++{
++    char *copy;
++    int index;
++
++    if (bytes == encoder->copies_bytes)
++    {
++        for (index = 0; index < 4; index++)
++        {
++            if (encoder->copies[index] != NULL)
++            {
++                copy = encoder->copies[index];
++                encoder->copies[index] = NULL;
++                return copy;
++            }
++        }
++    }
++    return g_new(char, bytes);
++}
++
++/*****************************************************************************/
++static void
++xrdp_mm_copy_give(struct xrdp_encoder *encoder, char *copy, int bytes)
++{
++    int index;
++
++    if (bytes != encoder->copies_bytes)
++    {
++        /* the screen changed size: the buffers kept are no use now */
++        for (index = 0; index < 4; index++)
++        {
++            g_free(encoder->copies[index]);
++            encoder->copies[index] = NULL;
++        }
++        encoder->copies_bytes = bytes;
++    }
++    for (index = 0; index < 4; index++)
++    {
++        if (encoder->copies[index] == NULL)
++        {
++            encoder->copies[index] = copy;
++            return;
++        }
++    }
++    g_free(copy);
++}
++
++/*****************************************************************************/
+ static int
+ xrdp_mm_process_enc_done(struct xrdp_mm *self)
+ {
+@@ -3777,7 +3827,8 @@
+         {
+             enc = enc_done->enc;
+             LOG_DEVEL(LOG_LEVEL_DEBUG, "xrdp_mm_process_enc_done: last set");
+-            if (got_frame_id)
++            /* a copied frame was acknowledged when it was copied */
++            if (got_frame_id && !ENC_IS_BIT_SET(enc->flags, ENC_FLAGS_COPY_BIT))
+             {
+                 if (client_ack)
+                 {
+@@ -3793,6 +3844,11 @@
+             if (is_gfx)
+             {
+                 g_free(enc->u.gfx.cmd);
++                if (ENC_IS_BIT_SET(enc->flags, ENC_FLAGS_COPY_BIT))
++                {
++                    xrdp_mm_copy_give(self->encoder, enc->u.gfx.data,
++                                      enc->u.gfx.data_bytes);
++                }
+             }
+             else
+             {
+@@ -4421,6 +4477,116 @@
+ }
+ 
+ /*****************************************************************************/
++/* What the commands of a frame read of the X server's shared memory: from
++   its first row of RemoteFX tiles to its last, or all of it for H.264.
++   Returns the frame's id when the commands end the frame, else -1. */
++static int
++egfx_cmd_extent(char *cmd, int cmd_bytes, int data_bytes,
++                int *offset, int *bytes)
++{
++    struct stream in_s;
++    char *holdp;
++    char *holdend;
++    int cmd_id;
++    int bytes1;
++    int frame_id;
++    int index;
++    int num_rects;
++    short top;
++    short width;
++    int lo;
++    int hi;
++    int stride;
++    int all;
++
++    g_memset(&in_s, 0, sizeof(in_s));
++    in_s.data = cmd;
++    in_s.size = cmd_bytes;
++    in_s.p = in_s.data;
++    in_s.end = in_s.data + in_s.size;
++    frame_id = -1;
++    lo = INT_MAX;
++    hi = 0;
++    stride = 0;
++    all = 0;
++    while (s_check_rem(&in_s, 8))
++    {
++        holdp = in_s.p;
++        holdend = in_s.end;
++        in_uint16_le(&in_s, cmd_id);
++        in_uint8s(&in_s, 2); /* flags */
++        in_uint32_le(&in_s, bytes1);
++        if ((bytes1 < 8) || (bytes1 > 32 * 1024) || (bytes1 > holdend - holdp))
++        {
++            return -1;
++        }
++        in_s.end = holdp + bytes1;
++        frame_id = -1;
++        switch (cmd_id)
++        {
++            case XR_RDPGFX_CMDID_WIRETOSURFACE_1:
++                all = 1;
++                break;
++            case XR_RDPGFX_CMDID_WIRETOSURFACE_2:
++                /* surface_id, codec_id, codec_context_id, pixel_format,
++                   flags, then the region's rects and the tiles' */
++                if (!s_check_rem(&in_s, 15))
++                {
++                    return -1;
++                }
++                in_uint8s(&in_s, 13);
++                in_uint16_le(&in_s, num_rects);
++                if ((num_rects < 1) || (num_rects > 16 * 1024) ||
++                        !s_check_rem(&in_s, num_rects * 8 + 2))
++                {
++                    return -1;
++                }
++                in_uint8s(&in_s, num_rects * 8);
++                in_uint16_le(&in_s, num_rects);
++                if ((num_rects < 1) || (num_rects > 16 * 1024) ||
++                        !s_check_rem(&in_s, num_rects * 8 + 8))
++                {
++                    return -1;
++                }
++                /* each row of 64x64 tiles is 64 rows of the surface */
++                for (index = 0; index < num_rects; index++)
++                {
++                    in_uint8s(&in_s, 2);
++                    in_sint16_le(&in_s, top);
++                    in_uint8s(&in_s, 4);
++                    lo = MIN(lo, top & ~63);
++                    hi = MAX(hi, (top & ~63) + 64);
++                }
++                in_uint8s(&in_s, 4);
++                in_sint16_le(&in_s, width);
++                stride = MAX(stride, ((width + 63) & ~63) * 4);
++                break;
++            case XR_RDPGFX_CMDID_ENDFRAME:
++                if (s_check_rem(&in_s, 4))
++                {
++                    in_uint32_le(&in_s, frame_id);
++                }
++                break;
++            default:
++                break;
++        }
++        in_s.p = holdp + bytes1;
++        in_s.end = holdend;
++    }
++    if (all || stride == 0 || lo < 0)
++    {
++        *offset = 0;
++        *bytes = all || lo < 0 ? data_bytes : 0;
++    }
++    else
++    {
++        *offset = MIN(lo * stride, data_bytes);
++        *bytes = MIN(hi * stride, data_bytes) - *offset;
++    }
++    return frame_id;
++}
++
++/*****************************************************************************/
+ int
+ server_egfx_cmd(struct xrdp_mod *mod,
+                 char *cmd, int cmd_bytes,
+@@ -4429,6 +4595,10 @@
+     XRDP_ENC_DATA *enc;
+     struct xrdp_wm *wm;
+     struct xrdp_mm *mm;
++    char *copy;
++    int frame_id;
++    int offset;
++    int bytes;
+ 
+     wm = (struct xrdp_wm *)(mod->wm);
+     mm = wm->mm;
+@@ -4468,12 +4638,55 @@
+     enc->u.gfx.data_bytes = data_bytes;
+     enc->shmem_ptr = data;
+     enc->shmem_bytes = data_bytes;
++    /* The X server captures a frame only once the last is acknowledged. Sent
++       when the frame was encoded, the acknowledgement had the capture and the
++       encoding take turns, and each frame of a video played full screen
++       waited for both. A copy is encoded instead, and the X server told it
++       may go on now; frames_in_flight still bounds how many frames are on
++       their way to the client. Only while frames take 5 ms or more to
++       encode, though: the X server waits 4 ms between frames anyway, and for
++       a window dragged across a desktop, encoded in under 3, the copy was a
++       third of what xrdp spent. */
++    frame_id = -1;
++    if (data != NULL && mm->encoder->encode_ms >= 5)
++    {
++        frame_id = egfx_cmd_extent(cmd, cmd_bytes, data_bytes, &offset, &bytes);
++    }
++    if (frame_id >= 0)
++    {
++        copy = xrdp_mm_copy_take(mm->encoder, data_bytes);
++        if (copy == NULL)
++        {
++            frame_id = -1;
++        }
++        else
++        {
++            g_memcpy(copy + offset, data + offset, bytes);
++            g_munmap(data, data_bytes);
++            enc->u.gfx.data = copy;
++            enc->shmem_ptr = NULL;
++            enc->shmem_bytes = 0;
++            ENC_SET_BIT(enc->flags, ENC_FLAGS_COPY_BIT);
++        }
++    }
+     /* insert into fifo for encoder thread to process */
+     tc_mutex_lock(mm->encoder->mutex);
+     fifo_add_item(mm->encoder->fifo_to_proc, enc);
+     tc_mutex_unlock(mm->encoder->mutex);
+     /* signal xrdp_encoder thread */
+     g_set_wait_obj(mm->encoder->xrdp_encoder_event_to_proc);
++    if (frame_id >= 0)
++    {
++        if (mm->encoder->gfx_ack_off == 0)
++        {
++            mm->encoder->frame_id_server = frame_id;
++            xrdp_mm_update_module_frame_ack(mm);
++        }
++        else if (mm->mod != NULL)
++        {
++            mm->mod->mod_frame_ack(mm->mod, 0, frame_id);
++        }
++    }
+     return 0;
+ }
+ 
+PATCH
+}
+
 build_xrdp() {
     fetch "https://github.com/neutrinolabs/xrdp/releases/download/v$XRDP_VERSION/xrdp-$XRDP_VERSION.tar.gz" \
         "$XRDP_SHA256" "xrdp-$XRDP_VERSION.tar.gz"
@@ -187,6 +536,7 @@ build_xrdp() {
     units=$(pkg-config --variable=systemdsystemunitdir systemd 2>/dev/null || true)
     [ -n "$units" ] || units=/usr/lib/systemd/system
     unpack "xrdp-$XRDP_VERSION.tar.gz" "xrdp-$XRDP_VERSION"
+    xrdp_patch | patch -p1 -s
     ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
         --with-systemdsystemunitdir="$units" \
         --enable-"$H264" --enable-pixman --enable-fuse --enable-opus --enable-ipv6
