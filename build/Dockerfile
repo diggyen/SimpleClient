@@ -131,6 +131,12 @@ RUN set -e; \
 # GRUB release key (Daniel Kiper, BE5C 2320 9ACD DACE B20D B0A2 8C81 89F1 988C
 # 2166) was verified. The packages are the build dependencies of Debian's
 # grub2 that an i386-pc build uses.
+#
+# configure is told the linker does not take --image-base. 2.14 links its
+# images with it when the linker takes it, and with it Debian's linker starts
+# kernel.img at 0x9074, which grub-mkimage refuses. Ruled out, it links with
+# -Ttext, as GRUB did up to 2.12 and as Gentoo's revert of that check does
+# (bugs.gentoo.org/965424), which is how Rufus's 2.14 core was built.
 FROM --platform=linux/amd64 debian:${DEBIAN_VERSION} AS grub-builder
 ARG GRUB_VERSION=2.14
 ARG GRUB_SHA256=bc8d3c73535b8838d8c8e2654d73edc4e6ae8c8acdb45d5df5dc9a1547446d43
@@ -145,10 +151,12 @@ RUN set -e; \
     tar -xJf grub.tar.xz; cd "grub-${GRUB_VERSION}"; \
     ./configure --target=i386 --with-platform=pc --prefix=/opt/grub --disable-nls \
         --disable-werror --disable-grub-mkfont --disable-grub-mount --disable-device-mapper \
-        --disable-libzfs; \
+        --disable-libzfs ax_cv_check_ldflags___Wl___image_base_0x400000=no; \
     make -j"$(nproc)"; make install; \
     test "$(tr '\0' '\n' < /opt/grub/lib/grub/i386-pc/normal.mod \
         | grep -A1 'GRUB  version %s$' | tail -1)" = "${GRUB_VERSION}"; \
+    /opt/grub/bin/grub-mkimage -d /opt/grub/lib/grub/i386-pc -O i386-pc-eltorito \
+        -p /boot/grub -o /tmp/grub-eltorito.img biosdisk iso9660; \
     rm -rf /tmp/grub* /var/lib/apt/lists/*
 
 # ── AMD's video decoders ──────────────────────────────────────────────────────
