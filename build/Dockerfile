@@ -141,12 +141,14 @@ FROM --platform=linux/amd64 debian:${DEBIAN_VERSION} AS grub-builder
 ARG GRUB_VERSION=2.14
 ARG GRUB_SHA256=bc8d3c73535b8838d8c8e2654d73edc4e6ae8c8acdb45d5df5dc9a1547446d43
 ENV DEBIAN_FRONTEND=noninteractive
+# Downloads retry every error: a runner that cannot resolve a host for a few
+# seconds (curl 6) failed a CI build, and plain --retry skips that one.
 RUN set -e; \
     apt-get update; \
     apt-get install -y --no-install-recommends gcc gcc-multilib libc6-dev make \
         bison flex gawk python3 gettext pkgconf curl ca-certificates xz-utils; \
     cd /tmp; \
-    curl -fsSLo grub.tar.xz "https://ftp.gnu.org/gnu/grub/grub-${GRUB_VERSION}.tar.xz"; \
+    curl -fsSL --retry 5 --retry-all-errors -o grub.tar.xz "https://ftp.gnu.org/gnu/grub/grub-${GRUB_VERSION}.tar.xz"; \
     echo "${GRUB_SHA256}  grub.tar.xz" | sha256sum -c -; \
     tar -xJf grub.tar.xz; cd "grub-${GRUB_VERSION}"; \
     ./configure --target=i386 --with-platform=pc --prefix=/opt/grub --disable-nls \
@@ -175,7 +177,7 @@ RUN set -e; \
     apk add --no-cache build-base meson samurai python3 py3-mako py3-yaml py3-packaging bison \
         flex glslang pkgconf curl linux-headers libdrm-dev libva-dev zlib-dev elfutils-dev; \
     mkdir -p /src; cd /src; \
-    curl -fsSLo mesa.tar.xz "https://mesa.freedesktop.org/archive/mesa-${MESA_VERSION}.tar.xz"; \
+    curl -fsSL --retry 5 --retry-all-errors -o mesa.tar.xz "https://mesa.freedesktop.org/archive/mesa-${MESA_VERSION}.tar.xz"; \
     echo "${MESA_SHA256}  mesa.tar.xz" | sha256sum -c -; \
     tar -xJf mesa.tar.xz; \
     meson setup mesa-build "mesa-${MESA_VERSION}" --prefix=/usr --libdir=lib --buildtype=release \
@@ -217,7 +219,7 @@ RUN apk add --no-cache build-base cmake samurai nasm pkgconf curl linux-headers 
         openssl-dev zlib-dev alsa-lib-dev libusb-dev pcsc-lite-dev libdrm-dev libva-dev
 
 RUN set -e; mkdir -p /src; cd /src; \
-    curl -fsSLo ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    curl -fsSL --retry 5 --retry-all-errors -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | sha256sum -c -; \
     tar -xJf ffmpeg.tar.xz; cd "ffmpeg-${FFMPEG_VERSION}"; \
     ./configure --prefix=/usr --libdir=/usr/lib --enable-shared --disable-static \
@@ -247,7 +249,7 @@ RUN set -e; mkdir -p /src; cd /src; \
 #         own and swscale converts them, where FreeRDP lost every frame.
 COPY build/patches/freerdp/ /src/freerdp-patches/
 RUN set -e; cd /src; \
-    curl -fsSLo freerdp.tar.gz \
+    curl -fsSL --retry 5 --retry-all-errors -o freerdp.tar.gz \
         "https://github.com/FreeRDP/FreeRDP/releases/download/${FREERDP_VERSION}/freerdp-${FREERDP_VERSION}.tar.gz"; \
     echo "${FREERDP_SHA256}  freerdp.tar.gz" | sha256sum -c -; \
     tar -xzf freerdp.tar.gz; \
@@ -285,7 +287,7 @@ RUN set -e; cd /src; \
 ARG PCSC_VERSION=2.5.2
 ARG PCSC_SHA256=60a08942d8c00a1d86a3bf4c64eddbf7a5569c7c54f6904e3f07801bb5316acd
 RUN set -e; apk add --no-cache meson flex perl ccid; cd /src; \
-    curl -fsSLo pcsc.tar.xz "https://pcsclite.apdu.fr/files/pcsc-lite-${PCSC_VERSION}.tar.xz"; \
+    curl -fsSL --retry 5 --retry-all-errors -o pcsc.tar.xz "https://pcsclite.apdu.fr/files/pcsc-lite-${PCSC_VERSION}.tar.xz"; \
     echo "${PCSC_SHA256}  pcsc.tar.xz" | sha256sum -c -; \
     tar -xJf pcsc.tar.xz; \
     meson setup pcsc-build "pcsc-lite-${PCSC_VERSION}" --prefix=/usr --libdir=lib --buildtype=release \
