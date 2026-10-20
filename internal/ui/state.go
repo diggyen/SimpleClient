@@ -121,12 +121,6 @@ type UIState struct {
 	// ErrorUntil is when ErrorMsg goes away by itself (see flash); zero
 	// keeps it up.
 	ErrorUntil time.Time
-	// Notice is a passing word on what a key did, such as where F4 moved
-	// the sound, drawn where ErrorMsg goes while there is none: green, or
-	// amber (NoticeWarn) when what the key is for is not there.
-	Notice      string
-	NoticeWarn  bool
-	NoticeUntil time.Time
 
 	// Boot is how this kiosk was started. Installing to disk is offered
 	// (CanInstall) only when it runs from a USB stick or CD: a kiosk booted
@@ -270,21 +264,11 @@ func (s *UIState) flash(msg string, now time.Time) {
 	s.Dirty = true
 }
 
-// notice puts msg under the list for bannerFor, amber if warn.
-func (s *UIState) notice(msg string, warn bool, now time.Time) {
-	s.Notice, s.NoticeWarn, s.NoticeUntil = msg, warn, now.Add(bannerFor)
-	s.Dirty = true
-}
-
-// expireBanner takes a flashed message or a notice down once its time is up.
+// expireBanner takes a flashed message down once its time is up.
 func (s *UIState) expireBanner(now time.Time) {
 	if s.ErrorMsg != "" && !s.ErrorUntil.IsZero() && !now.Before(s.ErrorUntil) {
 		s.ErrorMsg = ""
 		s.ErrorUntil = time.Time{}
-		s.Dirty = true
-	}
-	if s.Notice != "" && !now.Before(s.NoticeUntil) {
-		s.Notice = ""
 		s.Dirty = true
 	}
 }

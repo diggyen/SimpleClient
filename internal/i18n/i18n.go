@@ -56,11 +56,7 @@ const (
 	HintRefresh
 	HintLanguage
 	HintKeyboard
-	HintSound
 	BadgeSound
-	SoundTo   // F4 moved sound: "%s" the output, "%d of %d" its place
-	SoundOnly // F4 with one output: "%s" is it
-	SoundNone // F4 with no sound hardware
 	BadgeKeyboard
 	BadgeLanguage
 	BadgeVideo // what decodes the sessions' video, after the version
@@ -230,11 +226,7 @@ var catalogues = map[Lang]*catalogue{
 		HintRefresh:    "Refresh",
 		HintLanguage:   "Language",
 		HintKeyboard:   "Keyboard",
-		HintSound:      "Sound",
 		BadgeSound:     "Sound",
-		SoundTo:        "Sound output: %s (%d of %d)",
-		SoundOnly:      "%s is the only sound output",
-		SoundNone:      "No sound hardware found",
 		BadgeKeyboard:  "Keyboard",
 		BadgeLanguage:  "Language",
 		BadgeVideo:     "Video",
@@ -391,11 +383,7 @@ var catalogues = map[Lang]*catalogue{
 		HintRefresh:    "Yenile",
 		HintLanguage:   "Dil",
 		HintKeyboard:   "Klavye",
-		HintSound:      "Ses",
 		BadgeSound:     "Ses",
-		SoundTo:        "Ses çıkışı: %s (%d/%d)",
-		SoundOnly:      "Tek ses çıkışı var: %s",
-		SoundNone:      "Ses aygıtı bulunamadı",
 		BadgeKeyboard:  "Klavye",
 		BadgeLanguage:  "Dil",
 		BadgeVideo:     "Video",

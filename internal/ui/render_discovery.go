@@ -223,10 +223,10 @@ func renderDiscovery(img *image.RGBA, state *UIState) {
 // drawLanguageBadge puts the active language in the top-right corner as a cap,
 // so it looks like the F2-toggled control it is rather than stray text.
 func drawLanguageBadge(img *image.RGBA, screen image.Rectangle) {
-	// Sound output, layout, then language, all as caps: F4, F3 and F2 change
-	// them, in the order they sit in the footer.
+	// Sound output, layout, then language, all as caps; F3 and F2 change the
+	// last two, in the order they sit in the footer.
 	caps := []string{}
-	// The sound output F4 cycles, when there is any sound hardware at all.
+	// Where sound goes, chosen by itself, when there is any sound hardware.
 	if rdp.Audio != nil {
 		if d, ok := rdp.Audio.Sel.Output(); ok {
 			caps = append(caps, i18n.T(i18n.BadgeSound)+": "+d.Label())
@@ -453,29 +453,21 @@ func (l discoveryLayout) errorBanner() image.Rectangle {
 	return image.Rect(l.Card.Min.X, l.Card.Max.Y+bannerGap, l.Card.Max.X, l.Card.Max.Y+bannerGap+bannerH)
 }
 
-// renderErrorBanner draws the transient message strip under the card: the
-// error, or with none a notice in its own colours.
+// renderErrorBanner draws the transient message strip under the card.
 func renderErrorBanner(img *image.RGBA, l discoveryLayout, state *UIState) {
-	msg, edge, fill, mark := state.ErrorMsg, ColorErrorBorder, ColorErrorBG, ColorError
-	if msg == "" {
-		msg, edge, fill, mark = state.Notice, ColorSuccessBorder, ColorSuccessBG, ColorSuccess
-		if state.NoticeWarn {
-			edge, fill, mark = ColorWarningBorder, ColorWarningBG, ColorWarning
-		}
-	}
-	if msg == "" {
+	if state.ErrorMsg == "" {
 		return
 	}
 	banner := l.errorBanner()
-	FillNotched(img, banner, edge)
-	FillNotched(img, banner.Inset(1), fill)
+	FillNotched(img, banner, ColorErrorBorder)
+	FillNotched(img, banner.Inset(1), ColorErrorBG)
 
 	textY := banner.Min.Y + (banner.Dy()-CharH)/2
 
 	// The leading bar gives the banner the same anatomy as a selected row.
-	FillRect(img, image.Rect(banner.Min.X+2, banner.Min.Y+2, banner.Min.X+5, banner.Max.Y-2), mark)
-	FillRect(img, image.Rect(banner.Min.X+cardPad, textY+1, banner.Min.X+cardPad+5, textY+6), mark)
-	DrawText(img, banner.Min.X+cardPad+13, textY, msg, ColorText)
+	FillRect(img, image.Rect(banner.Min.X+2, banner.Min.Y+2, banner.Min.X+5, banner.Max.Y-2), ColorError)
+	FillRect(img, image.Rect(banner.Min.X+cardPad, textY+1, banner.Min.X+cardPad+5, textY+6), ColorError)
+	DrawText(img, banner.Min.X+cardPad+13, textY, state.ErrorMsg, ColorText)
 }
 
 // keyHints pairs each key with the action it performs, so the footer can set
@@ -490,7 +482,6 @@ func keyHints(f9 string) [][2]string {
 		{"F5", i18n.T(i18n.HintRefresh)},
 		{"F2", i18n.T(i18n.HintLanguage)},
 		{"F3", i18n.T(i18n.HintKeyboard)},
-		{"F4", i18n.T(i18n.HintSound)},
 	}
 	if f9 != "" {
 		h = append(h, [2]string{"F9", f9})

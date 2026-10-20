@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // Kind classifies a sound endpoint the way a user thinks of it.
@@ -51,8 +50,7 @@ func (d Device) ALSA() string {
 
 // Label is a short name for the on-screen indicator. An HDMI output goes by
 // its PCM's own name, "HDMI 0" and on: a graphics card has one for every
-// port, and "HDMI" for each made stepping through them with F4 look like
-// nothing happened.
+// port, and the name says which of them the sound is on.
 func (d Device) Label() string {
 	if d.Kind == KindHDMI && d.Name != "" && len(d.Name) <= 12 {
 		return d.Name
@@ -129,7 +127,7 @@ func Scan() []Device {
 	// Which HDMI PCM a monitor sits on is not exposed directly. The ELD files
 	// come in pin order and the PCMs in device order, which line up on every
 	// common codec; the n-th connected pin with audio is taken to be the n-th
-	// HDMI PCM. A wrong guess is one F4 press away from fixed.
+	// HDMI PCM.
 	for card := range ids {
 		var hdmi []*Device
 		for i := range devs {
@@ -207,12 +205,8 @@ func eldPresence(card int) []bool {
 	return out
 }
 
-// Selector picks the playback and capture endpoints, and lets the user
-// override the playback choice at runtime.
-type Selector struct {
-	mu       sync.Mutex
-	override string // CardID,Dev of a user-chosen output, "" for automatic
-}
+// Selector picks the playback and capture endpoints.
+type Selector struct{}
 
 // headphonesIn is replaced on Linux by a check of the codec's jack switches.
 var headphonesIn = func() bool { return false }
@@ -223,18 +217,7 @@ var headphonesIn = func() bool { return false }
 // explicit choice); the analog jack when headphones are in it; a monitor with
 // speakers on HDMI/DisplayPort; the analog output; anything that plays.
 func (s *Selector) Output() (Device, bool) {
-	devs := Scan()
-	s.mu.Lock()
-	override := s.override
-	s.mu.Unlock()
-	if override != "" {
-		for _, d := range devs {
-			if d.Playback && key(d) == override {
-				return d, true
-			}
-		}
-	}
-	return pickOutput(devs, headphonesIn())
+	return pickOutput(Scan(), headphonesIn())
 }
 
 func pickOutput(devs []Device, phones bool) (Device, bool) {
@@ -277,34 +260,3 @@ func (s *Selector) Input() (Device, bool) {
 	}
 	return best, found
 }
-
-// Cycle moves the playback choice to the next endpoint and returns it, with
-// its place among the outputs counting from 1 and how many there are, which
-// is 0 when there is no sound hardware.
-func (s *Selector) Cycle() (Device, int, int) {
-	cur, ok := s.Output()
-	var outs []Device
-	for _, d := range Scan() {
-		if d.Playback {
-			outs = append(outs, d)
-		}
-	}
-	if len(outs) == 0 {
-		return Device{}, 0, 0
-	}
-	next := 0
-	if ok {
-		for i, d := range outs {
-			if key(d) == key(cur) {
-				next = (i + 1) % len(outs)
-				break
-			}
-		}
-	}
-	s.mu.Lock()
-	s.override = key(outs[next])
-	s.mu.Unlock()
-	return outs[next], next + 1, len(outs)
-}
-
-func key(d Device) string { return fmt.Sprintf("%s,%d", d.CardID, d.Dev) }

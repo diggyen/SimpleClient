@@ -331,23 +331,6 @@ func TestLanguageToggle_F2(t *testing.T) {
 	}
 }
 
-// F4 with no sound hardware says so, rather than doing nothing to see.
-func TestSoundKey_F4_NoHardware(t *testing.T) {
-	state := &UIState{Screen: ScreenDiscovery}
-	ctx := context.Background()
-	cancel := context.CancelFunc(func() {})
-	var scanCh <-chan domain.ScanEvent
-	handleInput(inputdev.InputEvent{Type: inputdev.EvKey, KeyCode: inputdev.KeyF4, Pressed: true},
-		state, &mockScanner{}, config.Config{}, framebuffer.NewMock(1280, 720), &ctx, &cancel, &scanCh, nil, 20)
-	if state.Notice != i18n.T(i18n.SoundNone) || !state.NoticeWarn {
-		t.Fatalf("notice %q warn %v", state.Notice, state.NoticeWarn)
-	}
-	state.expireBanner(time.Now().Add(bannerFor))
-	if state.Notice != "" {
-		t.Fatalf("notice %q still up after %v", state.Notice, bannerFor)
-	}
-}
-
 // F2 also toggles while the credential modal is open, and must not be typed
 // into the focused text field.
 func TestLanguageToggle_F2_InModal(t *testing.T) {

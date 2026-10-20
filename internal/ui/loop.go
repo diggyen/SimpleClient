@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diggyen/SimpleClient/internal/audio"
 	"github.com/diggyen/SimpleClient/internal/autoconnect"
 	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/config"
@@ -242,26 +241,6 @@ func handleInput(
 	// F2 cycles the UI language from any non-session screen. Handled before the
 	// per-screen switch so it also works while the credential modal is open —
 	// F2 produces no rune, so it never collides with text entry.
-	// F4 moves sound to the next output: speakers or headphones, the monitor,
-	// a USB headset. Automatic choice is right most of the time; this is for
-	// the rest. Where it went is said under the list: the badge in the corner
-	// alone was easy to miss, and with no sound hardware there was none.
-	if ev.KeyCode == inputdev.KeyF4 {
-		d, i, n := audio.Device{}, 0, 0
-		if rdp.Audio != nil {
-			d, i, n = rdp.Audio.Sel.Cycle()
-			rdp.Audio.Reselect()
-		}
-		switch now := time.Now(); n {
-		case 0:
-			state.notice(i18n.T(i18n.SoundNone), true, now)
-		case 1:
-			state.notice(i18n.Tf(i18n.SoundOnly, d.Label()), false, now)
-		default:
-			state.notice(i18n.Tf(i18n.SoundTo, d.Label(), i, n), false, now)
-		}
-		return
-	}
 
 	if ev.KeyCode == inputdev.KeyF3 {
 		inputdev.NextLayout()

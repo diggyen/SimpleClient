@@ -51,14 +51,6 @@ func (s *Sink) Stop() {
 	s.mu.Unlock()
 }
 
-// Reselect drops the cached endpoint so the next block re-chooses it — after
-// the user cycles the output with F4.
-func (s *Sink) Reselect() {
-	s.mu.Lock()
-	s.haveDev = false
-	s.mu.Unlock()
-}
-
 // Mic returns the recorder half of the sink, for the microphone channel.
 func (s *Sink) Mic() Mic { return Mic{s} }
 

@@ -32,9 +32,9 @@ func fakeProc(t *testing.T) {
 	}
 }
 
-// F4 steps through every output and says which of how many it is on; the
-// HDMI ports go by their own names, so each step reads differently.
-func TestSelectorCycle(t *testing.T) {
+// With nothing in the headphone jack sound goes to the monitor, and the badge
+// names the HDMI port it is on.
+func TestSelectorOutput(t *testing.T) {
 	fakeProc(t)
 	old := headphonesIn
 	headphonesIn = func() bool { return false }
@@ -44,21 +44,13 @@ func TestSelectorCycle(t *testing.T) {
 	if d, ok := s.Output(); !ok || d.Label() != "HDMI 0" {
 		t.Fatalf("automatic choice %q %v, want the monitor's speakers", d.Label(), ok)
 	}
-	for _, want := range []struct {
-		label string
-		i     int
-	}{{"HDMI 1", 3}, {"Analog", 1}, {"HDMI 0", 2}} {
-		d, i, n := s.Cycle()
-		if d.Label() != want.label || i != want.i || n != 3 {
-			t.Errorf("Cycle gave %q %d of %d, want %q %d of 3", d.Label(), i, n, want.label, want.i)
-		}
-		if got, _ := s.Output(); got.Label() != want.label {
-			t.Errorf("Output after Cycle is %q, want %q", got.Label(), want.label)
-		}
+	headphonesIn = func() bool { return true }
+	if d, ok := s.Output(); !ok || d.Label() != "Analog" {
+		t.Errorf("with headphones in, choice %q %v, want the analog jack", d.Label(), ok)
 	}
 
 	procRoot = t.TempDir()
-	if _, i, n := s.Cycle(); i != 0 || n != 0 {
-		t.Errorf("with no sound hardware Cycle gave %d of %d", i, n)
+	if d, ok := s.Output(); ok {
+		t.Errorf("with no sound hardware Output gave %q", d.Label())
 	}
 }
