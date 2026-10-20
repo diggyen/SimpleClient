@@ -409,7 +409,11 @@ func renderEmptyList(img *image.RGBA, l discoveryLayout, state *UIState) {
 	if subnet == "" {
 		subnet = "?"
 	}
-	hint := fmt.Sprintf(i18n.T(i18n.NoServersHint), subnet)
+	port := state.ScanPort
+	if port == 0 {
+		port = domain.DefaultRDPPort
+	}
+	hint := fmt.Sprintf(i18n.T(i18n.NoServersHint), subnet, port)
 	maxChars := (l.List.Dx() - 2*cardPad) / CharW
 	for n, line := range wrapText(hint, maxChars) {
 		DrawText(img, cx-TextWidth(line, false)/2, cy+12+n*(CharH+4), line, ColorDim)

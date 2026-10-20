@@ -9,7 +9,8 @@ import (
 	"github.com/diggyen/SimpleClient/internal/domain"
 )
 
-// NetworkScanner implements domain.Scanner by probing port 3389 concurrently.
+// NetworkScanner implements domain.Scanner by probing the RDP port — 3389
+// unless the network settings say otherwise — concurrently.
 type NetworkScanner struct {
 	concurrency int
 	timeout     time.Duration
@@ -28,9 +29,16 @@ func New(concurrency int, timeout time.Duration) *NetworkScanner {
 }
 
 // Start expands the given CIDRs into individual IPs and probes each for
-// port 3389. Scan events are streamed on the returned channel, which is
-// closed when the scan completes or the context is cancelled.
-func (s *NetworkScanner) Start(ctx context.Context, cidrs []string) <-chan domain.ScanEvent {
+// port, 0 being domain.DefaultRDPPort. Scan events are streamed on the
+// returned channel, which is closed when the scan completes or the context is
+// cancelled. The hosts found carry the port when it is not the default, so a
+// connection goes where the scan found them.
+func (s *NetworkScanner) Start(ctx context.Context, cidrs []string, port int) <-chan domain.ScanEvent {
+	// A host on the default port says 0, as typed and remembered ones do.
+	if port == domain.DefaultRDPPort {
+		port = 0
+	}
+
 	// Cancel any previously running scan.
 	if s.cancel != nil {
 		s.cancel()
@@ -85,7 +93,7 @@ func (s *NetworkScanner) Start(ctx context.Context, cidrs []string) <-chan domai
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				addr := ip.String() + ":3389"
+				addr := domain.Host{IP: ip, Port: port}.AddrRDP()
 				start := time.Now()
 				conn, err := net.DialTimeout("tcp", addr, s.timeout)
 				if err == nil {
@@ -100,6 +108,7 @@ func (s *NetworkScanner) Start(ctx context.Context, cidrs []string) <-chan domai
 					host := domain.Host{
 						IP:           ip,
 						Hostname:     hostname,
+						Port:         port,
 						LatencyMs:    latency,
 						DiscoveredAt: time.Now(),
 					}
@@ -159,75 +168,6 @@ func (s *NetworkScanner) Hosts() []domain.Host {
 		out = append(out, h)
 	}
 	return out
-}
-
-// startWithPort is like Start but dials a custom port instead of 3389.
-// This exists for testing so mock listeners on random ports can be discovered.
-func (s *NetworkScanner) startWithPort(ctx context.Context, cidrs []string, port string) <-chan domain.ScanEvent {
-	if s.cancel != nil {
-		s.cancel()
-	}
-	scanCtx, cancel := context.WithCancel(ctx)
-	s.cancel = cancel
-
-	s.mu.Lock()
-	s.hosts = make(map[string]domain.Host)
-	s.mu.Unlock()
-
-	var ips []net.IP
-	for _, cidr := range cidrs {
-		expanded, err := ExpandCIDR(cidr)
-		if err == nil {
-			ips = append(ips, expanded...)
-		}
-	}
-
-	ch := make(chan domain.ScanEvent, 64)
-
-	go func() {
-		defer close(ch)
-		if len(ips) == 0 {
-			ch <- domain.ScanEvent{Type: domain.EventScanComplete, Total: 0}
-			return
-		}
-
-		total := len(ips)
-		sem := make(chan struct{}, s.concurrency)
-		var wg sync.WaitGroup
-
-		for _, ip := range ips {
-			select {
-			case <-scanCtx.Done():
-				wg.Wait()
-				return
-			case sem <- struct{}{}:
-			}
-
-			wg.Add(1)
-			go func(ip net.IP) {
-				defer wg.Done()
-				defer func() { <-sem }()
-
-				addr := ip.String() + ":" + port
-				conn, err := net.DialTimeout("tcp", addr, s.timeout)
-				if err == nil {
-					conn.Close()
-					host := domain.Host{IP: ip, DiscoveredAt: time.Now()}
-					s.mu.Lock()
-					s.hosts[ip.String()] = host
-					s.mu.Unlock()
-					select {
-					case ch <- domain.ScanEvent{Type: domain.EventHostFound, Host: &host}:
-					case <-scanCtx.Done():
-					}
-				}
-			}(ip)
-		}
-		wg.Wait()
-		ch <- domain.ScanEvent{Type: domain.EventScanComplete, Scanned: total, Total: total}
-	}()
-
-	return ch
 }
 
 // dialLatencyMs converts a measured handshake time to the whole milliseconds

@@ -107,7 +107,10 @@ type UIState struct {
 	// Subnet is the network the last scan covered, shown when it found
 	// nothing: "no servers in ?" is what a machine whose NIC never came up
 	// looks like, and saying so saves chasing DHCP on a dead interface.
-	Subnet       string
+	Subnet string
+	// ScanPort is the port scans go to, 0 for 3389: from the network
+	// settings (netconf), which the network dialog changes.
+	ScanPort     int
 	Hosts        []domain.Host
 	SelectedIdx  int
 	ScrollOffset int

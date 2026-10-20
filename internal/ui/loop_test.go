@@ -22,9 +22,11 @@ import (
 // mockScanner implements domain.Scanner for loop tests.
 type mockScanner struct {
 	events []domain.ScanEvent
+	port   int // the port the last scan was started for
 }
 
-func (m *mockScanner) Start(_ context.Context, _ []string) <-chan domain.ScanEvent {
+func (m *mockScanner) Start(_ context.Context, _ []string, port int) <-chan domain.ScanEvent {
+	m.port = port
 	ch := make(chan domain.ScanEvent, len(m.events)+1)
 	for _, ev := range m.events {
 		ch <- ev
@@ -173,20 +175,25 @@ func TestDiscoveryKey_F5_ResetsScan(t *testing.T) {
 		Hosts:        []domain.Host{{IP: net.ParseIP("10.0.0.1"), DiscoveredAt: time.Now()}},
 		ScanDone:     true,
 		ScanProgress: 1.0,
+		ScanPort:     3390,
 	}
 	ctx := context.Background()
 	cancel := context.CancelFunc(func() {})
 	var scanCh <-chan domain.ScanEvent
+	scan := &mockScanner{}
 	handleDiscoveryKey(inputdev.InputEvent{
 		Type:    inputdev.EvKey,
 		KeyCode: inputdev.KeyF5,
 		Pressed: true,
-	}, state, &mockScanner{}, &ctx, &cancel, &scanCh, 20)
+	}, state, scan, &ctx, &cancel, &scanCh, 20)
 	if state.ScanDone {
 		t.Fatal("F5 should reset ScanDone")
 	}
 	if state.ScanProgress != 0 {
 		t.Fatal("F5 should reset ScanProgress")
+	}
+	if scan.port != 3390 {
+		t.Fatalf("F5 scanned port %d, want the one set, 3390", scan.port)
 	}
 }
 

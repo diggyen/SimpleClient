@@ -362,8 +362,9 @@ func TestNetDialog_WirelessRow(t *testing.T) {
 		t.Fatalf("wireless %q", n.Wireless)
 	}
 	handleNetKey(inputdev.InputEvent{Type: inputdev.EvKey, Pressed: true, KeyCode: inputdev.KeyTab}, state)
+	handleNetKey(inputdev.InputEvent{Type: inputdev.EvKey, Pressed: true, KeyCode: inputdev.KeyTab}, state)
 	if n.Focus != netFocusWifi {
-		t.Fatalf("Tab from the switch went to %d, want the wireless row", n.Focus)
+		t.Fatalf("Tab from the switch past the port went to %d, want the wireless row", n.Focus)
 	}
 	state.Mu.Unlock()
 	waitFor(t, state, "the status", func() bool { return state.Wifi.Status.Joined() })

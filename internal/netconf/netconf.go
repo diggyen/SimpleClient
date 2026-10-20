@@ -1,5 +1,6 @@
 // Package netconf holds the kiosk's network settings — DHCP, or a fixed
-// address with its gateway and DNS servers — and applies them through
+// address with its gateway and DNS servers, and the port the server list scans
+// for — and applies them through
 // /sbin/sc-net, the script /init runs at boot, so a setting behaves the same
 // whether it was just changed or the kiosk has just started.
 package netconf
@@ -17,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/diggyen/SimpleClient/internal/bootenv"
+	"github.com/diggyen/SimpleClient/internal/domain"
 )
 
 // RunPath holds the settings in effect; /init writes it at boot.
@@ -36,6 +38,9 @@ type Config struct {
 	Address   string // with its prefix length: 192.168.1.50/24
 	Gateway   string // may be empty
 	DNS       []string
+	// Port is the one the server list scans for, with DHCP or without: 0
+	// for RDP's own, 3389. sc-net has no use for it and passes over it.
+	Port int
 }
 
 // Parse reads the key=value form sc-net reads. Anything it does not know, or a
@@ -59,6 +64,8 @@ func Parse(b []byte) Config {
 			c.Gateway = v
 		case "dns":
 			c.DNS = strings.Fields(v)
+		case "port":
+			c.Port, _ = ParsePort(v)
 		}
 	}
 	if c.Address == "" {
@@ -69,11 +76,36 @@ func Parse(b []byte) Config {
 
 // Encode writes c the way Parse and sc-net read it.
 func (c Config) Encode() []byte {
+	var b []byte
 	if !c.Static {
-		return []byte("mode=dhcp\n")
+		b = []byte("mode=dhcp\n")
+	} else {
+		b = fmt.Appendf(nil, "mode=static\ninterface=%s\naddress=%s\ngateway=%s\ndns=%s\n",
+			c.Interface, c.Address, c.Gateway, strings.Join(c.DNS, " "))
 	}
-	return []byte(fmt.Sprintf("mode=static\ninterface=%s\naddress=%s\ngateway=%s\ndns=%s\n",
-		c.Interface, c.Address, c.Gateway, strings.Join(c.DNS, " ")))
+	if c.Port != 0 {
+		b = fmt.Appendf(b, "port=%d\n", c.Port)
+	}
+	return b
+}
+
+// ErrPort is ParsePort's answer to anything but a port number.
+var ErrPort = errors.New("netconf: bad port")
+
+// ParsePort reads the dialog's port field: empty, or RDP's own 3389, is 0.
+func ParsePort(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	p, err := strconv.Atoi(s)
+	if err != nil || p < 1 || p > 65535 {
+		return 0, ErrPort
+	}
+	if p == domain.DefaultRDPPort {
+		return 0, nil
+	}
+	return p, nil
 }
 
 // Load returns the settings in effect.

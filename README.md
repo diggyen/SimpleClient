@@ -63,17 +63,17 @@ walks through the causes in order of likelihood.
 | `F4` | Move sound to the next output: speakers or headphones, the monitor, a USB headset |
 | `F6` | In the credential dialog: show or hide the domain field |
 | `F7` | Connect to a server by address (`10.0.0.5`, `rdp.example.com:53389`) |
-| `F8` | Network settings: DHCP or a fixed address, and the wireless network |
+| `F8` | Network settings: DHCP or a fixed address, the RDP port the scan looks for, and the wireless network |
 | `F9` | Started from a USB stick or CD: install to a disk, or onto the stick itself. Installed: software update |
 | `F10` | In the credential dialog: what the kiosk does at startup — the server list, this server's dialog, or logging on to it |
 | `F11` | Started from a USB stick: software update of the stick |
 | `Ctrl`+`Alt`+`End` | Disconnect from an active session |
 
-The scan probes TCP port 3389 across the subnet the machine got from DHCP. If
-there is no DHCP server it falls back to a link-local address and scans that.
-Each host is listed with the round trip of that handshake, graded onto four
-signal bars, so a link too slow to work as a desktop session is visible before
-you connect to it rather than after.
+The scan probes TCP port 3389 — or the port set with `F8` — across the subnet
+the machine got from DHCP. If there is no DHCP server it falls back to a
+link-local address and scans that. Each host is listed with the round trip of
+that handshake, graded onto four signal bars, so a link too slow to work as a
+desktop session is visible before you connect to it rather than after.
 
 The two caps in the top-right corner show the active keyboard layout and
 language. Choosing Türkçe — from the boot menu or with `F2` — selects the
@@ -265,7 +265,7 @@ Design boundaries, not bugs waiting to be filed:
 ```
 cmd/simpleclient/     entry point: opens the framebuffer, wires everything up
 internal/ui/          render loop, screens, layout, the 8-bit mark and face
-internal/scanner/     concurrent TCP scan of the subnet for port 3389
+internal/scanner/     concurrent TCP scan of the subnet for the RDP port (3389)
 internal/rdp/         RDP client wrapper around tomatome/grdp
 internal/framebuffer/ mmap'd /dev/fb0
 internal/inputdev/    evdev keyboard and mouse reader

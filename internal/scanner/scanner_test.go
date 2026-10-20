@@ -3,15 +3,16 @@ package scanner
 import (
 	"context"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/diggyen/SimpleClient/internal/domain"
 )
 
-// startMockRDP3389 binds a TCP listener on 127.0.0.1:3389 if available.
-// Falls back to a random port and patches the scanner to use that port.
-func startMockRDP3389(t *testing.T) string {
+// startMockRDP binds a TCP listener on a random port of 127.0.0.1, which
+// the tests then scan for.
+func startMockRDP(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -30,8 +31,19 @@ func startMockRDP3389(t *testing.T) string {
 	return ln.Addr().String()
 }
 
+func mustPort(t *testing.T, s string) int {
+	t.Helper()
+	p, err := strconv.Atoi(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// The scan goes to the port it is given, and the host it finds carries it:
+// connecting to it must not fall back to 3389.
 func TestScannerFindsHost(t *testing.T) {
-	addr := startMockRDP3389(t)
+	addr := startMockRDP(t)
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		t.Fatal(err)
@@ -47,12 +59,15 @@ func TestScannerFindsHost(t *testing.T) {
 	ip3[3] &= 0xFC // zero last 2 bits for /30 network
 	cidr := ip3.String() + "/30"
 
-	ch := s.startWithPort(ctx, []string{cidr}, port)
+	ch := s.Start(ctx, []string{cidr}, mustPort(t, port))
 
 	found := false
 	for ev := range ch {
 		if ev.Type == domain.EventHostFound {
 			found = true
+			if got := ev.Host.AddrRDP(); got != addr {
+				t.Errorf("found %s, want %s", got, addr)
+			}
 		}
 	}
 	if !found {
@@ -63,7 +78,7 @@ func TestScannerFindsHost(t *testing.T) {
 func TestScannerCancel(t *testing.T) {
 	s := New(8, 100*time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := s.Start(ctx, []string{"10.255.0.0/24"})
+	ch := s.Start(ctx, []string{"10.255.0.0/24"}, 0)
 	// Cancel almost immediately.
 	time.Sleep(50 * time.Millisecond)
 	cancel()
@@ -86,16 +101,16 @@ func TestScannerDoubleStart(t *testing.T) {
 
 	// Start first scan on a large, unreachable subnet.
 	ctx := context.Background()
-	ch1 := s.Start(ctx, []string{"10.255.0.0/24"})
+	ch1 := s.Start(ctx, []string{"10.255.0.0/24"}, 0)
 
 	// Start second scan — should cancel the first.
-	addr := startMockRDP3389(t)
+	addr := startMockRDP(t)
 	host, port, _ := net.SplitHostPort(addr)
 	ip := net.ParseIP(host)
 	ip3 := ip.To4()
 	ip3[3] &= 0xFC
 	cidr := ip3.String() + "/30"
-	ch2 := s.startWithPort(ctx, []string{cidr}, port)
+	ch2 := s.Start(ctx, []string{cidr}, mustPort(t, port))
 
 	// First channel should close.
 	drained := false

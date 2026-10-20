@@ -84,7 +84,8 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 	ctx, cancelScan := context.WithCancel(context.Background())
 	cidr, _ := network.DetectCIDR()
 	state.Subnet = cidr
-	scanCh := scan.Start(ctx, []string{cidr})
+	state.ScanPort = netconf.Load().Port
+	scanCh := scan.Start(ctx, []string{cidr}, state.ScanPort)
 
 	ticker := time.NewTicker(16 * time.Millisecond) // ~60 FPS
 	netTicker := time.NewTicker(3 * time.Second)
@@ -147,7 +148,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 					state.Subnet = cidr
 					state.ScanDone = false
 					state.ScanProgress = 0
-					scanCh = scan.Start(ctx, []string{cidr})
+					scanCh = scan.Start(ctx, []string{cidr}, state.ScanPort)
 					state.Dirty = true
 				}
 			}
@@ -335,7 +336,7 @@ func handleDiscoveryKey(
 		state.ErrorMsg = ""
 		cidr, _ := network.DetectCIDR()
 		state.Subnet = cidr
-		*scanCh = scan.Start(newCtx, []string{cidr})
+		*scanCh = scan.Start(newCtx, []string{cidr}, state.ScanPort)
 	}
 }
 
@@ -487,6 +488,8 @@ func handleMouseClick(
 			n.Static, n.Focus = false, netFocusMode
 		case p.In(l.Static):
 			n.Static, n.Focus = true, netFocusMode
+		case p.In(l.Port):
+			n.Focus = netFocusPort
 		case p.In(l.Wifi):
 			n.Focus = netFocusWifi
 			openWifi(state)

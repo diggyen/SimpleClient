@@ -3,8 +3,10 @@ package ui
 import (
 	"errors"
 	"log"
+	"strconv"
 	"strings"
 
+	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 	"github.com/diggyen/SimpleClient/internal/netconf"
@@ -13,12 +15,15 @@ import (
 // NetState is the network settings dialog (F8): DHCP, or a fixed address for
 // a network without a DHCP server — without one the kiosk has no address, and
 // nothing to scan or connect from. The address fields are there only while
-// "manual" is chosen; with DHCP there is nothing to fill in. On a kiosk with a
-// wireless interface a row under them opens the wireless networks (wifi.go).
+// "manual" is chosen; with DHCP there is nothing to fill in. The port the
+// server list scans for is there either way: RDP's 3389, or the one a network
+// moved its servers to. On a kiosk with a wireless interface a row under them
+// opens the wireless networks (wifi.go).
 type NetState struct {
 	Static bool
 	Fields [netFields]string // indexed by netAddress ... netDNS2
-	Focus  int               // netFocusMode, 1+field, wireless, then save and cancel
+	Focus  int               // netFocusMode, 1+field, port, wireless, then save and cancel
+	Port   string            // the port field; 3389 unless set otherwise
 	Iface  string
 	Status netconf.Status
 	Msg    string // the outcome of the last save
@@ -37,14 +42,15 @@ const (
 	netFields
 )
 
-// The focus order: the DHCP/manual switch, the fields (manual only), the
-// wireless row (with a wireless interface only), the buttons.
+// The focus order: the DHCP/manual switch, the fields (manual only), the port,
+// the wireless row (with a wireless interface only), the buttons.
 const (
 	netFocusMode   = 0
-	netFocusWifi   = 1 + netFields
-	netFocusSave   = 2 + netFields
-	netFocusCancel = 3 + netFields
-	netFocusCount  = 4 + netFields
+	netFocusPort   = 1 + netFields
+	netFocusWifi   = 2 + netFields
+	netFocusSave   = 3 + netFields
+	netFocusCancel = 4 + netFields
+	netFocusCount  = 5 + netFields
 )
 
 // field returns the field index the focus is on, or -1.
@@ -73,7 +79,11 @@ func (n *NetState) move(d int) {
 // state.Mu.
 func openNetwork(state *UIState) {
 	c := netconf.Load()
-	n := NetState{Static: c.Static, Iface: c.Interface}
+	port := state.ScanPort
+	if port == 0 {
+		port = domain.DefaultRDPPort
+	}
+	n := NetState{Static: c.Static, Iface: c.Interface, Port: strconv.Itoa(port)}
 	if n.Iface == "" {
 		n.Iface = pickInterface()
 	}
@@ -147,16 +157,31 @@ func handleNetKey(ev inputdev.InputEvent, state *UIState) {
 			saveNetwork(state)
 		}
 	case inputdev.KeyBackspace:
-		if f := n.field(); f >= 0 {
-			if r := []rune(n.Fields[f]); len(r) > 0 {
-				n.Fields[f] = string(r[:len(r)-1])
+		if t := n.text(); t != nil {
+			if r := []rune(*t); len(r) > 0 {
+				*t = string(r[:len(r)-1])
 			}
 		}
 	default:
-		if f := n.field(); f >= 0 && ev.Rune != 0 {
-			n.Fields[f] += string(ev.Rune)
+		t := n.text()
+		switch {
+		case t == nil || ev.Rune == 0:
+		case n.Focus == netFocusPort && (ev.Rune < '0' || ev.Rune > '9' || len(*t) >= 5):
+		default:
+			*t += string(ev.Rune)
 		}
 	}
+}
+
+// text returns the text the focus is on — a field, the port — or nil.
+func (n *NetState) text() *string {
+	if f := n.field(); f >= 0 {
+		return &n.Fields[f]
+	}
+	if n.Focus == netFocusPort {
+		return &n.Port
+	}
+	return nil
 }
 
 // saveNetwork checks the fields, then saves and applies the settings in the
@@ -181,12 +206,17 @@ func saveNetwork(state *UIState) {
 		}
 		return
 	}
+	if c.Port, err = netconf.ParsePort(n.Port); err != nil {
+		n.Msg, n.Err, n.Focus = i18n.T(i18n.NetErrPort), true, netFocusPort
+		return
+	}
 	n.Busy, n.Msg, n.Err = true, i18n.T(i18n.NetApplying), false
 	installed := state.Boot.Installed()
 	log.Printf("network: saving %q", c.Encode())
 
 	go func() {
 		persisted, err := netconf.Save(c, installed)
+		saved := err == nil
 		if err == nil {
 			err = netconf.Apply()
 		}
@@ -206,7 +236,12 @@ func saveNetwork(state *UIState) {
 			n.Msg, n.Err = i18n.T(i18n.NetSessionOnly), false
 		}
 		// A new address is a new subnet to scan; the network ticker in Run
-		// starts that scan once it sees no subnet.
+		// starts that scan once it sees no subnet. A new port starts the list
+		// afresh too, as F5 does: what is in it was found on the old one.
+		if saved && c.Port != state.ScanPort {
+			state.ScanPort = c.Port
+			state.Hosts = nil
+		}
 		state.Subnet = ""
 		state.ScanDone = false
 		state.Dirty = true

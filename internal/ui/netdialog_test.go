@@ -10,19 +10,24 @@ func netKey(state *UIState, code int, r rune) {
 	handleNetKey(inputdev.InputEvent{Type: inputdev.EvKey, KeyCode: code, Rune: r, Pressed: true}, state)
 }
 
-// With DHCP chosen the fields do not apply, and Tab skips them; switching to
-// manual makes them reachable and editable.
+// With DHCP chosen the fields do not apply, and Tab skips them to the port;
+// switching to manual makes them reachable and editable.
 func TestNetDialog_FocusAndEditing(t *testing.T) {
 	state := &UIState{Screen: ScreenNetwork}
 	n := &state.Net
 
 	netKey(state, inputdev.KeyTab, 0)
+	if n.Focus != netFocusPort {
+		t.Fatalf("with DHCP, Tab from the switch went to %d, want the port", n.Focus)
+	}
+	netKey(state, inputdev.KeyTab, 0)
 	if n.Focus != netFocusSave {
-		t.Fatalf("with DHCP, Tab from the switch went to %d, want the save button", n.Focus)
+		t.Fatalf("with DHCP, Tab from the port went to %d, want the save button", n.Focus)
 	}
 	netKey(state, inputdev.KeyUp, 0)
+	netKey(state, inputdev.KeyUp, 0)
 	if n.Focus != netFocusMode {
-		t.Fatalf("Up from save went to %d, want the switch", n.Focus)
+		t.Fatalf("Up from save past the port went to %d, want the switch", n.Focus)
 	}
 
 	netKey(state, inputdev.KeySpace, ' ')
@@ -59,5 +64,30 @@ func TestNetDialog_RejectsBadInput(t *testing.T) {
 	netKey(state, inputdev.KeyEnter, 0)
 	if n.Busy || !n.Err || n.field() != netGateway {
 		t.Fatalf("busy %v err %v focus %d (%q), want the gateway field flagged", n.Busy, n.Err, n.Focus, n.Msg)
+	}
+}
+
+// The port takes digits only, five at most; one out of range is flagged and
+// nothing is applied.
+func TestNetDialog_Port(t *testing.T) {
+	state := &UIState{Screen: ScreenNetwork}
+	n := &state.Net
+	n.Port = "3389"
+	n.Focus = netFocusPort
+
+	for range 4 {
+		netKey(state, inputdev.KeyBackspace, 0)
+	}
+	for _, r := range "3a3-9.0123" {
+		netKey(state, 0, r)
+	}
+	if n.Port != "33901" {
+		t.Fatalf("port field holds %q, want 33901", n.Port)
+	}
+
+	n.Port = "70000"
+	netKey(state, inputdev.KeyEnter, 0)
+	if n.Busy || !n.Err || n.Focus != netFocusPort {
+		t.Fatalf("busy %v err %v focus %d (%q), want the port flagged", n.Busy, n.Err, n.Focus, n.Msg)
 	}
 }

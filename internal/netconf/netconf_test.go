@@ -62,6 +62,34 @@ func TestFromForm(t *testing.T) {
 	}
 }
 
+// The port rides along with either mode, and RDP's own is written as nothing.
+func TestPort(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want int
+		err  bool
+	}{
+		{"", 0, false}, {" 3389 ", 0, false}, {"3390", 3390, false}, {"65535", 65535, false},
+		{"0", 0, true}, {"65536", 0, true}, {"33a", 0, true}, {"-1", 0, true},
+	} {
+		got, err := ParsePort(c.in)
+		if got != c.want || (err != nil) != c.err {
+			t.Errorf("ParsePort(%q) = %d, %v", c.in, got, err)
+		}
+	}
+	for _, c := range []Config{
+		{Port: 3390},
+		{Static: true, Interface: "eth0", Address: "10.0.0.7/24", DNS: []string{"10.0.0.1"}, Port: 53389},
+	} {
+		if got := Parse(c.Encode()); got.Port != c.Port || got.Static != c.Static {
+			t.Errorf("%+v came back as %+v from %q", c, got, c.Encode())
+		}
+	}
+	if b := (Config{}).Encode(); string(b) != "mode=dhcp\n" {
+		t.Errorf("DHCP on 3389 encodes as %q", b)
+	}
+}
+
 func TestParse_DefaultsToDHCP(t *testing.T) {
 	for _, in := range []string{"", "mode=dhcp\n", "mode=static\n", "garbage"} {
 		if c := Parse([]byte(in)); c.Static {

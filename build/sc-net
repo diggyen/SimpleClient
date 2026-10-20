@@ -8,6 +8,7 @@
 #   address=192.168.1.50/24   (static only)
 #   gateway=192.168.1.1       (static, optional)
 #   dns=192.168.1.1 1.1.1.1   (static, optional)
+#   port=3390                 (the port the server list scans; not sc-net's)
 # /init writes the file at boot — from sc.ip= on the kernel command line, or
 # from what the network dialog saved — and the dialog rewrites it and runs this
 # again to apply a change on the spot. A missing file means DHCP.

@@ -20,6 +20,7 @@ type netLayout struct {
 	DHCP    image.Rectangle // the two choices of the mode row
 	Static  image.Rectangle
 	Fields  []image.Rectangle // none while DHCP is chosen
+	Port    image.Rectangle   // the port the list scans for, either way
 	Wifi    image.Rectangle   // the wireless row; empty without it
 	StatusY int
 	MsgY    int
@@ -39,7 +40,7 @@ func layoutNet(screen image.Rectangle, static, wireless bool) netLayout {
 	}
 	h := cardHeader + modalPad +
 		netChipH + modalFieldG +
-		fields*(modalFieldH+modalFieldG) +
+		(fields+1)*(modalFieldH+modalFieldG) +
 		rows*(netChipH+modalFieldG) +
 		2*(CharH+10) +
 		modalPad + modalBtnH + modalPad
@@ -66,6 +67,8 @@ func layoutNet(screen image.Rectangle, static, wireless bool) netLayout {
 		l.Fields[i] = image.Rect(inputX, y, inputX+inputW, y+modalFieldH)
 		y += modalFieldH + modalFieldG
 	}
+	l.Port = image.Rect(inputX, y, inputX+inputW, y+modalFieldH)
+	y += modalFieldH + modalFieldG
 	if wireless {
 		l.Wifi = image.Rect(inputX, y, inputX+inputW, y+netChipH)
 		y += netChipH + modalFieldG
@@ -105,6 +108,9 @@ func renderNet(img *image.RGBA, state *UIState) {
 		DrawText(img, l.LabelX, f.Min.Y+(modalFieldH-CharH)/2, labels[i], ColorDim)
 		DrawInputField(img, f, n.Fields[i], n.Focus == i+1)
 	}
+	// The port the server list scans for, with DHCP or without.
+	DrawText(img, l.LabelX, l.Port.Min.Y+(modalFieldH-CharH)/2, i18n.T(i18n.NetPort), ColorDim)
+	DrawInputField(img, l.Port, n.Port, n.Focus == netFocusPort)
 
 	// The wireless network: which, and whether the kiosk is on it. The row
 	// opens the wireless dialog.

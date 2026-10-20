@@ -47,7 +47,7 @@ const (
 	ColumnServer
 	ColumnAddress
 	ColumnLatency
-	NoServersHint
+	NoServersHint // "%[1]s" is the subnet, "%[2]d" the port
 
 	// Key hints are held as one label per action rather than a single
 	// pre-joined sentence, so the footer can draw each key as its own cap.
@@ -114,6 +114,7 @@ const (
 	NetGateway
 	NetDNS1
 	NetDNS2
+	NetPort
 	NetSave
 	NetCable   // "%s" is the interface
 	NetNoCable // "%s" is the interface
@@ -125,6 +126,7 @@ const (
 	NetErrMask
 	NetErrGateway
 	NetErrDNS
+	NetErrPort
 	NetErrApply // "%s" is the reason
 
 	// Going to a server at startup (F10 in the connection dialog).
@@ -220,7 +222,7 @@ var catalogues = map[Lang]*catalogue{
 		ColumnServer:   "SERVER",
 		ColumnAddress:  "ADDRESS",
 		ColumnLatency:  "LATENCY",
-		NoServersHint:  "Nothing is listening on port 3389 in %s. F5 scans again, F7 connects to an address, F8 sets up the network.",
+		NoServersHint:  "Nothing is listening on port %[2]d in %[1]s. F5 scans again, F7 connects to an address, F8 sets up the network and the port.",
 		HintSelect:     "Select",
 		HintConnect:    "Connect",
 		HintRefresh:    "Refresh",
@@ -281,6 +283,7 @@ var catalogues = map[Lang]*catalogue{
 		NetGateway:     "Gateway:",
 		NetDNS1:        "Preferred DNS:",
 		NetDNS2:        "Alternate DNS:",
+		NetPort:        "RDP port:",
 		NetSave:        "Save",
 		NetCable:       "%s: cable in",
 		NetNoCable:     "%s: no cable",
@@ -292,6 +295,7 @@ var catalogues = map[Lang]*catalogue{
 		NetErrMask:     "Invalid subnet mask",
 		NetErrGateway:  "The gateway is not in this subnet",
 		NetErrDNS:      "Invalid DNS server address",
+		NetErrPort:     "The RDP port is a number from 1 to 65535",
 		NetErrApply:    "Could not apply: %s",
 
 		HintAutoOff:    "At startup: the server list",
@@ -377,7 +381,7 @@ var catalogues = map[Lang]*catalogue{
 		ColumnServer:   "SUNUCU",
 		ColumnAddress:  "ADRES",
 		ColumnLatency:  "GECİKME",
-		NoServersHint:  "%s ağında 3389 portunu dinleyen bir sunucu yok. F5 yeniden tarar, F7 adres girer, F8 ağ ayarlarını açar.",
+		NoServersHint:  "%[1]s ağında %[2]d portunu dinleyen bir sunucu yok. F5 yeniden tarar, F7 adres girer, F8 ağ ve port ayarlarını açar.",
 		HintSelect:     "Seç",
 		HintConnect:    "Bağlan",
 		HintRefresh:    "Yenile",
@@ -438,6 +442,7 @@ var catalogues = map[Lang]*catalogue{
 		NetGateway:     "Ağ geçidi:",
 		NetDNS1:        "Tercih edilen DNS:",
 		NetDNS2:        "Alternatif DNS:",
+		NetPort:        "RDP portu:",
 		NetSave:        "Kaydet",
 		NetCable:       "%s: kablo takılı",
 		NetNoCable:     "%s: kablo yok",
@@ -449,6 +454,7 @@ var catalogues = map[Lang]*catalogue{
 		NetErrMask:     "Alt ağ maskesi geçersiz",
 		NetErrGateway:  "Ağ geçidi bu alt ağda değil",
 		NetErrDNS:      "DNS sunucusu adresi geçersiz",
+		NetErrPort:     "RDP portu 1 ile 65535 arası bir sayı olmalı",
 		NetErrApply:    "Uygulanamadı: %s",
 
 		HintAutoOff:    "Açılışta: sunucu listesi",

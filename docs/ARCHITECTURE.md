@@ -233,9 +233,12 @@ part of it, unless `F10` asks for it (see the README).
 
 ## Discovery
 
-`internal/scanner` opens a TCP connection to port 3389 across the subnet the
+`internal/scanner` opens a TCP connection to the RDP port across the subnet the
 machine got from DHCP, bounded by a worker semaphore. A host that completes the
-handshake is a host; nothing speaks RDP to check.
+handshake is a host; nothing speaks RDP to check. The port is 3389 unless the
+network dialog (`F8`) set another; it is kept with the network settings
+(`port=` in `/run/sc-network`, which `sc-net` passes over), and the hosts the
+scan finds carry it.
 
 The handshake is timed and reported as the latency shown in the list, measured
 before the reverse DNS lookup so a slow resolver is not charged to the host. It

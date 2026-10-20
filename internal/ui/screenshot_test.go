@@ -122,7 +122,7 @@ func TestScreenshots(t *testing.T) {
 			Screen: ScreenNetwork, Hosts: sampleHosts(5), SelectedIdx: 1,
 			ScanDone: true, ScanProgress: 1,
 			Net: NetState{
-				Static: true, Iface: "eth0", Focus: 1 + netGateway,
+				Static: true, Iface: "eth0", Focus: 1 + netGateway, Port: "3389",
 				Fields: [netFields]string{"192.168.1.50", "255.255.255.0", "192.168.1.1", "192.168.1.1", "1.1.1.1"},
 				Status: netconf.Status{Interface: "eth0", Address: "192.168.1.50/24", Carrier: true},
 				Msg:    i18n.T(i18n.NetSaved),
@@ -136,7 +136,7 @@ func TestScreenshots(t *testing.T) {
 			Screen: ScreenNetwork, Hosts: sampleHosts(5), SelectedIdx: 1,
 			ScanDone: true, ScanProgress: 1,
 			Net: NetState{
-				Iface: "eth0", Focus: netFocusMode,
+				Iface: "eth0", Focus: netFocusPort, Port: "3390",
 				Status: netconf.Status{Interface: "eth0", Address: "10.7.7.53/24", Carrier: true},
 			},
 		}
@@ -168,7 +168,7 @@ func TestScreenshots(t *testing.T) {
 		st := wifiShot(WifiState{})
 		st.Screen = ScreenNetwork
 		st.Net = NetState{
-			Iface: "wlan0", Focus: netFocusWifi, Wireless: "wlan0",
+			Iface: "wlan0", Focus: netFocusWifi, Wireless: "wlan0", Port: "3389",
 			Status: netconf.Status{Interface: "wlan0", Address: "192.168.20.31/24", Carrier: true},
 		}
 		renderDiscovery(b, st)
