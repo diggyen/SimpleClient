@@ -6,16 +6,13 @@ environment underneath.
 
 ![The host picker](docs/screenshots/02-list.png)
 
-A 30-second tour:
+A 30-second tour, in English:
 
 https://github.com/user-attachments/assets/6d6814fe-d162-481e-a321-482b3e08c30b
 
-<details>
-<summary>Türkçe</summary>
+Türkçe:
 
 https://github.com/user-attachments/assets/e5de44ea-808e-4cb1-8a81-99e2ed2dcdd3
-
-</details>
 
 It draws straight to the Linux framebuffer (`/dev/fb0`) and reads raw evdev
 input. There is no X11 and no Wayland: the whole system is a kernel and an
