@@ -37,6 +37,15 @@ echo /bin/modprobe > /proc/sys/kernel/modprobe 2>/dev/null
 # Silence kernel log noise so it does not scribble over the UI.
 echo 0 > /proc/sys/kernel/printk 2>/dev/null
 
+# Ctrl+Alt+Del belongs to the session: Windows answers it with its security
+# screen. The kernel's default restarts the machine on the spot, which looked
+# like a crash. At 0 the kernel signals PID 1 instead, and the trap swallows
+# it: without one, ash takes the SIGINT for an interrupt and exits, and PID 1
+# exiting panics. A trap with a command, unlike an ignored signal, is not
+# inherited: the kiosk and the engine keep the default SIGINT.
+trap : INT
+echo 0 > /proc/sys/kernel/ctrl-alt-del 2>/dev/null
+
 # ── Splash ────────────────────────────────────────────────────────────────────
 # The boot splash (ui.RunSplash): the picture GRUB showed while it loaded all
 # this, now with its spinner turning, until the kiosk draws its first screen.
