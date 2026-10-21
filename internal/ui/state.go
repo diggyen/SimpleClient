@@ -110,8 +110,15 @@ type UIState struct {
 	Subnet string
 	// ScanPort is the port scans go to, 0 for 3389: from the network
 	// settings (netconf), which the network dialog changes.
-	ScanPort     int
-	Hosts        []domain.Host
+	ScanPort int
+	Hosts    []domain.Host
+	// found is what the scan under way has found, by endpoint; kept is what
+	// came into the list another way — typed in, saved, the startup server —
+	// and stays whether a scan finds it or not. A rescan leaves the list up
+	// and, when it ends, drops what it did not find again: emptying the list
+	// first showed "0 servers" in a narrowed card until the first answer.
+	found        map[string]bool
+	kept         map[string]bool
 	SelectedIdx  int
 	ScrollOffset int
 	ScanProgress float64 // [0, 1]
@@ -172,7 +179,12 @@ type UIState struct {
 
 // AddHost puts h in the list unless the same endpoint is already there, and
 // returns its index. A known name is kept when the other record has none.
+// A rescan does not drop it.
 func (s *UIState) AddHost(h domain.Host) int {
+	if s.kept == nil {
+		s.kept = map[string]bool{}
+	}
+	s.kept[h.AddrRDP()] = true
 	for i, o := range s.Hosts {
 		if o.Same(h) {
 			if s.Hosts[i].Hostname == "" {
@@ -359,6 +371,10 @@ func (s *UIState) HandleScanEvent(ev domain.ScanEvent) {
 			if !existing {
 				s.Hosts = append(s.Hosts, *ev.Host)
 			}
+			if s.found == nil {
+				s.found = map[string]bool{}
+			}
+			s.found[ev.Host.AddrRDP()] = true
 		}
 
 	case domain.EventScanProgress:
@@ -369,7 +385,40 @@ func (s *UIState) HandleScanEvent(ev domain.ScanEvent) {
 	case domain.EventScanComplete:
 		s.ScanProgress = 1.0
 		s.ScanDone = true
+		s.dropUnfound()
 	}
+}
+
+// Rescan readies the state for a new scan, which leaves the list as it is
+// until it ends.
+func (s *UIState) Rescan() {
+	s.found = nil
+	s.ScanDone = false
+	s.ScanProgress = 0
+	s.Dirty = true
+}
+
+// dropUnfound takes out of the list what the scan just ended did not find,
+// other than the kept hosts. The cursor stays on the host it was on, or the
+// row it was on when that host went.
+func (s *UIState) dropUnfound() {
+	var cur string
+	if h := s.SelectedHost(); h != nil {
+		cur = h.AddrRDP()
+	}
+	hosts := s.Hosts[:0]
+	for _, h := range s.Hosts {
+		if k := h.AddrRDP(); s.found[k] || s.kept[k] {
+			if k == cur {
+				s.SelectedIdx = len(hosts)
+			}
+			hosts = append(hosts, h)
+		}
+	}
+	s.Hosts = hosts
+	s.found = nil
+	s.SelectedIdx = clampInt(s.SelectedIdx, 0, max(len(s.Hosts)-1, 0))
+	s.ScrollOffset = clampInt(s.ScrollOffset, 0, s.SelectedIdx)
 }
 
 // MoveSelection moves the host list cursor by delta, clamped to valid range.

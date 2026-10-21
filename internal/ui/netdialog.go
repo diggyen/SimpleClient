@@ -237,10 +237,13 @@ func saveNetwork(state *UIState) {
 		}
 		// A new address is a new subnet to scan; the network ticker in Run
 		// starts that scan once it sees no subnet. A new port starts the list
-		// afresh too, as F5 does: what is in it was found on the old one.
+		// afresh: what is in it was found on the old one. The cursor and the
+		// scrolled window go back to the top with it, or the first host found
+		// would be drawn from a window past the end of the list.
 		if saved && c.Port != state.ScanPort {
 			state.ScanPort = c.Port
 			state.Hosts = nil
+			state.SelectedIdx, state.ScrollOffset = 0, 0
 		}
 		state.Subnet = ""
 		state.ScanDone = false

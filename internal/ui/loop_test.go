@@ -195,6 +195,44 @@ func TestDiscoveryKey_F5_ResetsScan(t *testing.T) {
 	if scan.port != 3390 {
 		t.Fatalf("F5 scanned port %d, want the one set, 3390", scan.port)
 	}
+	if len(state.Hosts) != 1 {
+		t.Fatalf("F5 left %d hosts, want the list up while it rescans", len(state.Hosts))
+	}
+}
+
+// A rescan drops at its end what it did not find again, but not a host typed
+// in or saved, and the cursor stays on the host it was on.
+func TestRescan_DropsWhatItDidNotFind(t *testing.T) {
+	host := func(ip string) *domain.Host { return &domain.Host{IP: net.ParseIP(ip), DiscoveredAt: time.Now()} }
+	state := &UIState{Screen: ScreenDiscovery}
+	state.AddHost(*host("10.0.9.9")) // saved, on another subnet
+	for _, ip := range []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"} {
+		state.HandleScanEvent(domain.ScanEvent{Type: domain.EventHostFound, Host: host(ip)})
+	}
+	state.HandleScanEvent(domain.ScanEvent{Type: domain.EventScanComplete})
+	state.SelectedIdx, state.ScrollOffset = 3, 3 // on 10.0.0.3
+
+	state.Rescan()
+	state.HandleScanEvent(domain.ScanEvent{Type: domain.EventHostFound, Host: host("10.0.0.3")})
+	if len(state.Hosts) != 4 {
+		t.Fatalf("%d hosts while rescanning, want all 4 still up", len(state.Hosts))
+	}
+	state.HandleScanEvent(domain.ScanEvent{Type: domain.EventHostFound, Host: host("10.0.0.4")})
+	state.HandleScanEvent(domain.ScanEvent{Type: domain.EventScanComplete})
+
+	var got []string
+	for _, h := range state.Hosts {
+		got = append(got, h.IP.String())
+	}
+	if want := "10.0.9.9 10.0.0.3 10.0.0.4"; strings.Join(got, " ") != want {
+		t.Fatalf("after the rescan %v, want %s", got, want)
+	}
+	if sel := state.SelectedHost(); sel == nil || sel.IP.String() != "10.0.0.3" || state.ScrollOffset > state.SelectedIdx {
+		t.Fatalf("cursor on %v at %d, window from %d; want it on 10.0.0.3 and in view", sel, state.SelectedIdx, state.ScrollOffset)
+	}
+	if v := state.VisibleHosts(20); len(v) == 0 {
+		t.Fatal("nothing visible after the rescan")
+	}
 }
 
 func TestModalKey_Tab(t *testing.T) {

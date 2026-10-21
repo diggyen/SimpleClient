@@ -148,10 +148,8 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 					cancelScan()
 					ctx, cancelScan = context.WithCancel(context.Background())
 					state.Subnet = cidr
-					state.ScanDone = false
-					state.ScanProgress = 0
+					state.Rescan()
 					scanCh = scan.Start(ctx, []string{cidr}, state.ScanPort)
-					state.Dirty = true
 				}
 			}
 			state.Mu.Unlock()
@@ -316,9 +314,7 @@ func handleDiscoveryKey(
 		newCtx, newCancel := context.WithCancel(context.Background())
 		*ctx = newCtx
 		*cancelScan = newCancel
-		state.Hosts = nil
-		state.ScanDone = false
-		state.ScanProgress = 0
+		state.Rescan()
 		state.ErrorMsg = ""
 		cidr, _ := network.DetectCIDR()
 		state.Subnet = cidr
