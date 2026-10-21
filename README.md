@@ -6,6 +6,9 @@ environment underneath.
 
 ![The host picker](docs/screenshots/02-list.png)
 
+A 30-second tour: [English](docs/video/simpleclient-en.mp4) ·
+[Türkçe](docs/video/simpleclient-tr.mp4).
+
 It draws straight to the Linux framebuffer (`/dev/fb0`) and reads raw evdev
 input. There is no X11 and no Wayland: the whole system is a kernel and an
 initramfs — busybox, the Go binary that draws the UI, FreeRDP for the session.
@@ -269,7 +272,7 @@ internal/framebuffer/ mmap'd /dev/fb0
 internal/inputdev/    evdev keyboard and mouse reader
 internal/i18n/        message catalogue (en, tr)
 build/                Dockerfile, init, GRUB config, Makefile, vendor patches
-docs/                 architecture, development, troubleshooting, screenshots
+docs/                 architecture, development, troubleshooting, screenshots, the tour video
 ```
 
 `vendor/` is committed on purpose: `tomatome/grdp` does not compile for Linux as
