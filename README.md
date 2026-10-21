@@ -8,11 +8,11 @@ environment underneath.
 
 A 30-second tour, in English:
 
-https://github.com/user-attachments/assets/6d6814fe-d162-481e-a321-482b3e08c30b
+https://github.com/user-attachments/assets/31a4cea0-08f9-4f1d-afea-c0370152965b
 
 Türkçe:
 
-https://github.com/user-attachments/assets/e5de44ea-808e-4cb1-8a81-99e2ed2dcdd3
+https://github.com/user-attachments/assets/bec44850-45f1-43ce-9c71-af62f6609df2
 
 It draws straight to the Linux framebuffer (`/dev/fb0`) and reads raw evdev
 input. There is no X11 and no Wayland: the whole system is a kernel and an
