@@ -49,6 +49,7 @@ sync
 
 On Windows, write it with [Rufus](https://rufus.ie). Rufus asks how, and
 both ways work: ISO Image mode (the default; keep FAT32) and DD Image mode.
+If an older Rufus asks to download GRUB files, answer *Yes*.
 
 Verify it first if you like: `shasum -a 256 -c --ignore-missing SHA256SUMS`.
 

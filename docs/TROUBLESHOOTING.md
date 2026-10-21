@@ -73,9 +73,14 @@ the write went to the wrong place.
 Written with Rufus, either mode boots. DD Image mode writes the ISO as `dd`
 does. ISO Image mode makes one FAT32 partition, labelled `SIMPLECLIEN`, with
 the ISO's files on it: keep FAT32, and keep the label — GRUB, the kiosk's
-settings and the installer find the stick by it. Older releases had Rufus ask,
-in ISO Image mode, to download GRUB 2.12 files: *Yes* made a stick that
-restarts the machine as soon as GRUB starts; answer *No* with those.
+settings and the installer find the stick by it.
+
+A Rufus older than 4.13 carries GRUB 2.12 and asks, in ISO Image mode, to
+download the files for the ISO's GRUB 2.14: answer *Yes*. It fetches the same
+core image Rufus 4.13 and later carry. *No* puts 2.12 on the stick, which
+cannot load 2.14's modules, and the stick does not boot. Releases before 0.7.2
+had Rufus ask about 2.12 instead, and there *Yes* made a stick that restarts
+the machine as soon as GRUB starts; answer *No* with those.
 
 Some BIOSes offer a USB stick only when its MBR has a partition marked active.
 The ISO has one; a stick written with an older release in DD mode is not
