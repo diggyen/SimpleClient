@@ -4,6 +4,9 @@ A bootable remote-desktop kiosk. Boot it on a machine, it scans the local
 network for RDP hosts, you pick one, and it connects — full screen, no desktop
 environment underneath.
 
+Windows serves it as it is. A Linux server — Ubuntu, Linux Mint, Fedora — needs
+one script, run once on it: see [Linux servers](#linux-servers).
+
 ![The host picker](docs/screenshots/02-list.png)
 
 A 30-second tour, in English:
