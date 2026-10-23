@@ -17,6 +17,8 @@ import (
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
+	"github.com/diggyen/SimpleClient/internal/install"
+	"github.com/diggyen/SimpleClient/internal/wifi"
 )
 
 // mockScanner implements domain.Scanner for loop tests.
@@ -418,6 +420,54 @@ func TestInstall_F9(t *testing.T) {
 	key(state, inputdev.KeyEsc)
 	if state.Screen != ScreenDiscovery {
 		t.Fatalf("Esc should leave the install dialog, screen is %v", state.Screen)
+	}
+}
+
+// The wheel goes through the lists a row a notch, rolled away from the user
+// up the list, and stops at their ends; not while the Wi-Fi dialog asks for a
+// password.
+func TestWheel_MovesThroughLists(t *testing.T) {
+	ctx := context.Background()
+	cancel := context.CancelFunc(func() {})
+	var scanCh <-chan domain.ScanEvent
+	wheel := func(state *UIState, notches int) {
+		handleInput(inputdev.InputEvent{Type: inputdev.EvMouseWheel, Wheel: notches},
+			state, &mockScanner{}, config.Config{}, framebuffer.NewMock(1280, 720),
+			&ctx, &cancel, &scanCh, nil, 2)
+	}
+
+	state := &UIState{Screen: ScreenDiscovery, Hosts: []domain.Host{
+		{IP: net.ParseIP("10.0.0.1")}, {IP: net.ParseIP("10.0.0.2")}, {IP: net.ParseIP("10.0.0.3")},
+	}}
+	wheel(state, -1)
+	if state.SelectedIdx != 1 {
+		t.Fatalf("a notch towards the user should select the next server, selected %d", state.SelectedIdx)
+	}
+	wheel(state, -5)
+	if state.SelectedIdx != 2 || state.ScrollOffset != 1 {
+		t.Fatalf("the wheel should stop at the last server and scroll it into view, selected %d, offset %d",
+			state.SelectedIdx, state.ScrollOffset)
+	}
+	wheel(state, 1)
+	if state.SelectedIdx != 1 {
+		t.Fatalf("a notch away from the user should select the previous server, selected %d", state.SelectedIdx)
+	}
+
+	state = &UIState{Screen: ScreenInstall, Install: InstallState{Disks: make([]install.Disk, 2)}}
+	wheel(state, -3)
+	if state.Install.Sel != 1 {
+		t.Fatalf("the wheel should stop at the last disk, selected %d", state.Install.Sel)
+	}
+
+	state = &UIState{Screen: ScreenWifi, Wifi: WifiState{Networks: make([]wifi.Network, 3)}}
+	wheel(state, -1)
+	if state.Wifi.Sel != 1 {
+		t.Fatalf("a notch should select the next network, selected %d", state.Wifi.Sel)
+	}
+	state.Wifi.Prompt = true
+	wheel(state, -1)
+	if state.Wifi.Sel != 1 {
+		t.Fatalf("the wheel moved the selection under the password prompt, selected %d", state.Wifi.Sel)
 	}
 }
 

@@ -232,6 +232,11 @@ func handleInput(
 		return
 	}
 
+	if ev.Type == inputdev.EvMouseWheel {
+		handleWheel(ev.Wheel, state, maxRows)
+		return
+	}
+
 	if ev.Type != inputdev.EvKey || !ev.Pressed {
 		return
 	}
@@ -269,6 +274,26 @@ func handleInput(
 		handleWifiKey(ev, state)
 	case ScreenAuto:
 		handleAutoKey(ev, state)
+	}
+}
+
+// handleWheel moves through the list on the screen — the servers, the disks,
+// the wireless networks — a row a notch, as the arrow keys do; notches > 0
+// roll away from the user, up the list. Callers must hold state.Mu.
+func handleWheel(notches int, state *UIState, maxRows int) {
+	switch state.Screen {
+	case ScreenDiscovery:
+		state.MoveSelection(-notches, maxRows)
+	case ScreenInstall:
+		in := &state.Install
+		if in.Phase == InstallPick && len(in.Disks) > 0 {
+			in.Sel = clampInt(in.Sel-notches, 0, len(in.Disks)-1)
+		}
+	case ScreenWifi:
+		// Not while it joins a network or asks for its password.
+		if w := &state.Wifi; !w.Busy && !w.Prompt {
+			w.move(-notches)
+		}
 	}
 }
 
