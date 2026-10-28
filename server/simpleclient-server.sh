@@ -790,14 +790,32 @@ if [ -r /etc/dconf/profile/simpleclient ] && [ -r /etc/dconf/db/simpleclient ]; 
     export DCONF_PROFILE=simpleclient
 fi
 
+# A user already logged in elsewhere — at the console, or in another remote
+# session — has a desktop on the D-Bus bus systemd keeps for the user, and
+# owns its session manager's name there. Started on the same bus, this
+# desktop finds the name taken and quits, and the kiosk shows black until
+# the machine restarts. Such a session gets a bus of its own.
+RUN=
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ] &&
+    command -v dbus-run-session >/dev/null 2>&1 && command -v dbus-send >/dev/null 2>&1; then
+    for name in org.gnome.SessionManager org.kde.ksmserver org.xfce.SessionManager; do
+        if DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus" timeout 5 dbus-send --session \
+            --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+            org.freedesktop.DBus.NameHasOwner "string:$name" 2>/dev/null | grep -q 'boolean true'; then
+            RUN="dbus-run-session --"
+            break
+        fi
+    done
+fi
+
 # The distribution's Xsession sets up what its display manager would (D-Bus,
 # agents, input methods) before running the session.
 if [ -x /etc/X11/Xsession ]; then
-    exec /etc/X11/Xsession ${START:+"$START"}
+    exec $RUN /etc/X11/Xsession ${START:+"$START"}
 elif [ -x /etc/X11/xinit/Xsession ]; then
-    exec /etc/X11/xinit/Xsession ${START:+"$START"}
+    exec $RUN /etc/X11/xinit/Xsession ${START:+"$START"}
 fi
-exec sh -c "${START:-xterm}"
+exec $RUN sh -c "${START:-xterm}"
 EOF
     chmod 755 /etc/xrdp/startwm.sh
     if [ -r /usr/share/xsessions/mate.desktop ]; then
