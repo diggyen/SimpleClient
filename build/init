@@ -253,10 +253,9 @@ fi
 # ── Video decoders ────────────────────────────────────────────────────────────
 # The GPUs' VA-API drivers, which decode the sessions' H.264 (engine/hwdec.c),
 # are 70 MB unpacked, and come compressed with xz in 12. A machine has use for
-# one maker's at most, and only with memory to spare for what the GPU decodes
-# into, beside the session's own: with 1.4 GB or more, those for the GPUs it
-# runs are unpacked here, and the rest go. In safe graphics no GPU runs, and
-# the CPU decodes.
+# one maker's at most: those for the GPUs it runs are unpacked here, whatever
+# its memory, and the rest go. In safe graphics no GPU runs, and the CPU
+# decodes.
 GPUS=" $(for r in /sys/class/drm/renderD*; do readlink "$r/device/driver" 2>/dev/null; done | sed 's|.*/||' | tr '\n' ' ')"
 MEM=$(sed -n 's/^MemTotal: *\([0-9]*\) kB/\1/p' /proc/meminfo)
 unpack() {
@@ -264,10 +263,8 @@ unpack() {
         unxz -c "/usr/lib/dri/$f.xz" > "/usr/lib/dri/$f" 2>/dev/null || rm -f "/usr/lib/dri/$f"
     done
 }
-if [ "${MEM:-0}" -ge 1433600 ]; then
-    case "$GPUS" in *" i915 "* | *" xe "*) unpack iHD_drv_video.so i965_drv_video.so ;; esac
-    case "$GPUS" in *" amdgpu "* | *" radeon "*) unpack libgallium_drv_video.so ;; esac
-fi
+case "$GPUS" in *" i915 "* | *" xe "*) unpack iHD_drv_video.so i965_drv_video.so ;; esac
+case "$GPUS" in *" amdgpu "* | *" radeon "*) unpack libgallium_drv_video.so ;; esac
 rm -f /usr/lib/dri/*.xz
 for l in /usr/lib/dri/*; do [ -e "$l" ] || rm -f "$l"; done
 log "video: GPU drivers [${GPUS# }], $((${MEM:-0} / 1024)) MB, VA-API drivers [$(ls /usr/lib/dri 2>/dev/null | tr '\n' ' ')]"
