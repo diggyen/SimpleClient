@@ -23,9 +23,13 @@
 #     instead, installed if need be, and the console keeps Cinnamon
 #   - no polkit password prompts for colour profiles and package lists,
 #     which a remote session otherwise gets on every login
+#   - the kiosks' USB drives on every user's desktop and in the file
+#     manager's places, which do not show them of their own
 #   - ports 3389 and 3241 open in ufw or firewalld
 # It can be run again: to upgrade, or after a distribution upgrade has
-# replaced the libraries xrdp was built against.
+# replaced the libraries xrdp was built against. Remote sessions running then
+# are left running, on the xrdp they started with; the new one takes over
+# once they have ended or the machine restarts.
 #
 # Usage:  sudo bash simpleclient-server.sh [--session NAME] [--h264] [--no-audio] [--no-usb]
 #   --session NAME  the desktop for remote sessions, a file name from
@@ -1443,6 +1447,54 @@ AGENT
     chmod 755 /usr/local/sbin/simpleclient-usb-agent
 }
 
+# ── Drives on the desktop ────────────────────────────────────────────────────
+# The kiosks' USB drives come to a session as ~/thinclient_drives/<name>,
+# xrdp's FUSE mount (FuseMountName), which no desktop shows of its own: a
+# stick plugged into the kiosk looked to the person at it as if it had not
+# come. Every login gets a link to it on the desktop, and the place in the
+# file manager's side bar (GTK's bookmarks: Caja, Nemo, Nautilus, Thunar).
+configure_drives() {
+    cat > /usr/local/bin/simpleclient-drives <<'EOF'
+#!/bin/sh
+# Written by simpleclient-server.sh, run at every login (see
+# /etc/xdg/autostart/simpleclient-drives.desktop): the kiosks' USB drives, in
+# ~/thinclient_drives, on the desktop and in the file manager's places.
+case "${LANG:-}" in
+tr*) name="USB Bellekler" ;;
+*) name="USB drives" ;;
+esac
+drives="$HOME/thinclient_drives"
+desktop=$(xdg-user-dir DESKTOP 2>/dev/null)
+[ -n "$desktop" ] && [ "$desktop" != "$HOME" ] || desktop="$HOME/Desktop"
+mkdir -p "$drives" "$desktop" "$HOME/.config/gtk-3.0"
+if [ ! -e "$desktop/$name" ] && [ ! -L "$desktop/$name" ]; then
+    ln -s "$drives" "$desktop/$name"
+fi
+marks="$HOME/.config/gtk-3.0/bookmarks"
+if ! grep -q "file://$drives\( \|$\)" "$marks" 2>/dev/null; then
+    echo "file://$drives $name" >> "$marks"
+fi
+exit 0
+EOF
+    chmod 755 /usr/local/bin/simpleclient-drives
+    mkdir -p /etc/xdg/autostart
+    cat > /etc/xdg/autostart/simpleclient-drives.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=SimpleClient drives
+Comment=The kiosks' USB drives on the desktop and in the file manager
+Exec=/usr/local/bin/simpleclient-drives
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+}
+
+# xrdp_sessions lists the users with a remote session running, comma-separated.
+xrdp_sessions() {
+    ps -eo user=,args= 2>/dev/null |
+        awk '$2 ~ /(^|\/)(Xorg|Xvnc)$/ && /xrdp\// {print $1}' | sort -u | paste -sd, -
+}
+
 # ── Firewall and services ────────────────────────────────────────────────────
 open_firewall() {
     local ports=(3389) p
@@ -1471,7 +1523,19 @@ start_services() {
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
         systemctl enable xrdp-sesman xrdp
-        systemctl restart xrdp-sesman xrdp
+        # Restarting xrdp-sesman takes the sessions it runs away from it:
+        # their desktops live on, but a user who connects again is given a
+        # new one beside the old, which keeps what it had open — on Linux
+        # Mint, Chrome's profile, so that Chrome would not start in the new
+        # one. With sessions running the new build waits for them to end.
+        local running
+        running=$(xrdp_sessions)
+        if [ -n "$running" ] && systemctl is-active --quiet xrdp-sesman; then
+            warn "açık uzak oturumlar var ($running): kapanmasınlar diye xrdp yeniden başlatılmadı."
+            warn "yeni xrdp, oturumlar kapandıktan sonra 'sudo systemctl restart xrdp-sesman xrdp' ile ya da makine yeniden başlayınca devreye girer"
+        else
+            systemctl restart xrdp-sesman xrdp
+        fi
         if [ "$USB_READY" = 1 ]; then
             systemctl enable --now pcscd.socket 2>/dev/null || true
             systemctl enable simpleclient-usb
@@ -1500,6 +1564,7 @@ build_xrdp
 configure_xrdp
 configure_session
 configure_polkit
+configure_drives
 if [ "$AUDIO" = 1 ]; then
     setup_audio
 fi
