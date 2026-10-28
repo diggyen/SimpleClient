@@ -470,10 +470,22 @@ func handleMouseClick(
 			return
 		}
 		absIdx := state.ScrollOffset + rowIdx
-		if absIdx >= 0 && absIdx < len(state.Hosts) {
-			state.SelectedIdx = absIdx
+		if absIdx < 0 || absIdx >= len(state.Hosts) {
+			return
+		}
+		// A click picks the server, as the arrow keys do; a second on the
+		// same row soon after — a double click — opens its dialog, as Enter
+		// does. One click opening it took the list away from someone only
+		// choosing, or scrolling with the wheel and clicking to stop.
+		at := clickClock()
+		double := absIdx == state.lastClickRow && at.Sub(state.lastClick) <= doubleClick
+		state.SelectedIdx = absIdx
+		if double {
+			state.lastClick = time.Time{}
 			state.OpenModalFor()
 			state.Transition(ScreenModal)
+		} else {
+			state.lastClick, state.lastClickRow = at, absIdx
 		}
 
 	case ScreenModal:
@@ -541,6 +553,13 @@ func handleMouseClick(
 		handlePowerClick(state, fb.Bounds(), image.Pt(mx, my))
 	}
 }
+
+// doubleClick is how soon a second click on a server has to follow the first
+// to open its dialog. clickClock tells the time of a click; tests set it.
+var (
+	doubleClick = 500 * time.Millisecond
+	clickClock  = time.Now
+)
 
 // connect establishes the RDP session. It runs on its own goroutine and takes
 // state.Mu itself; the network calls deliberately happen outside the lock so the

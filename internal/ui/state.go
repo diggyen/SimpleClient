@@ -142,6 +142,10 @@ type UIState struct {
 	// driverPending is a restart RestartForDriver asked for, waiting for the
 	// kiosk to be idle.
 	driverPending bool
+	// lastClick is when the server list was last clicked, on lastClickRow,
+	// for a second click to make a double click of.
+	lastClick    time.Time
+	lastClickRow int
 	// SafeGfx is whether this boot left the display on the firmware
 	// framebuffer, said after the decoder on the server list.
 	SafeGfx bool

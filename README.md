@@ -66,7 +66,7 @@ walks through the causes in order of likelihood.
 | Key | Action |
 | --- | --- |
 | `↑` `↓` `PgUp` `PgDn` | Move through the host list |
-| `Enter` | Open the credential dialog for the selected host |
+| `Enter` | Open the credential dialog for the selected host — or a double click on it; one click only selects |
 | `Tab` | Move between username / password / domain / buttons |
 | `Esc` | Close the dialog |
 | `F5` | Rescan the network |

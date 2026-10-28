@@ -762,3 +762,40 @@ func TestFlash_Expires(t *testing.T) {
 		t.Error("a banner with no time was taken down")
 	}
 }
+
+// One click on a server picks it; a second on it soon after opens its
+// dialog. A second click on another server, or too late, only picks again.
+func TestDiscoveryClick_DoubleOpensDialog(t *testing.T) {
+	fb := framebuffer.NewMock(1280, 800)
+	clock := time.Unix(1000, 0)
+	old := clickClock
+	clickClock = func() time.Time { return clock }
+	t.Cleanup(func() { clickClock = old })
+
+	state := &UIState{Screen: ScreenDiscovery, Hosts: []domain.Host{
+		{IP: net.IPv4(10, 0, 0, 1)}, {IP: net.IPv4(10, 0, 0, 2)}, {IP: net.IPv4(10, 0, 0, 3)},
+	}}
+	l := layoutDiscoveryFor(fb.Bounds(), state.Hosts)
+	click := func(row int, after time.Duration) {
+		clock = clock.Add(after)
+		r := l.rowRect(row)
+		handleMouseClick(r.Min.X+20, r.Min.Y+r.Dy()/2, state, fb, nil)
+	}
+
+	click(1, 0)
+	if state.Screen != ScreenDiscovery || state.SelectedIdx != 1 {
+		t.Fatalf("one click: screen %v selected %d, want row 1 picked on the list", state.Screen, state.SelectedIdx)
+	}
+	click(2, 100*time.Millisecond)
+	if state.Screen != ScreenDiscovery || state.SelectedIdx != 2 {
+		t.Fatalf("a click on another row: screen %v selected %d, want row 2 picked", state.Screen, state.SelectedIdx)
+	}
+	click(2, time.Second)
+	if state.Screen != ScreenDiscovery {
+		t.Fatalf("a second click a second later opened the dialog")
+	}
+	click(2, 200*time.Millisecond)
+	if state.Screen != ScreenModal || state.SelectedIdx != 2 {
+		t.Fatalf("double click: screen %v selected %d, want row 2's dialog", state.Screen, state.SelectedIdx)
+	}
+}
