@@ -25,6 +25,8 @@
 #     which a remote session otherwise gets on every login
 #   - the kiosks' USB drives on every user's desktop and in the file
 #     manager's places, which do not show them of their own
+#   - one workspace in remote MATE and GNOME sessions, which users cannot add
+#     to
 #   - ports 3389 and 3241 open in ufw or firewalld
 # It can be run again: to upgrade, or after a distribution upgrade has
 # replaced the libraries xrdp was built against. Remote sessions running then
@@ -835,6 +837,10 @@ EOF
 # on, as Cinnamon's does: a 1280x800 window dragged across a 1920x1080 kiosk
 # moved at 45 frames a second with it, at over 100 without it, for the same
 # server CPU. So remote MATE sessions start with it off.
+#
+# Remote sessions also have one workspace, locked: a machine serving a room of
+# kiosks has no use for a desktop's worth of them in every session, each one
+# more for the user to lose a window on.
 configure_dconf() {
     if ! command -v dconf >/dev/null; then
         case $FAMILY in
@@ -866,6 +872,19 @@ configure_dconf() {
 # /etc/xrdp/startwm.sh). The console keeps the machine's own settings.
 [org/mate/marco/general]
 compositing-manager=false
+num-workspaces=1
+
+[org/gnome/desktop/wm/preferences]
+num-workspaces=1
+
+[org/gnome/mutter]
+dynamic-workspaces=false
+EOF
+    mkdir -p /etc/dconf/db/simpleclient.d/locks
+    cat > /etc/dconf/db/simpleclient.d/locks/00-simpleclient <<'EOF'
+/org/mate/marco/general/num-workspaces
+/org/gnome/desktop/wm/preferences/num-workspaces
+/org/gnome/mutter/dynamic-workspaces
 EOF
     dconf update || warn "dconf update başarısız: uzak MATE oturumlarında pencere birleştirici açık kalabilir"
 }
