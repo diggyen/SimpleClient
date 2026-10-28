@@ -139,6 +139,27 @@ func TestSafeGraphics(t *testing.T) {
 	}
 }
 
+// Only a boot left on the firmware framebuffer for these adapters' sake is one
+// to restart out of; one the boot menu asked for stays as it is.
+func TestLeftSafe(t *testing.T) {
+	for _, c := range []struct {
+		list, gpus string
+		left       bool
+	}{
+		{"", "8086:5912", false},
+		{",8086:5912", "8086:5912", true},
+		{"10de:2860,8086:5912", "8086:5912", true},
+		{"10de:2860", "8086:5912", false},
+		{"once", "8086:5912", false},
+		{",8086:5912,once", "8086:5912", false},
+		{",8086:5912", "", false},
+	} {
+		if got := (Boot{GfxSafe: c.list}).leftSafe(c.gpus); got != c.left {
+			t.Errorf("list %q, gpus %q: %v, want %v", c.list, c.gpus, got, c.left)
+		}
+	}
+}
+
 func TestCompactGPUs(t *testing.T) {
 	if got := compactGPUs(",8086:46a6,,1002:15bf,8086:46a6"); got != "8086:46a6,1002:15bf" {
 		t.Fatalf("got %q", got)

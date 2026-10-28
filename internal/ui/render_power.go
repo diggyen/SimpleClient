@@ -51,7 +51,15 @@ func renderPower(img *image.RGBA, state *UIState) {
 
 	switch p.Going {
 	case powerFocusRestart:
-		DrawText(img, l.X, l.TextY, i18n.T(i18n.PowerRestarting), ColorText)
+		msg := i18n.T(i18n.PowerRestarting)
+		if p.Why != "" {
+			msg = p.Why
+		}
+		y := l.TextY
+		for _, line := range wrapText(msg, l.W/CharW) {
+			DrawText(img, l.X, y, line, ColorText)
+			y += CharH + 6
+		}
 		return
 	case powerFocusOff:
 		DrawText(img, l.X, l.TextY, i18n.T(i18n.PowerSwitchingOff), ColorText)

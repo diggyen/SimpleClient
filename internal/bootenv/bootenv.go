@@ -267,9 +267,12 @@ var loaderPath = "/usr/share/simpleclient/grub-disk.cfg"
 // When that changes the boot loader's rules, the display adapters the old one
 // left on the firmware framebuffer get their driver back on the next boot, to
 // be judged by the new rules: before v0.7.6 one boot switched off while the
-// driver loaded was enough to lose it for good.
-func MarkGood(b Boot) error {
-	err := withMedium(b, func(dir, file string) error {
+// driver loaded was enough to lose it for good. retry reports that this boot is
+// one of those, on the firmware framebuffer for want of a driver it may now
+// have: the kiosk restarts to give it the driver, rather than wait for someone
+// to restart it.
+func MarkGood(b Boot) (retry bool, err error) {
+	err = withMedium(b, func(dir, file string) error {
 		var loader []byte
 		if b.Installed() {
 			loader = newLoader(filepath.Join(dir, "boot/grub/grub.cfg"))
@@ -281,6 +284,7 @@ func MarkGood(b Boot) error {
 				env["sc_gfxsafe"] = compactGPUs(s)
 			}
 			if loader != nil {
+				retry = b.leftSafe(GPUs())
 				env["sc_gfxsafe"] = ""
 				env["sc_gfxfail"] = ""
 			}
@@ -297,9 +301,24 @@ func MarkGood(b Boot) error {
 		return replaceFile(filepath.Join(dir, "boot/grub/grub.cfg"), loader)
 	})
 	if errors.Is(err, errNoEnv) {
-		return nil
+		return false, nil
 	}
-	return err
+	return retry, err
+}
+
+// leftSafe reports whether this boot is on the firmware framebuffer because
+// the adapters gpus were remembered as taking a boot down — not because the
+// boot menu asked for safe graphics this once, which a restart would undo.
+func (b Boot) leftSafe(gpus string) bool {
+	if gpus == "" {
+		return false
+	}
+	for _, s := range strings.Split(b.GfxSafe, ",") {
+		if s == "once" {
+			return false
+		}
+	}
+	return b.SafeGraphics(gpus)
 }
 
 // newLoader returns this release's GRUB script when the one at path differs

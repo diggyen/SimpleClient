@@ -582,6 +582,11 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout, state *UIState) {
 	if gpu, known := rdp.Decoder(); known {
 		if gpu == "" {
 			gpu = i18n.T(i18n.VideoCPU)
+			// Why, when it is safe graphics: no GPU runs at all then, and
+			// the person reading this back needs to say so.
+			if state.SafeGfx {
+				gpu += " (" + i18n.T(i18n.VideoSafe) + ")"
+			}
 		}
 		ver += buildSep + i18n.T(i18n.BadgeVideo) + ": " + gpu
 	}
@@ -589,13 +594,17 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout, state *UIState) {
 	if note != "" {
 		note = buildSep + note
 	}
-	x := l.Screen.Min.X + (l.Screen.Dx()-TextWidth(gitURL+buildSep+ver+note, false))/2
+	// The URL goes first when the line is wider than a narrow screen: the
+	// version and what follows it are what someone reports a fault with.
+	url := gitURL + buildSep
+	if TextWidth(url+ver+note, false) > l.Screen.Dx()-2*padding {
+		url = ""
+	}
+	x := l.Screen.Min.X + (l.Screen.Dx()-TextWidth(url+ver+note, false))/2
 	urlY := l.Screen.Max.Y - hintsBottom + CharH + 18
 
-	DrawText(img, x, urlY, gitURL, ColorFaint)
-	x += TextWidth(gitURL, false)
-	DrawText(img, x, urlY, buildSep, ColorFaint)
-	x += TextWidth(buildSep, false)
+	DrawText(img, x, urlY, url, ColorFaint)
+	x += TextWidth(url, false)
 	DrawText(img, x, urlY, ver, ColorDim)
 	x += TextWidth(ver, false)
 	DrawText(img, x, urlY, note, ColorSuccess)

@@ -119,9 +119,13 @@ func main() {
 	go func() {
 		time.Sleep(provenAfter)
 		for try := 1; ; try++ {
-			err := bootenv.MarkGood(boot)
+			retry, err := bootenv.MarkGood(boot)
 			if err == nil {
 				update.Kept(boot)
+				if retry {
+					warnf("boot: the new boot rules give the GPU its driver back; restarting into it")
+					ui.RestartForDriver()
+				}
 				return
 			}
 			warnf("boot: recording a good boot failed: %v", err)

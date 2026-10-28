@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 )
 
@@ -18,6 +19,8 @@ type PowerState struct {
 	// Going is the choice made, once made: the dialog then only says so,
 	// until the machine goes.
 	Going int
+	// Why is said instead of the choice when the kiosk restarts on its own.
+	Why string
 }
 
 // The dialog's buttons, in focus order. Cancel has the focus when it opens,
@@ -37,6 +40,39 @@ var powerOff = func() { _ = exec.Command("sh", "-c", "sync; poweroff -f").Start(
 
 // powerDelay is how long the dialog says what is happening before it does.
 var powerDelay = time.Second
+
+// driverRestart carries RestartForDriver's request to the UI loop.
+var driverRestart = make(chan struct{}, 1)
+
+// driverRestartDelay is how long the kiosk says why it restarts on its own.
+var driverRestartDelay = 4 * time.Second
+
+// RestartForDriver has the kiosk restart once it is idle: on the server list
+// or counting down to its startup server, never in a session or a dialog
+// someone is using. It is for a boot left on the firmware framebuffer whose
+// GPU the boot rules have just given its driver back (bootenv.MarkGood).
+func RestartForDriver() {
+	select {
+	case driverRestart <- struct{}{}:
+	default:
+	}
+}
+
+// restartWhenIdle restarts for RestartForDriver if the kiosk is idle, and
+// reports whether it did. Callers must hold state.Mu.
+func restartWhenIdle(state *UIState) bool {
+	if !state.driverPending || (state.Screen != ScreenDiscovery && state.Screen != ScreenAuto) {
+		return false
+	}
+	state.driverPending = false
+	state.Transition(ScreenDiscovery)
+	state.Power = PowerState{Focus: powerFocusCancel, Going: powerFocusRestart, Why: i18n.T(i18n.PowerDriverRetry)}
+	state.Transition(ScreenPower)
+	state.Dirty = true
+	log.Printf("power: restarting to give the GPU its driver back")
+	time.AfterFunc(driverRestartDelay, restart)
+	return true
+}
 
 // openPower shows the dialog. Callers must hold state.Mu.
 func openPower(state *UIState) {

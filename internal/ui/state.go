@@ -139,6 +139,12 @@ type UIState struct {
 	Install    InstallState
 	Update     UpdateState
 	Power      PowerState
+	// driverPending is a restart RestartForDriver asked for, waiting for the
+	// kiosk to be idle.
+	driverPending bool
+	// SafeGfx is whether this boot left the display on the firmware
+	// framebuffer, said after the decoder on the server list.
+	SafeGfx bool
 
 	Net  NetState
 	Wifi WifiState

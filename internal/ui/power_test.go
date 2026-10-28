@@ -153,6 +153,9 @@ func TestPower_Layout(t *testing.T) {
 				t.Errorf("lang=%s: %q is %dpx, wider than its button", lang, i18n.T(k), tw)
 			}
 		}
+		if n := len(wrapText(i18n.T(i18n.PowerDriverRetry), (powerW-2*modalPad)/CharW)); n > 2 {
+			t.Errorf("lang=%s: the restart for the driver takes %d lines, the dialog has room for 2", lang, n)
+		}
 		for _, k := range []i18n.Key{i18n.PowerTitle, i18n.PowerRestarting, i18n.PowerSwitchingOff} {
 			if tw := TextWidth(i18n.T(k), false); tw > powerW-2*modalPad-16 {
 				t.Errorf("lang=%s: %q is %dpx, wider than the dialog", lang, i18n.T(k), tw)
@@ -162,4 +165,41 @@ func TestPower_Layout(t *testing.T) {
 			t.Errorf("lang=%s: the question takes %d lines, the dialog has room for 2", lang, n)
 		}
 	}
+}
+
+// A restart for the GPU's driver waits for the kiosk to be idle: through a
+// session, and a dialog in use, and happens once the server list is back.
+func TestPower_RestartForDriverWhenIdle(t *testing.T) {
+	restarted, _ := fakePower(t)
+	old := driverRestartDelay
+	driverRestartDelay = 0
+	t.Cleanup(func() { driverRestartDelay = old })
+
+	state := &UIState{Screen: ScreenSession, driverPending: true}
+	for _, busy := range []Screen{ScreenSession, ScreenConnecting, ScreenModal, ScreenUpdate, ScreenInstall} {
+		state.Screen = busy
+		if restartWhenIdle(state) {
+			t.Fatalf("restarted on screen %v", busy)
+		}
+	}
+	never(t, restarted, "restart")
+
+	state.Screen = ScreenDiscovery
+	if !restartWhenIdle(state) {
+		t.Fatal("no restart back on the server list")
+	}
+	expect(t, restarted, "restart")
+	if state.Screen != ScreenPower || state.Power.Why == "" {
+		t.Errorf("screen %v, why %q: the kiosk should say why it restarts", state.Screen, state.Power.Why)
+	}
+	if restartWhenIdle(state) {
+		t.Error("a second restart for the same request")
+	}
+
+	// From the countdown to the startup server too.
+	state = &UIState{Screen: ScreenAuto, driverPending: true}
+	if !restartWhenIdle(state) || state.Screen != ScreenPower {
+		t.Errorf("no restart from the countdown: screen %v", state.Screen)
+	}
+	expect(t, restarted, "restart")
 }

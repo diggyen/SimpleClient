@@ -211,6 +211,8 @@ const (
 	PowerSwitchingOff
 	ButtonRestart
 	ButtonSwitchOff
+	PowerDriverRetry // restarting on its own, for the GPU's driver
+	VideoSafe        // after VideoCPU, in safe graphics
 
 	numKeys // must stay last
 )
@@ -383,6 +385,8 @@ var catalogues = map[Lang]*catalogue{
 		PowerSwitchingOff: "Switching off...",
 		ButtonRestart:     "Restart",
 		ButtonSwitchOff:   "Switch off",
+		PowerDriverRetry:  "The update gives this machine's graphics card its driver back. Restarting to use it...",
+		VideoSafe:         "safe graphics",
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
@@ -548,6 +552,8 @@ var catalogues = map[Lang]*catalogue{
 		PowerSwitchingOff: "Kapatılıyor...",
 		ButtonRestart:     "Yeniden başlat",
 		ButtonSwitchOff:   "Kapat",
+		PowerDriverRetry:  "Güncelleme bu makinenin ekran kartına sürücüsünü geri veriyor. Kullanmak için yeniden başlatılıyor...",
+		VideoSafe:         "güvenli grafik",
 	},
 }
 

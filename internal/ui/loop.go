@@ -54,6 +54,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		state.pointer = input
 	}
 	state.Boot = bootenv.Current()
+	state.SafeGfx = state.Boot.SafeGraphics(bootenv.GPUs())
 	state.CanInstall = !state.Boot.Installed()
 	if state.Boot.Installed() {
 		state.SavePath = savedPath
@@ -175,10 +176,17 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 			}
 			state.Mu.Unlock()
 
+		// ── Restart for the GPU's driver ─────────────────────────────────────
+		case <-driverRestart:
+			state.Mu.Lock()
+			state.driverPending = true
+			state.Mu.Unlock()
+
 		// ── Render tick ──────────────────────────────────────────────────────
 		case <-ticker.C:
 			state.Mu.Lock()
 			state.expireBanner(time.Now())
+			restartWhenIdle(state)
 			// The countdown to the startup server, over: log on. The screen
 			// changes here, under the lock, so the next tick cannot start a
 			// second connection before this one has begun.
