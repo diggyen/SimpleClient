@@ -149,6 +149,9 @@ type UIState struct {
 	// SafeGfx is whether this boot left the display on the firmware
 	// framebuffer, said after the decoder on the server list.
 	SafeGfx bool
+	// DriverOff is whether it did so for want of the GPU's driver, which F4
+	// then offers to try again.
+	DriverOff bool
 
 	Net  NetState
 	Wifi WifiState

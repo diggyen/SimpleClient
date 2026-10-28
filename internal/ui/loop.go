@@ -54,7 +54,9 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		state.pointer = input
 	}
 	state.Boot = bootenv.Current()
-	state.SafeGfx = state.Boot.SafeGraphics(bootenv.GPUs())
+	gpus := bootenv.GPUs()
+	state.SafeGfx = state.Boot.SafeGraphics(gpus)
+	state.DriverOff = state.Boot.LeftSafe(gpus)
 	state.CanInstall = !state.Boot.Installed()
 	if state.Boot.Installed() {
 		state.SavePath = savedPath

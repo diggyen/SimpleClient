@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -272,28 +273,14 @@ var loaderPath = "/usr/share/simpleclient/grub-disk.cfg"
 // have: the kiosk restarts to give it the driver, rather than wait for someone
 // to restart it.
 func MarkGood(b Boot) (retry bool, err error) {
+	gpus := GPUs()
 	err = withMedium(b, func(dir, file string) error {
 		var loader []byte
 		if b.Installed() {
 			loader = newLoader(filepath.Join(dir, "boot/grub/grub.cfg"))
 		}
 		err := Modify(filepath.Join(dir, file), func(env Env) {
-			env["sc_kpending"] = "0"
-			env["sc_gfxtry"] = ""
-			if s, ok := env["sc_gfxsafe"]; ok {
-				env["sc_gfxsafe"] = compactGPUs(s)
-			}
-			if loader != nil {
-				retry = b.leftSafe(GPUs())
-				env["sc_gfxsafe"] = ""
-				env["sc_gfxfail"] = ""
-			}
-			if b.Kernel == "new" || b.Kernel == "lts" {
-				env["sc_kernel"] = b.Kernel
-			}
-			if b.Installed() {
-				env["sc_boot"] = b.Slot
-			}
+			retry = markGood(env, b, gpus, loader != nil)
 		})
 		if err != nil || loader == nil {
 			return err
@@ -306,10 +293,78 @@ func MarkGood(b Boot) (retry bool, err error) {
 	return retry, err
 }
 
-// leftSafe reports whether this boot is on the firmware framebuffer because
+// safeRetryEvery is how many boots in a row a GPU spends on the firmware
+// framebuffer before its driver gets another try. Two boots that died while
+// it loaded may have been two power cuts rather than the driver; left there
+// for good, the kiosk would wait for someone to know of the boot menu's way
+// out.
+const safeRetryEvery = 10
+
+// markGood is MarkGood's change to the grubenv env, for a boot b on a machine
+// whose display adapters are gpus; newLoader says whether this boot brought
+// a GRUB script with new rules. It reports whether the kiosk should restart
+// to give the GPU its driver.
+func markGood(env Env, b Boot, gpus string, newLoader bool) (retry bool) {
+	env["sc_kpending"] = "0"
+	env["sc_gfxtry"] = ""
+	if s, ok := env["sc_gfxsafe"]; ok {
+		env["sc_gfxsafe"] = compactGPUs(s)
+	}
+	switch {
+	case newLoader:
+		retry = b.LeftSafe(gpus)
+		env["sc_gfxsafe"] = ""
+		env["sc_gfxfail"] = ""
+		delete(env, "sc_gfxsafeboots")
+	case b.LeftSafe(gpus):
+		n, _ := strconv.Atoi(env["sc_gfxsafeboots"])
+		if n+1 >= safeRetryEvery {
+			// The next boot, whenever it comes, tries the driver: once.
+			retryGPUs(env, gpus)
+		} else {
+			env["sc_gfxsafeboots"] = strconv.Itoa(n + 1)
+		}
+	}
+	if b.Kernel == "new" || b.Kernel == "lts" {
+		env["sc_kernel"] = b.Kernel
+	}
+	if b.Installed() {
+		env["sc_boot"] = b.Slot
+	}
+	return retry
+}
+
+// retryGPUs takes the adapters gpus off the firmware framebuffer for the next
+// boot, with a single try: they are already counted as having failed once
+// (sc_gfxfail), so a boot that dies loading their driver puts them straight
+// back rather than giving it another.
+func retryGPUs(env Env, gpus string) {
+	var keep []string
+	for _, s := range strings.Split(env["sc_gfxsafe"], ",") {
+		if s != "" && s != gpus {
+			keep = append(keep, s)
+		}
+	}
+	env["sc_gfxsafe"] = strings.Join(keep, ",")
+	env["sc_gfxfail"] = gpus
+	delete(env, "sc_gfxsafeboots")
+}
+
+// RetryGraphics has the next boot try the GPU's own driver again, once, on a
+// boot left on the firmware framebuffer for want of it: the kiosk's way out
+// (F4) of what two boots switched off just then would leave for good.
+func RetryGraphics(b Boot) error {
+	gpus := GPUs()
+	if !b.LeftSafe(gpus) {
+		return nil
+	}
+	return withEnv(b, func(env Env) { retryGPUs(env, gpus) })
+}
+
+// LeftSafe reports whether this boot is on the firmware framebuffer because
 // the adapters gpus were remembered as taking a boot down — not because the
 // boot menu asked for safe graphics this once, which a restart would undo.
-func (b Boot) leftSafe(gpus string) bool {
+func (b Boot) LeftSafe(gpus string) bool {
 	if gpus == "" {
 		return false
 	}

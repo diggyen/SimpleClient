@@ -3,6 +3,7 @@ package bootenv
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -154,7 +155,7 @@ func TestLeftSafe(t *testing.T) {
 		{",8086:5912,once", "8086:5912", false},
 		{",8086:5912", "", false},
 	} {
-		if got := (Boot{GfxSafe: c.list}).leftSafe(c.gpus); got != c.left {
+		if got := (Boot{GfxSafe: c.list}).LeftSafe(c.gpus); got != c.left {
 			t.Errorf("list %q, gpus %q: %v, want %v", c.list, c.gpus, got, c.left)
 		}
 	}
@@ -219,5 +220,66 @@ func TestNewLoader(t *testing.T) {
 	}
 	if got := newLoader(esp); got != nil {
 		t.Fatalf("the same script: got %q", got)
+	}
+}
+
+// A boot left on the firmware framebuffer counts towards giving the driver
+// another try: the tenth gives it one, and only one.
+func TestMarkGoodRetriesSafeGraphics(t *testing.T) {
+	const gpu = "8086:5912"
+	b := Boot{Slot: "A", Kernel: "new", GfxSafe: ",10de:2860," + gpu}
+	env := Env{"sc_gfxsafe": ",10de:2860," + gpu, "sc_kpending": "1"}
+	for i := 1; i < safeRetryEvery; i++ {
+		if markGood(env, b, gpu, false) {
+			t.Fatalf("boot %d: asked for a restart", i)
+		}
+		if env["sc_gfxsafe"] != "10de:2860,"+gpu || env["sc_gfxsafeboots"] != strconv.Itoa(i) {
+			t.Fatalf("boot %d: %v", i, env)
+		}
+	}
+	if markGood(env, b, gpu, false) {
+		t.Fatal("the retry asked for a restart; it waits for the next boot")
+	}
+	if env["sc_gfxsafe"] != "10de:2860" || env["sc_gfxfail"] != gpu {
+		t.Fatalf("after %d boots: %v, want %s off the list and counted as failed once", safeRetryEvery, env, gpu)
+	}
+	if _, ok := env["sc_gfxsafeboots"]; ok {
+		t.Fatalf("the count is left: %v", env)
+	}
+}
+
+// Boots in safe graphics from the boot menu, or on another machine's GPU, or
+// with no GPU, count nothing.
+func TestMarkGoodLeavesOtherBootsAlone(t *testing.T) {
+	for _, c := range []struct{ list, gpus string }{
+		{"once", "8086:5912"},
+		{",8086:5912,once", "8086:5912"},
+		{"10de:2860", "8086:5912"},
+		{",8086:5912", ""},
+	} {
+		env := Env{"sc_gfxsafe": c.list}
+		markGood(env, Boot{GfxSafe: c.list}, c.gpus, false)
+		if _, ok := env["sc_gfxsafeboots"]; ok || env["sc_gfxfail"] != "" {
+			t.Errorf("list %q gpus %q: %v", c.list, c.gpus, env)
+		}
+	}
+}
+
+// New boot rules clear the list, the count with it, and restart only a boot
+// that is in safe graphics for its GPU's sake.
+func TestMarkGoodNewLoader(t *testing.T) {
+	const gpu = "8086:5912"
+	env := Env{"sc_gfxsafe": "," + gpu, "sc_gfxsafeboots": "4", "sc_gfxfail": "x"}
+	if !markGood(env, Boot{Slot: "B", GfxSafe: "," + gpu}, gpu, true) {
+		t.Fatal("no restart")
+	}
+	if env["sc_gfxsafe"] != "" || env["sc_gfxfail"] != "" || env["sc_boot"] != "B" {
+		t.Fatalf("%v", env)
+	}
+	if _, ok := env["sc_gfxsafeboots"]; ok {
+		t.Fatalf("the count is left: %v", env)
+	}
+	if markGood(Env{}, Boot{Slot: "B"}, gpu, true) {
+		t.Fatal("a restart for a boot on its driver")
 	}
 }

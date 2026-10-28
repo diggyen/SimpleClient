@@ -282,6 +282,15 @@ func TestScreenshots(t *testing.T) {
 		renderDiscovery(b, st)
 		renderPower(b, st)
 	})
+	shot("08-turkish-power-driver", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenPower, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Power: PowerState{Focus: powerFocusCancel, Going: powerNone, Driver: true},
+		}
+		renderDiscovery(b, st)
+		renderPower(b, st)
+	})
 
 	t.Logf("wrote screenshots to %s", dir)
 }

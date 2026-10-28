@@ -213,6 +213,9 @@ const (
 	ButtonSwitchOff
 	PowerDriverRetry // restarting on its own, for the GPU's driver
 	VideoSafe        // after VideoCPU, in safe graphics
+	ButtonDriver
+	PowerDriverNote
+	PowerDriverTrying
 
 	numKeys // must stay last
 )
@@ -387,6 +390,9 @@ var catalogues = map[Lang]*catalogue{
 		ButtonSwitchOff:   "Switch off",
 		PowerDriverRetry:  "The update gives this machine's graphics card its driver back. Restarting to use it...",
 		VideoSafe:         "safe graphics",
+		ButtonDriver:      "Try driver",
+		PowerDriverNote:   "The graphics card is in safe graphics: two starts died loading its driver, perhaps from the power being cut. Try driver restarts the kiosk with it once; should that fail too, it comes back in safe graphics.",
+		PowerDriverTrying: "Restarting to try the graphics card's driver...",
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
@@ -554,6 +560,9 @@ var catalogues = map[Lang]*catalogue{
 		ButtonSwitchOff:   "Kapat",
 		PowerDriverRetry:  "Güncelleme bu makinenin ekran kartına sürücüsünü geri veriyor. Kullanmak için yeniden başlatılıyor...",
 		VideoSafe:         "güvenli grafik",
+		ButtonDriver:      "Sürücüyü dene",
+		PowerDriverNote:   "Ekran kartı güvenli grafikte: iki açılış sürücüsü yüklenirken yarıda kaldı, belki fiş çekildiği için. Sürücüyü dene düğmesi kioskı sürücüyle bir kez yeniden başlatır; yine olmazsa güvenli grafikle açılır.",
+		PowerDriverTrying: "Ekran kartının sürücüsünü denemek için yeniden başlatılıyor...",
 	},
 }
 

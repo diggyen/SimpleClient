@@ -2,9 +2,11 @@ package ui
 
 import (
 	"image"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/config"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
@@ -15,12 +17,13 @@ import (
 // after the test.
 func fakePower(t *testing.T) (restarted, off chan struct{}) {
 	t.Helper()
-	oldR, oldO, oldD := restart, powerOff, powerDelay
+	oldR, oldO, oldD, oldG := restart, powerOff, powerDelay, retryGraphics
 	restarted, off = make(chan struct{}, 1), make(chan struct{}, 1)
 	restart = func() { restarted <- struct{}{} }
 	powerOff = func() { off <- struct{}{} }
+	retryGraphics = func(bootenv.Boot) error { t.Error("the driver retried"); return nil }
 	powerDelay = 0
-	t.Cleanup(func() { restart, powerOff, powerDelay = oldR, oldO, oldD })
+	t.Cleanup(func() { restart, powerOff, powerDelay, retryGraphics = oldR, oldO, oldD, oldG })
 	return restarted, off
 }
 
@@ -124,7 +127,7 @@ func TestPower_Mouse(t *testing.T) {
 		t.Fatalf("screen %v after a click on the F4 hint, want the dialog", state.Screen)
 	}
 
-	b := layoutPower(fb.Bounds()).Buttons[powerFocusOff]
+	b := layoutPower(fb.Bounds(), &state.Power).Buttons[powerFocusOff]
 	c = b.Min.Add(b.Size().Div(2))
 	handleMouseClick(c.X, c.Y, state, fb, nil)
 	expect(t, off, "switch off")
@@ -134,21 +137,32 @@ func TestPower_Mouse(t *testing.T) {
 // Every screen size the kiosk runs at has room for the three buttons, and
 // their labels fit in them in every language.
 func TestPower_Layout(t *testing.T) {
-	for _, w := range []int{640, 800, 1024, 1920} {
-		l := layoutPower(image.Rect(0, 0, w, 480))
-		if !l.Box.In(image.Rect(0, 0, w, 480)) {
-			t.Errorf("w=%d: the dialog %v is off screen", w, l.Box)
-		}
-		for i, b := range l.Buttons {
-			if !b.In(l.Box) {
-				t.Errorf("w=%d: button %d %v is outside the dialog %v", w, i, b, l.Box)
-			}
-		}
-	}
 	t.Cleanup(func() { i18n.Set(i18n.Default) })
 	for _, lang := range i18n.Available() {
 		i18n.Set(lang)
-		for _, k := range []i18n.Key{i18n.ButtonRestart, i18n.ButtonSwitchOff, i18n.ButtonCancel} {
+		for _, driver := range []bool{false, true} {
+			p := &PowerState{Driver: driver}
+			for _, w := range []int{640, 800, 1024, 1920} {
+				l := layoutPower(image.Rect(0, 0, w, 480), p)
+				if !l.Box.In(image.Rect(0, 0, w, 480)) {
+					t.Errorf("lang=%s driver=%v w=%d: the dialog %v is off screen", lang, driver, w, l.Box)
+				}
+				for i, b := range l.Buttons {
+					if !b.In(l.Box) {
+						t.Errorf("lang=%s driver=%v w=%d: button %d %v is outside the dialog %v", lang, driver, w, i, b, l.Box)
+					}
+				}
+			}
+			cols := (layoutPower(image.Rect(0, 0, 1024, 768), p).W) / CharW
+			n := len(wrapText(i18n.T(i18n.PowerQuestion), cols))
+			if driver {
+				n += 1 + len(wrapText(i18n.T(i18n.PowerDriverNote), cols))
+			}
+			if n > powerMaxTxt {
+				t.Errorf("lang=%s driver=%v: %d lines of text, the dialog shows %d", lang, driver, n, powerMaxTxt)
+			}
+		}
+		for _, k := range []i18n.Key{i18n.ButtonRestart, i18n.ButtonSwitchOff, i18n.ButtonCancel, i18n.ButtonDriver} {
 			if tw := TextWidth(i18n.T(k), false); tw > modalBtnW-16 {
 				t.Errorf("lang=%s: %q is %dpx, wider than its button", lang, i18n.T(k), tw)
 			}
@@ -160,6 +174,9 @@ func TestPower_Layout(t *testing.T) {
 			if tw := TextWidth(i18n.T(k), false); tw > powerW-2*modalPad-16 {
 				t.Errorf("lang=%s: %q is %dpx, wider than the dialog", lang, i18n.T(k), tw)
 			}
+		}
+		if n := len(wrapText(i18n.T(i18n.PowerDriverTrying), (powerWide-2*modalPad)/CharW)); n > 2 {
+			t.Errorf("lang=%s: the driver's restart takes %d lines", lang, n)
 		}
 		if n := len(wrapText(i18n.T(i18n.PowerQuestion), (powerW-2*modalPad)/CharW)); n > 2 {
 			t.Errorf("lang=%s: the question takes %d lines, the dialog has room for 2", lang, n)
@@ -201,5 +218,66 @@ func TestPower_RestartForDriverWhenIdle(t *testing.T) {
 	if !restartWhenIdle(state) || state.Screen != ScreenPower {
 		t.Errorf("no restart from the countdown: screen %v", state.Screen)
 	}
+	expect(t, restarted, "restart")
+}
+
+// On a boot in safe graphics for its GPU's sake, F4 offers to try the driver:
+// the button sits before Cancel, and pressing it has the next boot try the
+// driver, then restarts.
+func TestPower_TryDriver(t *testing.T) {
+	restarted, off := fakePower(t)
+	tried := make(chan bootenv.Boot, 1)
+	retryGraphics = func(b bootenv.Boot) error { tried <- b; return nil }
+
+	state := &UIState{Screen: ScreenDiscovery, DriverOff: true, Boot: bootenv.Boot{Slot: "A"}}
+	powerKey(state, inputdev.KeyF4)
+	if !state.Power.Driver || state.Power.Focus != powerFocusCancel {
+		t.Fatalf("dialog %+v: want the driver offered, Cancel focused", state.Power)
+	}
+	powerKey(state, inputdev.KeyLeft)
+	if state.Power.Focus != powerFocusDriver {
+		t.Fatalf("focus %d after Left from Cancel, want the driver", state.Power.Focus)
+	}
+	powerKey(state, inputdev.KeyEnter)
+	select {
+	case b := <-tried:
+		if b.Slot != "A" {
+			t.Errorf("tried for boot %+v", b)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the driver was not tried")
+	}
+	expect(t, restarted, "restart")
+	never(t, off, "switch off")
+
+	// Without it, the dialog has its three buttons, and Tab goes round them.
+	state = &UIState{Screen: ScreenDiscovery}
+	powerKey(state, inputdev.KeyF4)
+	seen := map[int]bool{}
+	for range 6 {
+		powerKey(state, inputdev.KeyTab)
+		seen[state.Power.Focus] = true
+	}
+	if len(seen) != 3 || seen[powerFocusDriver] {
+		t.Errorf("Tab went to %v, want the three buttons", seen)
+	}
+}
+
+// A click on the driver's button, found where it is drawn, does the same.
+func TestPower_TryDriverByMouse(t *testing.T) {
+	restarted, _ := fakePower(t)
+	tried := make(chan struct{}, 1)
+	retryGraphics = func(bootenv.Boot) error { tried <- struct{}{}; return nil }
+	fb := framebuffer.NewMock(1280, 800)
+	state := &UIState{Screen: ScreenDiscovery, DriverOff: true}
+	powerKey(state, inputdev.KeyF4)
+	l := layoutPower(fb.Bounds(), &state.Power)
+	i := slices.Index(l.Kinds, powerFocusDriver)
+	if i < 0 {
+		t.Fatal("no driver button")
+	}
+	c := l.Buttons[i].Min.Add(l.Buttons[i].Size().Div(2))
+	handleMouseClick(c.X, c.Y, state, fb, nil)
+	expect(t, tried, "the driver's try")
 	expect(t, restarted, "restart")
 }

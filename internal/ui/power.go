@@ -4,8 +4,10 @@ import (
 	"image"
 	"log"
 	"os/exec"
+	"slices"
 	"time"
 
+	"github.com/diggyen/SimpleClient/internal/bootenv"
 	"github.com/diggyen/SimpleClient/internal/i18n"
 	"github.com/diggyen/SimpleClient/internal/inputdev"
 )
@@ -15,28 +17,51 @@ import (
 // machine switched off while /init loads the GPU's driver is counted against
 // that driver (see bootenv.GraphicsTry).
 type PowerState struct {
-	Focus int // powerFocusRestart, powerFocusOff or powerFocusCancel
+	Focus int // the button with the focus: powerFocusRestart ... powerFocusDriver
 	// Going is the choice made, once made: the dialog then only says so,
 	// until the machine goes.
 	Going int
 	// Why is said instead of the choice when the kiosk restarts on its own.
 	Why string
+	// Driver offers to try the GPU's driver again: this boot is on the
+	// firmware framebuffer because two boots died loading it, which may have
+	// been the plug rather than the driver (bootenv.RetryGraphics).
+	Driver bool
 }
 
-// The dialog's buttons, in focus order. Cancel has the focus when it opens,
-// so an Enter pressed out of habit closes it rather than the machine.
+// The dialog's buttons. Cancel has the focus when it opens, so an Enter
+// pressed out of habit closes it rather than the machine.
 const (
 	powerFocusRestart = iota
 	powerFocusOff
 	powerFocusCancel
-	powerButtons
+	powerFocusDriver
 )
+
+// buttons is the dialog's buttons in focus order, left to right.
+func (p *PowerState) buttons() []int {
+	if p.Driver {
+		return []int{powerFocusRestart, powerFocusOff, powerFocusDriver, powerFocusCancel}
+	}
+	return []int{powerFocusRestart, powerFocusOff, powerFocusCancel}
+}
+
+// move moves the focus by delta buttons, round the row.
+func (p *PowerState) move(delta int) {
+	b := p.buttons()
+	i := slices.Index(b, p.Focus)
+	p.Focus = b[(i+delta+len(b))%len(b)]
+}
 
 // powerNone is Going before a choice is made.
 const powerNone = -1
 
-// The switch off; tests replace it, as they do restart (update.go).
-var powerOff = func() { _ = exec.Command("sh", "-c", "sync; poweroff -f").Start() }
+// The switch off, and the next boot's try of the GPU's driver; tests replace
+// them, as they do restart (update.go).
+var (
+	powerOff      = func() { _ = exec.Command("sh", "-c", "sync; poweroff -f").Start() }
+	retryGraphics = bootenv.RetryGraphics
+)
 
 // powerDelay is how long the dialog says what is happening before it does.
 var powerDelay = time.Second
@@ -76,7 +101,7 @@ func restartWhenIdle(state *UIState) bool {
 
 // openPower shows the dialog. Callers must hold state.Mu.
 func openPower(state *UIState) {
-	state.Power = PowerState{Focus: powerFocusCancel, Going: powerNone}
+	state.Power = PowerState{Focus: powerFocusCancel, Going: powerNone, Driver: state.DriverOff}
 	state.Transition(ScreenPower)
 }
 
@@ -90,9 +115,9 @@ func handlePowerKey(ev inputdev.InputEvent, state *UIState) {
 	case inputdev.KeyEsc:
 		state.Transition(ScreenDiscovery)
 	case inputdev.KeyTab, inputdev.KeyRight:
-		p.Focus = (p.Focus + 1) % powerButtons
+		p.move(1)
 	case inputdev.KeyLeft:
-		p.Focus = (p.Focus + powerButtons - 1) % powerButtons
+		p.move(-1)
 	case inputdev.KeyEnter:
 		powerChoose(state, p.Focus)
 	}
@@ -103,10 +128,11 @@ func handlePowerClick(state *UIState, screen image.Rectangle, pt image.Point) {
 	if state.Power.Going != powerNone {
 		return
 	}
-	for i, b := range layoutPower(screen).Buttons {
+	l := layoutPower(screen, &state.Power)
+	for i, b := range l.Buttons {
 		if pt.In(b) {
-			state.Power.Focus = i
-			powerChoose(state, i)
+			state.Power.Focus = l.Kinds[i]
+			powerChoose(state, l.Kinds[i])
 			return
 		}
 	}
@@ -123,6 +149,18 @@ func powerChoose(state *UIState, focus int) {
 		log.Printf("power: switching off, as asked at the kiosk")
 		state.Power.Going = focus
 		time.AfterFunc(powerDelay, powerOff)
+	case powerFocusDriver:
+		log.Printf("power: restarting to try the GPU's driver again, as asked at the kiosk")
+		state.Power.Going = focus
+		boot := state.Boot
+		// The boot environment is on a partition to mount: not under the lock.
+		go func() {
+			if err := retryGraphics(boot); err != nil {
+				log.Printf("power: the GPU's driver will not be tried: %v", err)
+			}
+			time.Sleep(powerDelay)
+			restart()
+		}()
 	default:
 		state.Transition(ScreenDiscovery)
 	}

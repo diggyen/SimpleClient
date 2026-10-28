@@ -123,8 +123,13 @@ simpleclient: display adapters "8086:46a6", native graphics
 - **A driver that leaves no screen** — missing firmware, a GPU it hangs on —
   is dealt with on its own: the boot restarts (or, after a hang, the next one
   does) with that GPU left on the firmware framebuffer, `safe graphics`, and
-  the USB stick or disk remembers this for that GPU. A different GPU tries its
-  driver afresh.
+  the USB stick or disk remembers this for that GPU — after two such boots in
+  a row, since one may have been the machine switched off just then. A
+  different GPU tries its driver afresh. Two may still have been the plug, so
+  the footer says `Video: CPU (safe graphics)`, `F4` offers **Try driver**,
+  and every tenth boot in safe graphics has the next one try the driver by
+  itself. Each of these is a single try: a boot that dies again puts the GPU
+  straight back.
 - **Dark screen, nothing to blame** — pick **Guvenli grafik / safe graphics**
   in the boot menu, which skips the driver for that boot.
   **ekran surucusunu yeniden dene / retry display driver** forgets what was
