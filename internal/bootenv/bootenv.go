@@ -9,8 +9,8 @@
 //
 // The display gets the same treatment, for the GPU's own driver: /init marks
 // the adapters it is about to load a driver for, and clears the mark once
-// there is a screen. A mark left behind sends those adapters to the firmware
-// framebuffer from then on.
+// there is a screen. A mark left behind two boots in a row sends those
+// adapters to the firmware framebuffer from then on.
 package bootenv
 
 import (
@@ -234,42 +234,110 @@ func compactGPUs(list string) string {
 // GraphicsTry records, before the GPU's own driver is loaded, the display
 // adapters it is about to drive. A boot that dies before GraphicsOK clears
 // the mark — the driver hung or crashed the machine, or took the screen away
-// without giving one back — makes GRUB add them to the adapters left on the
-// firmware framebuffer, so the next boot comes up without that driver. It
-// reports whether the mark was written; booted from a CD there is nowhere to
-// write it.
+// without giving one back, or the machine was switched off just then — makes
+// GRUB give the driver one more boot (sc_gfxfail); a second boot in a row that
+// dies there adds them to the adapters left on the firmware framebuffer, so
+// the boots after it come up without that driver. It reports whether the mark
+// was written; booted from a CD there is nowhere to write it.
 func GraphicsTry(b Boot, gpus string) bool {
 	return withEnv(b, func(env Env) { env["sc_gfxtry"] = gpus }) == nil
 }
 
 // GraphicsOK clears GraphicsTry's mark once the driver has brought up a
-// screen.
+// screen, and the one failed boot GRUB may have counted against it.
 func GraphicsOK(b Boot) error {
-	return withEnv(b, func(env Env) { env["sc_gfxtry"] = "" })
+	return withEnv(b, func(env Env) {
+		env["sc_gfxtry"] = ""
+		env["sc_gfxfail"] = ""
+	})
 }
+
+// loaderPath is a disk install's GRUB script as this release has it.
+// sc-install copies it to the ESP, and an update brings a new one only here,
+// into the slot: MarkGood copies it over the ESP's once the release has come
+// up.
+var loaderPath = "/usr/share/simpleclient/grub-disk.cfg"
 
 // MarkGood records that this boot came up: the kernel it runs on is the one
 // to keep using and, on a disk install, so is the slot — which is what makes
 // a freshly installed update permanent. Booted from a CD there is nothing to
 // write, and nothing is.
+//
+// On a disk install it also brings the ESP's GRUB script up to this release's.
+// When that changes the boot loader's rules, the display adapters the old one
+// left on the firmware framebuffer get their driver back on the next boot, to
+// be judged by the new rules: before v0.7.6 one boot switched off while the
+// driver loaded was enough to lose it for good.
 func MarkGood(b Boot) error {
-	err := withEnv(b, func(env Env) {
-		env["sc_kpending"] = "0"
-		env["sc_gfxtry"] = ""
-		if s, ok := env["sc_gfxsafe"]; ok {
-			env["sc_gfxsafe"] = compactGPUs(s)
-		}
-		if b.Kernel == "new" || b.Kernel == "lts" {
-			env["sc_kernel"] = b.Kernel
-		}
+	err := withMedium(b, func(dir, file string) error {
+		var loader []byte
 		if b.Installed() {
-			env["sc_boot"] = b.Slot
+			loader = newLoader(filepath.Join(dir, "boot/grub/grub.cfg"))
 		}
+		err := Modify(filepath.Join(dir, file), func(env Env) {
+			env["sc_kpending"] = "0"
+			env["sc_gfxtry"] = ""
+			if s, ok := env["sc_gfxsafe"]; ok {
+				env["sc_gfxsafe"] = compactGPUs(s)
+			}
+			if loader != nil {
+				env["sc_gfxsafe"] = ""
+				env["sc_gfxfail"] = ""
+			}
+			if b.Kernel == "new" || b.Kernel == "lts" {
+				env["sc_kernel"] = b.Kernel
+			}
+			if b.Installed() {
+				env["sc_boot"] = b.Slot
+			}
+		})
+		if err != nil || loader == nil {
+			return err
+		}
+		return replaceFile(filepath.Join(dir, "boot/grub/grub.cfg"), loader)
 	})
 	if errors.Is(err, errNoEnv) {
 		return nil
 	}
 	return err
+}
+
+// newLoader returns this release's GRUB script when the one at path differs
+// from it, and nil when they are the same or this release has none.
+func newLoader(path string) []byte {
+	want, err := os.ReadFile(loaderPath)
+	if err != nil || len(want) == 0 {
+		return nil
+	}
+	if have, err := os.ReadFile(path); err == nil && string(have) == string(want) {
+		return nil
+	}
+	return want
+}
+
+// replaceFile writes data to path through a file beside it, so that a machine
+// switched off halfway leaves either the old file or the new one.
+func replaceFile(path string, data []byte) error {
+	tmp := path + ".new"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // Read returns the variables of the grubenv of the medium this boot came from.
@@ -302,6 +370,14 @@ var errNoEnv = errors.New("bootenv: no boot environment on this medium")
 // withEnv changes the grubenv of the medium this boot came from: on the ESP
 // of a disk install, on the live partition of a USB stick.
 func withEnv(b Boot, fn func(Env)) error {
+	return withMedium(b, func(dir, file string) error {
+		return Modify(filepath.Join(dir, file), fn)
+	})
+}
+
+// withMedium mounts the medium this boot came from and has fn work on it, given
+// where it is mounted and the grubenv's path on it.
+func withMedium(b Boot, fn func(dir, file string) error) error {
 	var dev, file string
 	var err error
 	if b.Installed() {
@@ -315,7 +391,7 @@ func withEnv(b Boot, fn func(Env)) error {
 		return errNoEnv
 	}
 	return WithMounted(dev, "vfat", func(dir string) error {
-		return Modify(filepath.Join(dir, file), fn)
+		return fn(dir, file)
 	})
 }
 

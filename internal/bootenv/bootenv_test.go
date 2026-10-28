@@ -172,3 +172,31 @@ func TestCurrentReadsSafeGraphics(t *testing.T) {
 		t.Fatalf("got %+v", b)
 	}
 }
+
+func TestNewLoader(t *testing.T) {
+	dir := t.TempDir()
+	defer func(p string) { loaderPath = p }(loaderPath)
+	loaderPath = filepath.Join(dir, "grub-disk.cfg")
+	esp := filepath.Join(dir, "grub.cfg")
+	if got := newLoader(esp); got != nil {
+		t.Fatalf("a release without a script: got %q", got)
+	}
+	os.WriteFile(loaderPath, []byte("new rules\n"), 0o644)
+	os.WriteFile(esp, []byte("old rules\n"), 0o644)
+	got := newLoader(esp)
+	if string(got) != "new rules\n" {
+		t.Fatalf("got %q", got)
+	}
+	if err := replaceFile(esp, got); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(esp); string(b) != "new rules\n" {
+		t.Fatalf("replaced with %q", b)
+	}
+	if _, err := os.Stat(esp + ".new"); !os.IsNotExist(err) {
+		t.Fatalf("left the temporary file behind: %v", err)
+	}
+	if got := newLoader(esp); got != nil {
+		t.Fatalf("the same script: got %q", got)
+	}
+}
