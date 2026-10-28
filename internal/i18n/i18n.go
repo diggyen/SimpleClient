@@ -203,6 +203,15 @@ const (
 	ButtonUpdate
 	ButtonClose
 
+	// Restarting or switching off the kiosk, F4.
+	HintPower
+	PowerTitle
+	PowerQuestion
+	PowerRestarting
+	PowerSwitchingOff
+	ButtonRestart
+	ButtonSwitchOff
+
 	numKeys // must stay last
 )
 
@@ -366,6 +375,14 @@ var catalogues = map[Lang]*catalogue{
 		ButtonCheck:             "Check",
 		ButtonUpdate:            "Update",
 		ButtonClose:             "Close",
+
+		HintPower:         "Power",
+		PowerTitle:        "Restart or switch off",
+		PowerQuestion:     "Restart the kiosk, or switch it off? A session in progress on a server stays there, to go back to.",
+		PowerRestarting:   "Restarting...",
+		PowerSwitchingOff: "Switching off...",
+		ButtonRestart:     "Restart",
+		ButtonSwitchOff:   "Switch off",
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
@@ -523,6 +540,14 @@ var catalogues = map[Lang]*catalogue{
 		ButtonCheck:             "Denetle",
 		ButtonUpdate:            "Güncelle",
 		ButtonClose:             "Kapat",
+
+		HintPower:         "Kapat",
+		PowerTitle:        "Yeniden başlat ya da kapat",
+		PowerQuestion:     "Kiosk yeniden başlatılsın mı, kapatılsın mı? Sunucuda açık oturum varsa orada kalır, yeniden bağlanınca ona dönülür.",
+		PowerRestarting:   "Yeniden başlatılıyor...",
+		PowerSwitchingOff: "Kapatılıyor...",
+		ButtonRestart:     "Yeniden başlat",
+		ButtonSwitchOff:   "Kapat",
 	},
 }
 

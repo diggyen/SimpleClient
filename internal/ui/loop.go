@@ -268,6 +268,8 @@ func handleInput(
 		handleInstallKey(ev, state)
 	case ScreenUpdate:
 		handleUpdateKey(ev, state)
+	case ScreenPower:
+		handlePowerKey(ev, state)
 	case ScreenNetwork:
 		handleNetKey(ev, state)
 	case ScreenWifi:
@@ -328,6 +330,8 @@ func handleDiscoveryKey(
 		state.Transition(ScreenModal)
 	case inputdev.KeyF8:
 		openNetwork(state)
+	case inputdev.KeyF4:
+		openPower(state)
 	case inputdev.KeyF9:
 		if state.CanInstall {
 			openInstall(state)
@@ -447,6 +451,12 @@ func handleMouseClick(
 		state.Update.Tried = ""
 		// Hit-testing goes through the same layout the renderer used, so a
 		// click always lands on the row the user actually sees.
+		// The key hints are drawn as keys; the one for F4 is the dialog's
+		// way in for a kiosk worked with the mouse alone.
+		if keyHintAt(fb.Bounds(), state, image.Pt(mx, my)) == "F4" {
+			openPower(state)
+			return
+		}
 		rowIdx := layoutDiscoveryFor(fb.Bounds(), state.Hosts).rowAt(mx, my)
 		if rowIdx < 0 {
 			return
@@ -518,6 +528,9 @@ func handleMouseClick(
 
 	case ScreenUpdate:
 		handleUpdateClick(state, fb.Bounds(), image.Pt(mx, my))
+
+	case ScreenPower:
+		handlePowerClick(state, fb.Bounds(), image.Pt(mx, my))
 	}
 }
 

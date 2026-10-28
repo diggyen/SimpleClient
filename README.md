@@ -72,6 +72,7 @@ walks through the causes in order of likelihood.
 | `F5` | Rescan the network |
 | `F2` | Switch language (English ⇄ Türkçe), and the keyboard layout with it |
 | `F3` | Switch keyboard layout on its own (US ⇄ TR-Q ⇄ TR-F) |
+| `F4` | Restart or switch off the kiosk — also a click on its hint. Better than the power button: a kiosk switched off while it starts can lose its GPU's driver |
 | `F6` | In the credential dialog: show or hide the domain field |
 | `F7` | Connect to a server by address (`10.0.0.5`, `rdp.example.com:53389`) |
 | `F8` | Network settings: DHCP or a fixed address, the RDP port the scan looks for, and the wireless network |

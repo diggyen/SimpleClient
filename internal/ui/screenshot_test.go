@@ -273,6 +273,15 @@ func TestScreenshots(t *testing.T) {
 		renderDiscovery(b, st)
 		renderWifi(b, st)
 	})
+	shot("08-turkish-power", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenPower, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Power: PowerState{Focus: powerFocusCancel, Going: powerNone},
+		}
+		renderDiscovery(b, st)
+		renderPower(b, st)
+	})
 
 	t.Logf("wrote screenshots to %s", dir)
 }

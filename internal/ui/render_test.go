@@ -389,6 +389,16 @@ func TestRenderDiscovery_HeaderAndHintsFitEveryLanguage(t *testing.T) {
 				if f9 != "" && hints[len(hints)-1][0] != "F9" {
 					t.Errorf("lang=%s w=%d: the F9 hint was dropped", lang, w)
 				}
+				if keyHintAt(image.Rect(0, 0, w, 720), &UIState{}, image.Pt(0, 0)) != "" {
+					t.Errorf("lang=%s w=%d: a key hint at the top left", lang, w)
+				}
+				kept := false
+				for _, h := range hints {
+					kept = kept || h[0] == "F4"
+				}
+				if !kept {
+					t.Errorf("lang=%s w=%d F9=%q: the F4 hint was dropped", lang, w, f9)
+				}
 			}
 
 			logo := layoutLogo(w, 720, logoTop)

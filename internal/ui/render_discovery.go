@@ -482,6 +482,7 @@ func keyHints(f9 string) [][2]string {
 		{"F5", i18n.T(i18n.HintRefresh)},
 		{"F2", i18n.T(i18n.HintLanguage)},
 		{"F3", i18n.T(i18n.HintKeyboard)},
+		{"F4", i18n.T(i18n.HintPower)},
 	}
 	if f9 != "" {
 		h = append(h, [2]string{"F9", f9})
@@ -500,18 +501,24 @@ func f9Hint(state *UIState) string {
 	return ""
 }
 
-// fitKeyHints drops hints until the row fits in width, the ones before F9
-// first: on a narrow screen, installing is what the person at a fresh kiosk
-// is most likely to be looking for, and the keys still work unlabelled.
+// fitKeyHints drops hints until the row fits in width, the ones before F4
+// and F9 first: on a narrow screen, installing is what the person at a fresh
+// kiosk is most likely to be looking for, the way to switch it off is not to
+// be hidden, and the other keys still work unlabelled.
 func fitKeyHints(hints [][2]string, width int) [][2]string {
 	for len(hints) > 3 && keyHintsWidth(hints) > width {
 		drop := len(hints) - 1
-		if hints[drop][0] == "F9" {
+		for drop > 0 && keptHint(hints[drop][0]) {
 			drop--
 		}
 		hints = append(hints[:drop:drop], hints[drop+1:]...)
 	}
 	return hints
+}
+
+// keptHint reports whether a narrow screen keeps the hint for key.
+func keptHint(key string) bool {
+	return key == "F4" || key == "F9"
 }
 
 // keyHintsWidth measures a hint row so it can be centred.
@@ -527,18 +534,42 @@ func keyHintsWidth(hints [][2]string) int {
 	return w
 }
 
-// renderKeyHints draws the bottom key legend and the project URL.
-func renderKeyHints(img *image.RGBA, l discoveryLayout, state *UIState) {
+// placeKeyHints lays the key legend out on screen: each hint with the
+// rectangle it covers, its key's cap and its label. Drawing and the mouse
+// share it.
+func placeKeyHints(screen image.Rectangle, state *UIState) (hints [][2]string, at []image.Rectangle) {
 	const capGap, pairGap = 7, 22
 
-	hints := fitKeyHints(keyHints(f9Hint(state)), l.Screen.Dx()-2*padding)
-	y := l.Screen.Max.Y - hintsBottom
-	x := l.Screen.Min.X + (l.Screen.Dx()-keyHintsWidth(hints))/2
-
+	hints = fitKeyHints(keyHints(f9Hint(state)), screen.Dx()-2*padding)
+	y := screen.Max.Y - hintsBottom
+	x := screen.Min.X + (screen.Dx()-keyHintsWidth(hints))/2
 	for _, h := range hints {
-		x += DrawKeycap(img, x, y, h[0]) + capGap
-		DrawText(img, x, y+4, h[1], ColorDim)
-		x += TextWidth(h[1], false) + pairGap
+		w := TextWidth(h[0], false) + 10 + capGap + TextWidth(h[1], false)
+		at = append(at, image.Rect(x, y, x+w, y+CharH+8))
+		x += w + pairGap
+	}
+	return hints, at
+}
+
+// keyHintAt is the key of the hint at p, or "" where there is none.
+func keyHintAt(screen image.Rectangle, state *UIState, p image.Point) string {
+	hints, at := placeKeyHints(screen, state)
+	for i, r := range at {
+		if p.In(r) {
+			return hints[i][0]
+		}
+	}
+	return ""
+}
+
+// renderKeyHints draws the bottom key legend and the project URL.
+func renderKeyHints(img *image.RGBA, l discoveryLayout, state *UIState) {
+	const capGap = 7
+
+	hints, at := placeKeyHints(l.Screen, state)
+	for i, h := range hints {
+		x := at[i].Min.X + DrawKeycap(img, at[i].Min.X, at[i].Min.Y, h[0]) + capGap
+		DrawText(img, x, at[i].Min.Y+4, h[1], ColorDim)
 	}
 
 	// Project and build, on one centred line. The version is a shade brighter
@@ -558,8 +589,8 @@ func renderKeyHints(img *image.RGBA, l discoveryLayout, state *UIState) {
 	if note != "" {
 		note = buildSep + note
 	}
-	x = l.Screen.Min.X + (l.Screen.Dx()-TextWidth(gitURL+buildSep+ver+note, false))/2
-	urlY := y + CharH + 18
+	x := l.Screen.Min.X + (l.Screen.Dx()-TextWidth(gitURL+buildSep+ver+note, false))/2
+	urlY := l.Screen.Max.Y - hintsBottom + CharH + 18
 
 	DrawText(img, x, urlY, gitURL, ColorFaint)
 	x += TextWidth(gitURL, false)
