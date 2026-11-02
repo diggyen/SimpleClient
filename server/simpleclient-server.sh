@@ -605,9 +605,15 @@ configure_xrdp() {
         sed -i '/^\[default_layouts_map\]/a rdp_layout_tr=tr\nrdp_layout_tr_f=tr(f)' "$kb"
     fi
 
-    # TLS. make install creates a self-signed certificate; keep whatever is
-    # there, a real one included.
-    if [ ! -s /etc/xrdp/cert.pem ] || [ ! -s /etc/xrdp/key.pem ]; then
+    # TLS. A real certificate (issued by someone else) is kept. A self-signed
+    # one is made again when it does not name this machine: make install's
+    # www.xrdp.org one, the same key on every machine, or one made before the
+    # host name changed. The kiosk lists the server by the certificate's name.
+    local subject issuer
+    subject=$(openssl x509 -in /etc/xrdp/cert.pem -noout -subject -nameopt RFC2253 2>/dev/null)
+    issuer=$(openssl x509 -in /etc/xrdp/cert.pem -noout -issuer -nameopt RFC2253 2>/dev/null)
+    if [ ! -s /etc/xrdp/cert.pem ] || [ ! -s /etc/xrdp/key.pem ] ||
+        { [ "${subject#subject=}" = "${issuer#issuer=}" ] && [ "${subject#subject=}" != "CN=$(hostname)" ]; }; then
         openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
             -keyout /etc/xrdp/key.pem -out /etc/xrdp/cert.pem -subj "/CN=$(hostname)" 2>/dev/null
         chmod 600 /etc/xrdp/key.pem
