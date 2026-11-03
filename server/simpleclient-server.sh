@@ -27,6 +27,9 @@
 #     manager's places, which do not show them of their own
 #   - one workspace in remote MATE and GNOME sessions, which users cannot add
 #     to
+#   - a session that ends with its connection: what the user left running
+#     goes with it, and nothing they set up runs while no one is connected
+#     (no lingering user services, cron or at for users, no user switching)
 #   - ports 3389 and 3241 open in ufw or firewalld
 # It can be run again: to upgrade, or after a distribution upgrade has
 # replaced the libraries xrdp was built against. Remote sessions running then
@@ -45,6 +48,10 @@
 #                   CPU
 #   --no-audio      leave sound alone
 #   --no-usb        no USB/IP agent: drives still come, by name
+#   --disconnect-grace SECONDS
+#                   how long a session outlives its dropped connection, for
+#                   the kiosk to come back to it. Default: 300. Least: 60,
+#                   below which xorgxrdp does not go; it looks every 10
 set -Eeuo pipefail
 
 XRDP_VERSION=0.10.6.1
@@ -72,6 +79,7 @@ WANT_SESSION=""
 CODEC=rfx
 AUDIO=1
 USB=1
+DISCONNECT_GRACE=300
 while [ $# -gt 0 ]; do
     case "$1" in
         --session) WANT_SESSION=${2:-}; shift ;;
@@ -79,12 +87,20 @@ while [ $# -gt 0 ]; do
         --h264) CODEC=h264 ;;
         --no-audio) AUDIO=0 ;;
         --no-usb) USB=0 ;;
+        --disconnect-grace) DISCONNECT_GRACE=${2:-}; shift ;;
+        --disconnect-grace=*) DISCONNECT_GRACE=${1#--disconnect-grace=} ;;
         -h|--help) sed -n '2,/^set -Eeuo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         *) die "bilinmeyen seçenek: $1" ;;
     esac
     shift
 done
 
+case $DISCONNECT_GRACE in
+    ''|*[!0-9]*) die "--disconnect-grace saniye olmalı: $DISCONNECT_GRACE" ;;
+esac
+if [ "$DISCONNECT_GRACE" -lt 60 ]; then
+    DISCONNECT_GRACE=60
+fi
 [ "$(id -u)" = 0 ] || die "root olarak çalıştırın: sudo bash $0"
 mkdir -p "$SRC" "$CONF"
 exec > >(tee -a "$LOG") 2>&1
@@ -885,12 +901,26 @@ num-workspaces=1
 
 [org/gnome/mutter]
 dynamic-workspaces=false
+
+# No user switching: it would leave this session running behind another
+# user's, with no connection to end it (see configure_session_end).
+[org/mate/desktop/lockdown]
+disable-user-switching=true
+
+[org/mate/screensaver]
+user-switch-enabled=false
+
+[org/gnome/desktop/lockdown]
+disable-user-switching=true
 EOF
     mkdir -p /etc/dconf/db/simpleclient.d/locks
     cat > /etc/dconf/db/simpleclient.d/locks/00-simpleclient <<'EOF'
 /org/mate/marco/general/num-workspaces
 /org/gnome/desktop/wm/preferences/num-workspaces
 /org/gnome/mutter/dynamic-workspaces
+/org/mate/desktop/lockdown/disable-user-switching
+/org/mate/screensaver/user-switch-enabled
+/org/gnome/desktop/lockdown/disable-user-switching
 EOF
     dconf update || warn "dconf update başarısız: uzak MATE oturumlarında pencere birleştirici açık kalabilir"
 }
@@ -930,6 +960,97 @@ ResultAny=yes
 ResultInactive=yes
 ResultActive=yes
 EOF
+    fi
+}
+
+# ── Ending sessions ──────────────────────────────────────────────────────────
+# A remote session ends with its connection. xrdp keeps a disconnected
+# session by default, for the user to come back to: whatever they started
+# then runs on with no one at the kiosk — through the night, and anything
+# that takes connections from outside (a remote-control program) with it.
+#
+# Four ways a user's programs outlive the session, each closed here:
+#   - the session itself: xrdp ends it DISCONNECT_GRACE seconds (five
+#     minutes) after the connection drops — long enough for a kiosk that
+#     restarts or loses the network to come back to it, everything still open
+#   - processes moved out of it (nohup, setsid, tmux, screen): logind ends
+#     every process of the user once their last session has ended
+#   - user services that outlive every session (loginctl enable-linger)
+#   - cron and at jobs, which run with no session at all
+# User switching, the fifth, is off in remote sessions (configure_dconf).
+#
+# Root is left alone throughout: system services, and an administrator's
+# own cron jobs and tmux, are not the user's to start.
+configure_session_end() {
+    say "uzak oturumlar bağlantıyla birlikte bitecek (bağlantı koptuktan ${DISCONNECT_GRACE} sn sonra)"
+    local ini=/etc/xrdp/sesman.ini
+    set_key "$ini" KillDisconnected true
+    set_key "$ini" DisconnectedTimeLimit "$DISCONNECT_GRACE"
+
+    mkdir -p /etc/systemd/logind.conf.d
+    cat > /etc/systemd/logind.conf.d/50-simpleclient.conf <<'EOF'
+# Written by simpleclient-server.sh: a user's processes end with their last
+# session, including those moved out of it (nohup, setsid, tmux, screen).
+[Login]
+KillUserProcesses=yes
+KillExcludeUsers=root
+EOF
+    # logind reads its configuration again on SIGHUP (systemd 248 and later);
+    # restarting it would end nothing but is not needed. Older systemd takes
+    # it at the next boot.
+    if [ -d /run/systemd/system ]; then
+        systemctl kill --kill-whom=main -s HUP systemd-logind 2>/dev/null || true
+    fi
+
+    local u
+    for u in /var/lib/systemd/linger/*; do
+        [ -e "$u" ] || continue
+        loginctl disable-linger "${u##*/}" || true
+        say "kalıcı kullanıcı servisi kapatıldı: ${u##*/}"
+    done
+    if [ -d /etc/polkit-1/rules.d ] || [ -d /usr/share/polkit-1/rules.d ]; then
+        mkdir -p /etc/polkit-1/rules.d
+        cat > /etc/polkit-1/rules.d/49-simpleclient-linger.rules <<'EOF'
+// Written by simpleclient-server.sh: only root makes a user's services
+// outlive their sessions.
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.login1.set-self-linger" ||
+         action.id == "org.freedesktop.login1.set-user-linger") &&
+        subject.user != "root") {
+        return polkit.Result.NO;
+    }
+});
+EOF
+    fi
+
+    # cron.allow and at.allow: only the users listed may have jobs. A list an
+    # administrator already keeps is left as it is.
+    local f
+    for f in /etc/cron.allow /etc/at.allow; do
+        if [ ! -e "$f" ]; then
+            echo root > "$f"
+            chmod 644 "$f"
+        fi
+    done
+    local jobs
+    jobs=$(find /var/spool/cron/crontabs /var/spool/cron/tabs /var/spool/cron -maxdepth 1 -type f \
+             ! -name root ! -name '.*' -printf '%f ' 2>/dev/null || true)
+    if [ -n "$jobs" ]; then
+        warn "bu kullanıcıların cron görevi var ve çalışmaya devam eder: $jobs— gerekmiyorsa 'crontab -r -u KULLANICI' ile silin"
+    fi
+
+    # sesman reads its configuration again on SIGHUP without ending a
+    # session. Sent to sesman alone: the unit holds every session's sesexec
+    # too. (xrdp-sesman --reload cannot: run by systemd, sesman writes no
+    # pid file.) xrdp hands the setting to each session as it starts: the
+    # ones running now keep the old behaviour until they end.
+    if [ -d /run/systemd/system ] && systemctl is-active --quiet xrdp-sesman; then
+        systemctl kill --kill-whom=main -s HUP xrdp-sesman 2>/dev/null || true
+        local running
+        running=$(xrdp_sessions)
+        if [ -n "$running" ]; then
+            warn "açık uzak oturumlar ($running) bağlantı kopunca kapanmaz; kural bir sonraki oturumlarından itibaren geçerli"
+        fi
     fi
 }
 
@@ -1589,6 +1710,7 @@ build_xrdp
 configure_xrdp
 configure_session
 configure_polkit
+configure_session_end
 configure_drives
 if [ "$AUDIO" = 1 ]; then
     setup_audio
