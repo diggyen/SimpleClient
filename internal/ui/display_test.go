@@ -285,17 +285,44 @@ func TestDisplay_HintOpensIt(t *testing.T) {
 	t.Fatalf("no F11 hint at 640 px: %q", hints)
 }
 
-// On the firmware framebuffer for want of the driver, nothing is tried: the
-// next boot would be there too.
-func TestDisplay_NotInSafeGraphics(t *testing.T) {
+// On the firmware framebuffer for want of the driver, the boot that tries the
+// resolution tries the driver too: it would be on the firmware's mode again
+// otherwise. Even the resolution already kept is tried, for the driver's sake.
+func TestDisplay_SafeGraphicsTriesTheDriverToo(t *testing.T) {
+	for _, sel := range []int{0, 1} {
+		tried, _, restarted := fakeDisplay(t, nil, nil)
+		retried := make(chan struct{}, 1)
+		old := retryGraphics
+		retryGraphics = func(bootenv.Boot) error { retried <- struct{}{}; return nil }
+		t.Cleanup(func() { retryGraphics = old })
+		state := &UIState{Screen: ScreenDiscovery, SafeGfx: true, DriverOff: true}
+		powerKey(state, inputdev.KeyF11)
+		for range sel {
+			powerKey(state, inputdev.KeyDown)
+		}
+		want := state.Display.Choices[sel]
+		powerKey(state, inputdev.KeyEnter)
+		if !state.Display.Going {
+			t.Fatalf("sel %d: not going: %+v", sel, state.Display)
+		}
+		expectString(t, tried, want, "tried")
+		expect(t, retried, "driver retry")
+		expect(t, restarted, "restart")
+	}
+}
+
+// Without the safe graphics, the driver is left as it is.
+func TestDisplay_DriverLeftAloneOtherwise(t *testing.T) {
 	tried, _, restarted := fakeDisplay(t, nil, nil)
-	state := &UIState{Screen: ScreenDiscovery, SafeGfx: true, DriverOff: true}
+	retried := make(chan struct{}, 1)
+	old := retryGraphics
+	retryGraphics = func(bootenv.Boot) error { retried <- struct{}{}; return nil }
+	t.Cleanup(func() { retryGraphics = old })
+	state := &UIState{Screen: ScreenDiscovery}
 	powerKey(state, inputdev.KeyF11)
 	powerKey(state, inputdev.KeyDown)
 	powerKey(state, inputdev.KeyEnter)
-	if state.Screen != ScreenDisplay || state.Display.Going {
-		t.Fatalf("screen %v %+v", state.Screen, state.Display)
-	}
-	neverString(t, tried, "tried")
-	never(t, restarted, "restart")
+	<-tried
+	expect(t, restarted, "restart")
+	never(t, retried, "driver retry")
 }

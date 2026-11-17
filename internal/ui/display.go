@@ -56,7 +56,8 @@ const (
 // displayConfirmFor is how long the question waits for an answer.
 var displayConfirmFor = 20 * time.Second
 
-// The boot environment and the displays; tests replace them.
+// The boot environment and the displays; tests replace them. The driver is
+// tried again with power.go's retryGraphics.
 var (
 	tryVideo     = bootenv.TryVideo
 	keepVideo    = bootenv.KeepVideo
@@ -181,16 +182,16 @@ func handleDisplayClick(state *UIState, screen image.Rectangle, pt image.Point) 
 
 // displayApply has the next boot try the resolution chosen, and restarts
 // into it. The one already set closes the dialog. Callers must hold state.Mu.
+//
+// On the firmware framebuffer for want of the GPU's driver the next boot would
+// be there too, where no resolution can be chosen: that boot tries the driver
+// as well, once, as F4's Try driver does. A boot the driver takes down puts
+// the GPU straight back, and the try is gone with it: GRUB has cleared it.
 func displayApply(state *UIState) {
 	d := &state.Display
-	// On the firmware framebuffer for want of the GPU's driver, the next
-	// boot would be too, and a resolution cannot be seen there: the driver
-	// comes first (F4), as the dialog says.
-	if state.DriverOff {
-		return
-	}
+	driver := state.DriverOff
 	mode := d.Choices[d.Sel]
-	if mode == state.Boot.Video && !state.Boot.VideoTry {
+	if mode == state.Boot.Video && !state.Boot.VideoTry && !driver {
 		state.Transition(ScreenDiscovery)
 		return
 	}
@@ -199,7 +200,11 @@ func displayApply(state *UIState) {
 	boot := state.Boot
 	// The boot environment is on a partition to mount: not under the lock.
 	go func() {
-		if err := tryVideo(boot, mode); err != nil {
+		err := tryVideo(boot, mode)
+		if err == nil && driver {
+			err = retryGraphics(boot)
+		}
+		if err != nil {
 			log.Printf("display: %q cannot be tried: %v", mode, err)
 			state.Mu.Lock()
 			state.Display.Going, state.Display.Err = false, err.Error()

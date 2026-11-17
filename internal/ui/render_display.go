@@ -150,11 +150,11 @@ func renderDisplay(img *image.RGBA, state *UIState) {
 		}
 	}
 	if len(l.Rows) > 0 {
-		keys := [][2]string{{"↑↓", i18n.T(i18n.HintSelect)}, {"Enter", i18n.T(i18n.ButtonApply)}}
-		if state.DriverOff {
-			keys = keys[:1]
-		}
-		drawInstallKeys(img, l.X, l.KeysY, append(keys, [2]string{"Esc", i18n.T(i18n.ButtonCancel)}))
+		drawInstallKeys(img, l.X, l.KeysY, [][2]string{
+			{"↑↓", i18n.T(i18n.HintSelect)},
+			{"Enter", i18n.T(i18n.ButtonApply)},
+			{"Esc", i18n.T(i18n.ButtonCancel)},
+		})
 	}
 
 	labels := []string{i18n.T(i18n.ButtonKeep), i18n.T(i18n.ButtonRevert)}

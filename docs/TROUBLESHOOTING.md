@@ -156,7 +156,8 @@ tells apart:
 - **Safe graphics** — the footer says `Video: CPU (safe graphics)` and `F11`
   says the graphics card is in safe graphics. The firmware framebuffer is
   GRUB's 1024×768 and nothing else; `F4`, **Try driver**, is the way out (see
-  [above](#it-boots-but-the-screen-is-blank-or-garbled)).
+  [above](#it-boots-but-the-screen-is-blank-or-garbled)), and so is applying a
+  resolution in `F11`, which tries the driver along with it.
 - **The display does not say what it is** — `F11` says *no EDID*. A display
   tells the graphics card its modes over the cable's DDC lines; a VGA cable or
   adapter without them, a KVM switch, or a monitor still asleep at boot says
