@@ -23,6 +23,7 @@ const (
 	ScreenWifi                     // Wireless networks, from the network settings
 	ScreenUpdate                   // Software update, on a disk install
 	ScreenPower                    // Restart or switch off the kiosk (F4)
+	ScreenDisplay                  // The resolution (F11), or whether to keep one being tried
 )
 
 // ModalState holds the state of the connection dialog.
@@ -139,6 +140,7 @@ type UIState struct {
 	Install    InstallState
 	Update     UpdateState
 	Power      PowerState
+	Display    DisplayState
 	// driverPending is a restart RestartForDriver asked for, waiting for the
 	// kiosk to be idle.
 	driverPending bool
@@ -309,7 +311,7 @@ func (s *UIState) Transition(to Screen) {
 	// or the startup server's dialog or countdown. One that drops is
 	// reconnected, with the connecting screen up meanwhile.
 	allowed := map[Screen][]Screen{
-		ScreenDiscovery:  {ScreenModal, ScreenInstall, ScreenUpdate, ScreenNetwork, ScreenAuto, ScreenPower},
+		ScreenDiscovery:  {ScreenModal, ScreenInstall, ScreenUpdate, ScreenNetwork, ScreenAuto, ScreenPower, ScreenDisplay},
 		ScreenModal:      {ScreenDiscovery, ScreenConnecting},
 		ScreenConnecting: {ScreenSession, ScreenModal, ScreenAuto},
 		ScreenSession:    {ScreenDiscovery, ScreenConnecting, ScreenModal, ScreenAuto},

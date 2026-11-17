@@ -263,15 +263,33 @@ static long refresh_mhz(const drmModeModeInfo* m)
 	return r;
 }
 
+/* user_mode is the mode the kernel command line asks for (video=, the
+ * resolution set at the kiosk), which the kernel marks USERDEF: one of the
+ * display's own, or one it made up for a display that did not list it. */
+static const drmModeModeInfo* user_mode(const drmModeConnector* c)
+{
+	for (int i = 0; i < c->count_modes; i++)
+		if ((c->modes[i].type & DRM_MODE_TYPE_USERDEF) && !(c->modes[i].flags & DRM_MODE_FLAG_INTERLACE))
+			return &c->modes[i];
+	return NULL;
+}
+
 /* pick_mode chooses among a connector's modes: SC_MODE when it names one, else
- * the preferred resolution (the largest when none is marked), at its highest
- * refresh rate. Interlaced modes are never chosen. */
+ * the one the kernel command line asks for, else the preferred resolution (the
+ * largest when none is marked), at its highest refresh rate. Interlaced modes
+ * are never chosen. */
 static const drmModeModeInfo* pick_mode(const drmModeConnector* c)
 {
 	int want_w = 0, want_h = 0, want_hz = 0;
 	const char* env = getenv("SC_MODE");
 	if (env && sscanf(env, "%dx%d@%d", &want_w, &want_h, &want_hz) < 2)
 		want_w = want_h = want_hz = 0;
+	if (!want_w) {
+		/* Asked for by name: no 30 Hz trade below, it is what was set. */
+		const drmModeModeInfo* u = user_mode(c);
+		if (u)
+			return u;
+	}
 
 	if (!want_w) {
 		for (int i = 0; i < c->count_modes; i++)

@@ -283,3 +283,44 @@ func TestMarkGoodNewLoader(t *testing.T) {
 		t.Fatal("a restart for a boot on its driver")
 	}
 }
+
+// A resolution set by hand reaches the kiosk on the command line, with
+// whether it is on trial.
+func TestCurrentReadsTheResolution(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cmdline")
+	old := cmdlinePath
+	cmdlinePath = path
+	defer func() { cmdlinePath = old }()
+
+	os.WriteFile(path, []byte("quiet video=1600x900M@60 sc.slot=A sc.video=1600x900 sc.videotry=1\n"), 0o644)
+	if b := Current(); b.Video != "1600x900" || !b.VideoTry {
+		t.Fatalf("got %+v", b)
+	}
+	os.WriteFile(path, []byte("quiet sc.slot=A sc.video= sc.videotry=\n"), 0o644)
+	if b := Current(); b.Video != "" || b.VideoTry {
+		t.Fatalf("got %+v", b)
+	}
+}
+
+// A try is for one boot and leaves the resolution kept so far alone; keeping
+// it, or the displays' own, ends the try.
+func TestTryAndKeepVideo(t *testing.T) {
+	env := Env{"sc_video": "1440x900"}
+	tryVideo(env, "1600x900")
+	if env["sc_videotry"] != "1600x900" || env["sc_video"] != "1440x900" {
+		t.Fatalf("try: %v", env)
+	}
+	keepVideo(env, "1600x900")
+	if _, ok := env["sc_videotry"]; ok || env["sc_video"] != "1600x900" {
+		t.Fatalf("keep: %v", env)
+	}
+
+	tryVideo(env, "")
+	if env["sc_videotry"] != "auto" {
+		t.Fatalf("a try of the displays' own resolution is %q", env["sc_videotry"])
+	}
+	keepVideo(env, "")
+	if len(env) != 0 {
+		t.Fatalf("keeping their own leaves %v", env)
+	}
+}

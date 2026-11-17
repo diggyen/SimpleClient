@@ -147,6 +147,33 @@ shipped.
 
 ---
 
+## The kiosk runs at 1024×768 on a larger display
+
+The server sees it too: the session is the kiosk's size (xrdp logs
+`xrdp_egfx_reset_graphics: width 1024 height 768`). Two causes, which `F11`
+tells apart:
+
+- **Safe graphics** — the footer says `Video: CPU (safe graphics)` and `F11`
+  says the graphics card is in safe graphics. The firmware framebuffer is
+  GRUB's 1024×768 and nothing else; `F4`, **Try driver**, is the way out (see
+  [above](#it-boots-but-the-screen-is-blank-or-garbled)).
+- **The display does not say what it is** — `F11` says *no EDID*. A display
+  tells the graphics card its modes over the cable's DDC lines; a VGA cable or
+  adapter without them, a KVM switch, or a monitor still asleep at boot says
+  nothing, and the kernel then offers 1024×768 at most. Pick the display's
+  resolution in `F11`: the kiosk restarts at it — the kernel works out the
+  timings itself (`video=WxHM@60`, CVT) — and asks whether to keep it. A
+  resolution the display cannot show leaves no one to answer, and after 20
+  seconds the kiosk restarts at the one before. A cable with its DDC lines,
+  where there is one, fixes it for good.
+
+A resolution kept for a display the kiosk is later moved off, and the new
+one cannot show: pick **Guvenli grafik / safe graphics** in the boot menu,
+then `F11`, **Automatic**. The boot after is on the driver again, at the new
+display's own resolution.
+
+---
+
 ## The keyboard does not work (the mouse does)
 
 Read the `input:` line on the console — the nodes the kiosk reads:

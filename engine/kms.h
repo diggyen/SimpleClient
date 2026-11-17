@@ -25,8 +25,10 @@ struct kms;
  * (SC_OUTPUTS=N: up to N), and picks each one's mode: the native (preferred)
  * resolution, at the highest refresh rate the display offers there — unless
  * that is below 50 Hz (4K over HDMI 1.4), when the largest mode that runs at
- * 60 is taken instead. SC_MODE=WxH or WxH@Hz picks another. A laptop's own
- * panel is left out while its lid is shut, unless it is the only display.
+ * 60 is taken instead. A mode the kernel command line asks for (video=, the
+ * resolution set at the kiosk) comes before that, and SC_MODE=WxH or WxH@Hz
+ * before both. A laptop's own panel is left out while its lid is shut, unless
+ * it is the only display.
  * The displays keep showing what they show until kms_start.
  *
  * With no DRM device to drive — safe graphics, a GPU with no driver — it

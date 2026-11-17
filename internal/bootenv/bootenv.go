@@ -138,6 +138,12 @@ type Boot struct {
 	// install has the same labels, and a machine can have two disks with one
 	// on; GRUB knows which it booted from. Empty on an install without UUIDs.
 	ESP string
+	// Video is the resolution set by hand this boot started with, "1600x900"
+	// (see TryVideo), or "" when the displays chose their own.
+	Video string
+	// VideoTry is whether that resolution is on trial: set at the kiosk just
+	// now, and kept only once someone says it can be seen (KeepVideo).
+	VideoTry bool
 }
 
 // Installed reports whether the kiosk runs from a disk install.
@@ -170,6 +176,12 @@ func Current() Boot {
 		}
 		if v, ok := strings.CutPrefix(f, "sc.esp="); ok {
 			b.ESP = v
+		}
+		if v, ok := strings.CutPrefix(f, "sc.video="); ok {
+			b.Video = v
+		}
+		if v, ok := strings.CutPrefix(f, "sc.videotry="); ok {
+			b.VideoTry = v == "1"
 		}
 	}
 	return b
@@ -374,6 +386,41 @@ func (b Boot) LeftSafe(gpus string) bool {
 		}
 	}
 	return b.SafeGraphics(gpus)
+}
+
+// videoAuto is sc_videotry for a try of the displays' own resolution: an
+// empty variable is no try at all.
+const videoAuto = "auto"
+
+// TryVideo has the next boot, and only that one, start the displays at mode,
+// "1600x900", or at their own resolution when mode is "". GRUB clears the try
+// before the kernel starts (build/slot.cfg): a picture no one can see is gone
+// with the next restart, which the kiosk does by itself unless KeepVideo is
+// called first.
+func TryVideo(b Boot, mode string) error {
+	return withEnv(b, func(env Env) { tryVideo(env, mode) })
+}
+
+func tryVideo(env Env, mode string) {
+	if mode == "" {
+		mode = videoAuto
+	}
+	env["sc_videotry"] = mode
+}
+
+// KeepVideo makes mode, which this boot is trying, the resolution every boot
+// starts with; "" leaves it to the displays again.
+func KeepVideo(b Boot, mode string) error {
+	return withEnv(b, func(env Env) { keepVideo(env, mode) })
+}
+
+func keepVideo(env Env, mode string) {
+	if mode == "" {
+		delete(env, "sc_video")
+	} else {
+		env["sc_video"] = mode
+	}
+	delete(env, "sc_videotry")
 }
 
 // newLoader returns this release's GRUB script when the one at path differs

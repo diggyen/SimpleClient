@@ -78,6 +78,7 @@ walks through the causes in order of likelihood.
 | `F8` | Network settings: DHCP or a fixed address, the RDP port the scan looks for, and the wireless network |
 | `F9` | Started from a USB stick or CD: install to a disk, or onto the stick itself. Installed: software update |
 | `F10` | In the credential dialog: what the kiosk does at startup — the server list, this server's dialog, or logging on to it |
+| `F11` | The display resolution: the display's own, or one set by hand — for a display that does not say what it is and so gets 1024×768 at most. The kiosk restarts at it and asks whether to keep it; without an answer it goes back after 20 seconds |
 | `Ctrl`+`Alt`+`End` | Disconnect from an active session |
 
 The scan probes TCP port 3389 — or the port set with `F8` — across the subnet
@@ -262,8 +263,9 @@ image, testing against a real RDP server, and cutting a release.
 Design boundaries, not bugs waiting to be filed:
 
 - **The session takes each display's own resolution**, at its highest refresh
-  rate (a 4K screen that manages only 30 Hz at 4K gets its largest 60 Hz mode);
-  there is no setting for it. Up to four displays make one desktop, side by
+  rate (a 4K screen that manages only 30 Hz at 4K gets its largest 60 Hz mode).
+  `F11` sets one by hand instead, at 60 Hz, for every display at once; there
+  is no setting per display. Up to four displays make one desktop, side by
   side in the order the graphics card lists them, the first the primary — the
   server's taskbar goes there. The order cannot be changed yet, and a display
   plugged in during a session joins at the next one.

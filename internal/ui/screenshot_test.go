@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/diggyen/SimpleClient/internal/autoconnect"
+	"github.com/diggyen/SimpleClient/internal/bootenv"
+	"github.com/diggyen/SimpleClient/internal/display"
 	"github.com/diggyen/SimpleClient/internal/domain"
 	"github.com/diggyen/SimpleClient/internal/framebuffer"
 	"github.com/diggyen/SimpleClient/internal/i18n"
@@ -290,6 +292,34 @@ func TestScreenshots(t *testing.T) {
 		}
 		renderDiscovery(b, st)
 		renderPower(b, st)
+	})
+	// A display that did not say what it is, as the kiosk shows it: 1024x768.
+	shot("08-turkish-display", 1024, 768, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenDiscovery, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Boot: bootenv.Boot{Slot: "A", Video: "1440x900"},
+		}
+		old := probeOutputs
+		probeOutputs = func() []display.Output {
+			return []display.Output{{Name: "VGA-1", Modes: []display.Mode{{W: 1024, H: 768}, {W: 800, H: 600}, {W: 640, H: 480}}}}
+		}
+		defer func() { probeOutputs = old }()
+		openDisplay(st, b.Bounds())
+		st.Display.Sel = 4
+		renderDiscovery(b, st)
+		renderDisplay(b, st)
+	})
+	shot("08-turkish-display-confirm", 1280, 800, func(b *image.RGBA) {
+		st := &UIState{
+			Screen: ScreenDiscovery, Hosts: sampleHosts(5), SelectedIdx: 1,
+			ScanDone: true, ScanProgress: 1,
+			Boot: bootenv.Boot{Slot: "A", Video: "1600x900", VideoTry: true},
+		}
+		openDisplayConfirm(st, time.Now())
+		st.Display.Left = 14
+		renderDiscovery(b, st)
+		renderDisplay(b, st)
 	})
 
 	t.Logf("wrote screenshots to %s", dir)

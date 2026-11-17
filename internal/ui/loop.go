@@ -80,6 +80,13 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		state.Auto = &a
 		state.startAuto(time.Now())
 	}
+	// A resolution set at F11 is on trial: before anything else, whether it
+	// can be seen. Kept, the kiosk goes on to its startup server. On the
+	// firmware framebuffer it is not what is on the screen, so it is not
+	// asked about, and the try is over: GRUB has cleared it.
+	if state.Boot.VideoTry && !state.SafeGfx {
+		openDisplayConfirm(state, time.Now())
+	}
 
 	var session *SessionState
 
@@ -188,6 +195,7 @@ func Run(fb framebuffer.Device, input *inputdev.Reader, scan domain.Scanner, cfg
 		case <-ticker.C:
 			state.Mu.Lock()
 			state.expireBanner(time.Now())
+			displayTick(state, time.Now())
 			restartWhenIdle(state)
 			// The countdown to the startup server, over: log on. The screen
 			// changes here, under the lock, so the next tick cannot start a
@@ -271,6 +279,11 @@ func handleInput(
 		// What an update did is said until the first key on the list: the
 		// person who meets it at the kiosk has seen it by then.
 		state.Update.Tried = ""
+		if ev.KeyCode == inputdev.KeyF11 {
+			// The list of resolutions holds the screen's own size.
+			openDisplay(state, fb.Bounds())
+			return
+		}
 		handleDiscoveryKey(ev, state, scan, ctx, cancelScan, scanCh, maxRows)
 	case ScreenModal:
 		handleModalKey(ev, state, fb, session)
@@ -280,6 +293,8 @@ func handleInput(
 		handleUpdateKey(ev, state)
 	case ScreenPower:
 		handlePowerKey(ev, state)
+	case ScreenDisplay:
+		handleDisplayKey(ev, state)
 	case ScreenNetwork:
 		handleNetKey(ev, state)
 	case ScreenWifi:
@@ -305,6 +320,10 @@ func handleWheel(notches int, state *UIState, maxRows int) {
 		// Not while it joins a network or asks for its password.
 		if w := &state.Wifi; !w.Busy && !w.Prompt {
 			w.move(-notches)
+		}
+	case ScreenDisplay:
+		if d := &state.Display; !d.Confirm && !d.Going {
+			d.Sel = clampInt(d.Sel-notches, 0, len(d.Choices)-1)
 		}
 	}
 }
@@ -461,10 +480,14 @@ func handleMouseClick(
 		state.Update.Tried = ""
 		// Hit-testing goes through the same layout the renderer used, so a
 		// click always lands on the row the user actually sees.
-		// The key hints are drawn as keys; the one for F4 is the dialog's
-		// way in for a kiosk worked with the mouse alone.
-		if keyHintAt(fb.Bounds(), state, image.Pt(mx, my)) == "F4" {
+		// The key hints are drawn as keys; the ones for F4 and F11 are their
+		// dialogs' way in for a kiosk worked with the mouse alone.
+		switch keyHintAt(fb.Bounds(), state, image.Pt(mx, my)) {
+		case "F4":
 			openPower(state)
+			return
+		case "F11":
+			openDisplay(state, fb.Bounds())
 			return
 		}
 		rowIdx := layoutDiscoveryFor(fb.Bounds(), state.Hosts).rowAt(mx, my)
@@ -553,6 +576,8 @@ func handleMouseClick(
 
 	case ScreenPower:
 		handlePowerClick(state, fb.Bounds(), image.Pt(mx, my))
+	case ScreenDisplay:
+		handleDisplayClick(state, fb.Bounds(), image.Pt(mx, my))
 	}
 }
 

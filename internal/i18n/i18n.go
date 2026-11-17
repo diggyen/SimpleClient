@@ -217,6 +217,24 @@ const (
 	PowerDriverNote
 	PowerDriverTrying
 
+	// The resolution, F11, and the question a boot trying one asks.
+	HintDisplay
+	DisplayTitle
+	DisplayNow   // "%s" is the resolution the screen is at
+	DisplayBlind // after DisplayNow, for a display with no EDID
+	DisplaySafe  // after DisplayNow, in safe graphics for want of the driver
+	DisplayAuto
+	DisplaySaved      // after the resolution kept
+	DisplayUnlisted   // after one the display did not list
+	DisplayRestarting // "%s" is the resolution
+	DisplayFailed     // "%s" is why
+	DisplayConfirmTitle
+	DisplayConfirmQ // "%s" is the resolution, "%d" the seconds left
+	DisplayReverting
+	ButtonApply
+	ButtonKeep
+	ButtonRevert
+
 	numKeys // must stay last
 )
 
@@ -393,6 +411,23 @@ var catalogues = map[Lang]*catalogue{
 		ButtonDriver:      "Try driver",
 		PowerDriverNote:   "The graphics card is in safe graphics: two starts died loading its driver, perhaps from the power being cut. Try driver restarts the kiosk with it once; should that fail too, it comes back in safe graphics.",
 		PowerDriverTrying: "Restarting to try the graphics card's driver...",
+
+		HintDisplay:         "Size",
+		DisplayTitle:        "Display resolution",
+		DisplayNow:          "The screen is at %s.",
+		DisplayBlind:        "The display does not say what it is (no EDID), so on its own it gets 1024x768 at most: pick its resolution here.",
+		DisplaySafe:         "The graphics card is in safe graphics, at the mode the firmware set: a resolution can be chosen once it has its driver back (F4, Try driver).",
+		DisplayAuto:         "Automatic (the display's own)",
+		DisplaySaved:        "saved",
+		DisplayUnlisted:     "not listed by the display",
+		DisplayRestarting:   "Restarting at %s...",
+		DisplayFailed:       "The setting could not be saved: %s",
+		DisplayConfirmTitle: "Keep this resolution?",
+		DisplayConfirmQ:     "The kiosk restarted at %s. Keep it? Without an answer it goes back to the previous setting in %d s.",
+		DisplayReverting:    "Going back to the previous setting...",
+		ButtonApply:         "Apply",
+		ButtonKeep:          "Keep",
+		ButtonRevert:        "Go back",
 	},
 	LangTR: {
 		HostsFound:     "%d sunucu bulundu",
@@ -563,6 +598,23 @@ var catalogues = map[Lang]*catalogue{
 		ButtonDriver:      "Sürücüyü dene",
 		PowerDriverNote:   "Ekran kartı güvenli grafikte: iki açılış sürücüsü yüklenirken yarıda kaldı, belki fiş çekildiği için. Sürücüyü dene düğmesi kioskı sürücüyle bir kez yeniden başlatır; yine olmazsa güvenli grafikle açılır.",
 		PowerDriverTrying: "Ekran kartının sürücüsünü denemek için yeniden başlatılıyor...",
+
+		HintDisplay:         "Ekran",
+		DisplayTitle:        "Ekran çözünürlüğü",
+		DisplayNow:          "Ekran şu an %s.",
+		DisplayBlind:        "Monitör kendini tanıtmıyor (EDID yok), bu yüzden kendiliğinden en fazla 1024x768 açılır: çözünürlüğünü buradan seçin.",
+		DisplaySafe:         "Ekran kartı güvenli grafikte, açılıştaki modda: çözünürlük, sürücüsüne kavuşunca seçilebilir (F4, Sürücüyü dene).",
+		DisplayAuto:         "Otomatik (monitörün bildirdiği)",
+		DisplaySaved:        "kayıtlı",
+		DisplayUnlisted:     "monitör bildirmedi",
+		DisplayRestarting:   "%s ile yeniden başlatılıyor...",
+		DisplayFailed:       "Ayar kaydedilemedi: %s",
+		DisplayConfirmTitle: "Bu çözünürlük kalsın mı?",
+		DisplayConfirmQ:     "Kiosk %s ile açıldı. Bu ayar kalsın mı? Yanıt verilmezse %d sn sonra önceki ayara dönülür.",
+		DisplayReverting:    "Önceki ayara dönülüyor...",
+		ButtonApply:         "Uygula",
+		ButtonKeep:          "Kalsın",
+		ButtonRevert:        "Geri al",
 	},
 }
 

@@ -482,6 +482,7 @@ func keyHints(f9 string) [][2]string {
 		{"F5", i18n.T(i18n.HintRefresh)},
 		{"F2", i18n.T(i18n.HintLanguage)},
 		{"F3", i18n.T(i18n.HintKeyboard)},
+		{"F11", i18n.T(i18n.HintDisplay)},
 		{"F4", i18n.T(i18n.HintPower)},
 	}
 	if f9 != "" {
@@ -518,7 +519,7 @@ func fitKeyHints(hints [][2]string, width int) [][2]string {
 
 // keptHint reports whether a narrow screen keeps the hint for key.
 func keptHint(key string) bool {
-	return key == "F4" || key == "F9"
+	return key == "F4" || key == "F9" || key == "F11"
 }
 
 // keyHintsWidth measures a hint row so it can be centred.
